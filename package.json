@@ -12,6 +12,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "check:dom": "node scripts/check-dom.mjs",
+    "check:env": "./scripts/check-env.sh",
     "android": "pnpm build && cap sync android",
     "apk": "cd android && ./gradlew assembleDebug",
     "native:test": "cd android && ./gradlew testDebugUnitTest",
