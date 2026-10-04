@@ -118,8 +118,18 @@ export PATH="$HOME/Android/Sdk/platform-tools:$PATH"
 ```
 
 An empty "List of devices attached" means no phone is reachable — it is not something the
-build can work around. A physical device is required for SCUT protocol testing because the
-request should originate from a real user network, and no emulator is necessary.
+build can work around. On this host the distro `/usr/bin/adb` (34.0.4-debian) printed an
+empty list for a phone the SDK's 37.0.1 client saw right away: the two clients fight over
+port 5037, and whichever one starts the server first decides what the other reports. Once
+the SDK adb owns the server even the old client lists the device, which makes the symptom
+look intermittent. `scripts/check-env.sh` and `pnpm install:device` therefore resolve
+`$HOME/Android/Sdk/platform-tools/adb` by path instead of trusting `PATH`.
+
+A physical device is required for SCUT protocol testing because the request should
+originate from a real user network, and no emulator is necessary. A device alone is not
+sufficient: the school checks the **source address** of the request, so the phone also has
+to be on a network the school accepts — see
+[DEVICE_VERIFICATION.md](DEVICE_VERIFICATION.md) §0.1 before anything else.
 
 ## 6. CLI build loop
 
@@ -130,8 +140,17 @@ wrapper 8.14.3, Kotlin plugin 2.2.20):
 pnpm install
 pnpm build
 pnpm test
+pnpm check:dom
 pnpm exec cap sync android
 
+pnpm native:test          # Gradle tests, via scripts/with-jdk.sh
+pnpm apk                  # debug APK, same wrapper
+```
+
+The wrapper exists because this host's `PATH` java is a JRE: it finds a JDK with `javac`
+and exports `JAVA_HOME` for that one command. Calling Gradle directly still needs it:
+
+```bash
 cd android
 JAVA_HOME=/home/zyubuntu/opt/jdk-21.0.12.1+1 ./gradlew clean testDebugUnitTest assembleDebug
 ```
@@ -147,6 +166,8 @@ android/app/build/outputs/apk/debug/app-debug.apk
 Install:
 
 ```bash
+pnpm install:device        # resolves the SDK adb by path
+# or, from android/:
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 

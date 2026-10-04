@@ -41,8 +41,13 @@ the card host refuses, because the captcha request itself never gets past the ed
   is live in both directions: a native classification reaches the WebView and is printed
   verbatim on screen.
 - Nothing sensitive is persisted, checked from the app's own data directory:
-  `run-as cn.scut.bombax ls -laR` shows only WebView internals under `shared_prefs`, the
-  WebView cookie store holds 0 rows for the school hosts, and there is no session file.
+  `run-as cn.scut.bombax ls -laR` shows only `files/profileInstalled` and three WebView
+  preference files under `shared_prefs`, the WebView cookie store contains **0** cookie
+  rows in total (read with sqlite3 after `run-as … cat`), and there is no session file.
+- The §10 leakage audit was run against a real 403 exchange: the credential/token/cookie
+  grep, the address-echo grep and the TLS/proxy source grep all printed nothing. The
+  school's block page carries the caller's public IP, so that third grep matters —
+  `NetworkAccess` keeps a boolean and discards the body.
 - The APK contains the compiled plugin, the web assets and the `bridgeVersion` /
   `electricUnit` keys that `src/types.ts` expects (checked by unpacking and `strings`).
 - Protocol shapes recorded as RUNTIME_VERIFIED came only from **credential-free** probes of

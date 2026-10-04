@@ -275,6 +275,20 @@ encryption of the token state only — never the card password, and not `securit
 unless it is current and maintained on this minSdk (24). That work is deliberately not
 implemented here because it cannot be validated without a device.
 
+**Checked on 2026-10-05** (device, after a real captcha exchange that ended in 403):
+the app's own data directory contains only `files/profileInstalled` and three WebView
+preference files, and the WebView cookie store holds **zero** rows — so nothing
+session-shaped, and no school cookie, survives anywhere on disk:
+
+```bash
+adb shell "run-as cn.scut.bombax ls -laR /data/data/cn.scut.bombax/files /data/data/cn.scut.bombax/shared_prefs"
+adb shell "run-as cn.scut.bombax cat /data/data/cn.scut.bombax/app_webview/Default/Cookies" > /tmp/phone-cookies.sqlite
+python3 -c "import sqlite3;print(sqlite3.connect('/tmp/phone-cookies.sqlite').execute('select host_key,name from cookies').fetchall())"
+```
+
+The restart-behaviour and 清除登录状态 items above still need a logged-in session, so they
+stay open.
+
 ## 10. Leakage audit (run after the whole session)
 
 ```bash
@@ -294,6 +308,17 @@ git grep -nE 'X509TrustManager|sslSocketFactory|hostnameVerifier|_cert_pinning|p
 Expected: no matches (certificate validation stays at OkHttp defaults, no proxy, no
 WAF-bypass trick).
 
+**Run on 2026-10-05** over the device log of a real 403 exchange: both printed nothing.
+Two more greps belong here now that the app parses an upstream error page — the school's
+block page echoes the caller's public address, so that text must never appear either:
+
+```bash
+grep -nEi '访问IP|[0-9]{1,3}(\.[0-9]{1,3}){3}|[0-9a-f:]{16,}:' /tmp/scutbombax.log   # expect nothing
+```
+
+Nothing above was reached with a logged-in session, so the audit has to be repeated after
+§1–§8 complete.
+
 ## Recording template
 
 ```text
@@ -308,4 +333,23 @@ Foreground refresh steps 1-7 observed:
 Session restart behaviour:
 Leakage audit output:
 Remaining protocol uncertainty:
+```
+
+### 2026-10-05 (partial — stopped at §0.1)
+
+```text
+Date / Android version / device model (no serials, no IMEI): 2026-10-05 / Android 14 (API 34) / Redmi K50, arm64-v8a
+APK sha256: 70f3d2fea48d4278ac80d121bb31ad5d99bb630c10b21adcc98089c658088358
+Network location: off-campus uplink; card host answered 403, dfyc answered 200 on the same connection
+Captcha enforced? field names accepted?:            service code seen on wrong captcha: NOT_REACHED
+Login result:                                       campus / refreshToken present: NOT_REACHED
+refresh_token result:                               rotated / new expires_in / TGC / locSession: NOT_REACHED
+GZIC electric / water / ac  (app vs official):      NOT_REACHED
+DXC chain first failing hop:                        not started (needs a session from the card host)
+Foreground refresh steps 1-7 observed:              not started (needs a session)
+Session restart behaviour: anonymous by construction; on-disk state audited clean (§9)
+Leakage audit output: empty (§10)
+Remaining protocol uncertainty: everything that requires a logged-in session
+Also observed: plugin registered, health() returned over the bridge, UI rendered at 1440x3200
+without breakage, and the 403 surfaced on screen as CAMPUS_NETWORK_REQUIRED [captcha/403]
 ```
