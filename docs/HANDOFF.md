@@ -10,7 +10,7 @@ below), so no credential-bearing SCUT flow has run yet.
 
 | Required item | Result | Grade |
 | --- | --- | --- |
-| commit SHA | `6d5a031` implementation, `1ef80d3` + `cd8f62a` docs and checks (branch `main`) | RUNTIME_VERIFIED |
+| commit SHA | `6d5a031` implementation, `1ef80d3` + `cd8f62a` docs and checks, `29876cb` bridge fix, `9a0dc76` device findings and `CAMPUS_NETWORK_REQUIRED` (branch `main`; this report's own edits land in the commit that follows) | RUNTIME_VERIFIED |
 | APK path | `android/app/build/outputs/apk/debug/app-debug.apk` — 4,779,933 bytes, sha256 `70f3d2fea48d4278ac80d121bb31ad5d99bb630c10b21adcc98089c658088358` (clean `testDebugUnitTest assembleDebug`); installed and launched on the phone | RUNTIME_VERIFIED |
 | tested Android version / device | Android 14 (API 34), Redmi K50, arm64-v8a, 1440×3200 @ 560dpi. `minSdk 24` / `targetSdk 36` remain the build's declaration; only API 34 has executed it | RUNTIME_VERIFIED (one device) |
 | bridge + UI on device | `plugin=ScutApi ready api=34 release=14`, `health()` returned over the bridge, full Chinese UI rendered without layout breakage, and a native failure reached the screen as `CAMPUS_NETWORK_REQUIRED [captcha/403]: …` | RUNTIME_VERIFIED |
