@@ -22,12 +22,17 @@ data class LoginInput(
  * OAuth form construction, kept separate so the exact field names are one
  * auditable list rather than scattered strings.
  *
- * `username`, `password`, `grant_type`, `scope`, `loginForm`, `logintype`,
- * `device_token` and `synAccessSource` come from the old working implementation
- * (`src/utils/session.ts`). The two captcha names are the Synjones candidates
- * (`captcha_header_code` / `captcha_header_key`) that still have to be confirmed
- * by a device trace; the stage name recorded in logcat tells the two attempts
- * apart.
+ * SCUT's own login chunk builds the password-grant body as
+ * `{username, password, grant_type:"password", scope:"all", loginFrom, logintype, device_token}`
+ * and its axios interceptor merges `synAccessSource` into every
+ * `application/x-www-form-urlencoded` POST, which is the source of each value below.
+ * Note the spelling: the client sends `loginFrom`, not `loginForm`.
+ *
+ * The two captcha names come from the same chunk
+ * (`captcha_header_code` = what the user typed, `captcha_header_key` = the `key` returned by
+ * `/berserker-auth/oauth/captcha`), and `frontInfo` sets `openCaptcha:"1"` for the card login.
+ * Their acceptance by the server is still DEVICE_PENDING: only `code=8000` has been observed,
+ * because the school validates the credential pair before the captcha.
  */
 object LoginForm {
     const val FIELD_CAPTCHA_CODE = "captcha_header_code"
@@ -36,7 +41,7 @@ object LoginForm {
     val BASE_FIELDS = listOf(
         "grant_type" to "password",
         "scope" to "all",
-        "loginForm" to "h5",
+        "loginFrom" to "h5",
         "logintype" to "card",
         "device_token" to "h5",
         "synAccessSource" to "h5"
@@ -45,7 +50,7 @@ object LoginForm {
     val REFRESH_FIELDS = listOf(
         "grant_type" to "refresh_token",
         "scope" to "all",
-        "loginForm" to "h5",
+        "loginFrom" to "h5",
         "logintype" to "card",
         "device_token" to "h5",
         "synAccessSource" to "h5"
@@ -92,10 +97,10 @@ class AuthRepository(
         }
 
         val keyboard = keyboardService.fetch()
-        val encoded = SecureKeyboardEncoder.encode(input.password, keyboard.numberKeyboard, keyboard.uuid)
+        val encoded = SecureKeyboardEncoder.encode(input.password, keyboard.uuid)
             ?: throw ScutException(
                 AppError.INVALID_INPUT,
-                "一卡通密码应为数字，且与安全键盘布局匹配",
+                "请填写一卡通查询密码",
                 "login/encode"
             )
 

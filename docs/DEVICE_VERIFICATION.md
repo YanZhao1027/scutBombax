@@ -2,13 +2,15 @@
 
 The credential-bearing steps below stay **NOT_TESTED** until they are executed on a
 physical Android phone with the user's own SCUT credentials. The repository ships a
-green build and 63 passing JVM unit tests; those prove the code parses the shapes it
+green build and 68 passing JVM unit tests; those prove the code parses the shapes it
 has already observed, not that a real login works.
 
 What the device has already confirmed (2026-10-05, Android 14 / API 34, arm64-v8a):
 the native↔WebView bridge round trip, the captcha tile's failure path, the redacted
-log format, that nothing session-shaped is persisted, and that the card host refuses
-off-campus source addresses (§0.1). Those are RUNTIME_VERIFIED. Everything that needs
+log format, that nothing session-shaped is persisted, that the card host refuses
+off-campus source addresses (§0.1), and that nine credentialed requests that carried a
+valid captcha but a permuted password were all answered `code=8000` — which is how the
+encoding bug in §2.1 was found. Those are RUNTIME_VERIFIED. Everything that needs
 a logged-in session is still DEVICE_PENDING.
 
 Fill in the recording template at the bottom as you go, and give each line an
@@ -77,6 +79,20 @@ stage=captcha method=GET host=ecardwxnew.scut.edu.cn path=/berserker-auth/oauth/
 Record which network the phone ended up using, because every RUNTIME_VERIFIED row
 below inherits from it.
 
+### 0.2 Credential-free configuration probe (run this before §1)
+
+`frontInfo` is readable from anywhere and states how the school expects a login to look:
+
+```bash
+curl -s 'https://ecardwxnew.scut.edu.cn/berserker-app/frontInfo?synAccessSource=h5' \
+  | python3 -c 'import json,sys;d=json.load(sys.stdin)["data"];f=json.loads(d["getFrontConfig"]);print(f["loginType"]);print("passwordRule:",f["passwordRule"])'
+```
+
+Expected on 2026-10-05: three login types (`card`, `sno`, `sso`), the first two with
+`"encryption":"keyboard"` and `"openCaptcha":"1"`, and `passwordRule: a/num/#/leng_8`.
+If `card` ever stops being `encryption: keyboard`, the encoding in `SecureKeyboard.kt` is
+wrong for that deployment and §2.1 step 1 becomes the first thing to re-test.
+
 ## 1. Captcha display
 
 | Step | Expected |
@@ -90,31 +106,64 @@ a new `key`.
 
 ## 2. Captcha is actually enforced (this decides the field names)
 
-Submit a deliberately wrong captcha code.
+Read §0.2 and §2.1 first: since 2026-10-05 the field names and the `8002`/`8003` codes are
+no longer guesses — they are what SCUT's own client does. What this step still has to prove
+is that **this app's** request is accepted by the school.
+
+The school validates the credential pair **before** the captcha, so a deliberately wrong
+captcha only produces a captcha error once the password is correct. If §4 has not passed,
+this step cannot be observed at all: the log will keep saying `code=8000`.
+
+Once login works, submit a deliberately wrong captcha code.
 
 - Expected UI: "验证码不正确或已过期，已为你换一张。" and a fresh image.
 - Expected log: `stage=login.captchaForm result=rejected error=CAPTCHA_INVALID status=<n> code=<service code>`
 
-**This is the single most important line in the session.** Write down the real
-`code=` value. The classifier currently treats `8002`/`8003` as captcha codes
-because that is what sibling Synjones deployments do; it is a **HYPOTHESIS**. If the
-observed code differs, update all three of:
+Write down the real `code=` value and compare it with `8002` / `8003`. If it differs, update
+all three of:
 
 1. `LoginErrorClassifier.captchaServiceCodes` in
    `android/app/src/main/java/cn/scut/bombax/scut/auth/TokenState.kt`
 2. the `8002 / 8003` expectations in `LoginClassificationTest.kt`
 3. the "Captcha" section of `docs/PROTOCOL.md`
 
-Also confirm the request field names the app currently sends
-(`captcha_header_code`, `captcha_header_key` in `LoginForm.kt`) are the ones SCUT
-accepts — a wrong name shows up as "captcha always invalid", never as a clear error.
+The field names the app sends (`captcha_header_code`, `captcha_header_key`) are copied from
+the official login chunk, so a persistent "captcha always invalid" would point at the
+**captcha answer lifecycle** (the `key` expiring, or the keyboard uuid being reused after the
+captcha was re-fetched) rather than at the names.
+
+### 2.1 If login keeps answering `code=8000`
+
+Stop after two attempts on the same account. Nine consecutive 8000 responses were logged on
+2026-10-05 before the cause was found, and SCUT's lockout policy is undocumented in this
+repository — a wrong password repeated is the one way this app can damage the user's account.
+
+8000 with the network and captcha steps already green means the **credential pair** is
+rejected, so check these in order before blaming the password the user typed:
+
+1. the password encoding: the submitted value must be
+   `<the characters the user chose>$1$<keyboard uuid>` — not a permutation of it, see
+   `docs/PROTOCOL.md` "Secure keyboard";
+2. the field spelling: `loginFrom`, `logintype=card`, `scope=all`, `device_token=h5`;
+3. that the user's card password follows SCUT's rule (`a/num/#/leng_8` — letters **and**
+   digits, at least 8), i.e. the query password, not the 6-digit payment PIN;
+4. **isolate the app from the credential**: on the same phone, open
+   `https://ecardwxnew.scut.edu.cn/plat-h5/` in the browser and log in there with the same
+   account and password. The official page is the control group. If it accepts the password
+   and this app still gets 8000, the request this app builds is wrong — keep the log lines and
+   re-read `docs/PROTOCOL.md` "Secure keyboard". If the official page also refuses it, the
+   app is not the problem; reset the query password through the school's own path first;
+5. only then, the password itself.
 
 ## 3. Login without a captcha
 
-Optional but useful: with the captcha box empty, submit. Log shows
-`stage=login.noCaptcha result=rejected error=... code=...`. This tells us whether
-captcha is mandatory for every login or only after failed attempts, which changes the
-UI flow.
+`frontInfo` already answers the question this step used to pose: `openCaptcha:"1"` for the
+`card` login, so the official client shows a captcha before the first submit and this app
+does the same. Keep the step as a confirmation that the school enforces it server-side too:
+with the captcha box empty, submit and read
+`stage=login.noCaptcha result=rejected error=... code=...`. A captcha code there means the
+server enforces it independently of the client; `code=8000` means credentials were checked
+first, as they were on 2026-10-05.
 
 ## 4. Successful login
 
@@ -352,4 +401,36 @@ Leakage audit output: empty (§10)
 Remaining protocol uncertainty: everything that requires a logged-in session
 Also observed: plugin registered, health() returned over the bridge, UI rendered at 1440x3200
 without breakage, and the 403 surfaced on screen as CAMPUS_NETWORK_REQUIRED [captcha/403]
+```
+
+### 2026-10-05, second session (on the campus wireless network — §0.1 cleared, §1 cleared, stopped at §4)
+
+```text
+Date / Android version / device model (no serials, no IMEI): 2026-10-05 / Android 14 (API 34) / Redmi K50, arm64-v8a
+APK sha256 at the start of the session: 70f3d2fea48d4278ac80d121bb31ad5d99bb630c10b21adcc98089c658088358
+Network location: campus wireless; §0.1 prerequisite satisfied (card host answered 200, no 403 block page)
+Captcha display (§1): PASS — image legible, every reload returns a new key,
+  stage=captcha ... status=200 on each refresh
+Captcha enforced? field names accepted?: NOT_REACHED — the school rejected the credential
+  pair first, so the captcha branch could not be exercised
+Login result: REJECTED, nine attempts, every one:
+  stage=keyboard  method=GET /berserker-secure/keyboard status=200
+  stage=login.captchaForm method=POST /berserker-auth/oauth/token status=400 serviceCode=8000
+  stage=login.captchaForm result=rejected error=INVALID_CREDENTIALS status=400 code=8000
+  campus / refreshToken present: n/a
+refresh_token result / GZIC / DXC / foreground refresh: NOT_REACHED (no session)
+Session restart behaviour: anonymous by construction; on-disk state audited clean (§9)
+Leakage audit output: empty (§10) — no IP, SSID, serial, token or captcha answer in logcat
+Cause found the same day (SOURCE_VERIFIED, see docs/PROTOCOL.md): the encoder was permuting
+  the password through the shuffled keyboard layout instead of submitting
+  <chosen characters>$1$<uuid>, and the token field was spelled loginForm instead of
+  loginFrom. Both fixed; the clean rebuild now installed is
+  app-debug.apk sha256 f9a43d2139b5528ab06ab0c976fc07bd26649b15d1c79c8b46e3b07b0e8ca6d3,
+  4779765 bytes (archived at evidence/app-debug-2026-10-05T0214-clean.apk; the earlier
+  incremental build of the same sources hashed b66071a392477f1b73394444a67913f48fef5bcf645586eba89bc0178e90c550,
+  so APK bytes are a session marker rather than a content hash). Not yet exercised against
+  the school — the user was asked to stop retrying to avoid lockout.
+Remaining protocol uncertainty: whether the corrected encoding is accepted (needs one
+  login), 8002/8003 at runtime, expires_in unit, refresh_token presence and rotation,
+  GZIC semantics, DXC chain
 ```

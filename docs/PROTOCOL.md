@@ -16,7 +16,8 @@ Source references:
 RUNTIME_VERIFIED  observed in a live response (status and/or body) on the date
                   given, from this workstation or from the physical device, with
                   no user credentials involved
-SOURCE_VERIFIED   taken from the old working implementation's source code
+SOURCE_VERIFIED   taken from a source of record: SCUT's own published client code,
+                  or the old working implementation
 HYPOTHESIS        inherited assumption, not yet proven against SCUT
 DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 ```
@@ -24,20 +25,23 @@ DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 | Item | Grade | Still open |
 | --- | --- | --- |
 | captcha endpoint and `{key, image}` shape | RUNTIME_VERIFIED 2026-10-05 | no |
-| secure-keyboard endpoint and `data.numberKeyboard` / `data.uuid` shape | RUNTIME_VERIFIED 2026-10-05 | no |
+| secure-keyboard endpoint and `data.uuid` / `data.numberKeyboard` shape | RUNTIME_VERIFIED 2026-10-05 | no |
 | OAuth error envelope and `code=8000` = credential failure | RUNTIME_VERIFIED 2026-10-05 (empty-credential probe) | no |
 | card host answers `403` for any off-campus source address | RUNTIME_VERIFIED 2026-10-05 (physical device, both address families) | no |
-| login form field names other than the captcha pair | SOURCE_VERIFIED | accepted values on a real account |
-| `captcha_header_code` / `captcha_header_key` | HYPOTHESIS | DEVICE_PENDING |
-| service codes `8002` / `8003` as captcha signals | HYPOTHESIS | DEVICE_PENDING |
+| credentials are checked before the captcha | RUNTIME_VERIFIED 2026-10-05 (device, nine 8000 responses with a captcha attached) | no |
+| SCUT login types: `card` / `sno` (both `encryption:"keyboard"`, `openCaptcha:"1"`), `sso` | SOURCE_VERIFIED 2026-10-05 (`frontInfo`, credential-free) | no |
+| password submitted as `<chosen characters>$1$<keyboard uuid>` | SOURCE_VERIFIED 2026-10-05 (official `security-keyboard` component) | accepted by the server on a real login |
+| token field spelling `loginFrom` (not `loginForm`) | SOURCE_VERIFIED 2026-10-05 | no |
+| `captcha_header_code` / `captcha_header_key` | SOURCE_VERIFIED 2026-10-05 | DEVICE_PENDING |
+| service codes `8002` / `8003` as captcha signals | SOURCE_VERIFIED 2026-10-05 | DEVICE_PENDING |
 | successful login, `expires_in` unit, `refresh_token` presence | SOURCE_VERIFIED | DEVICE_PENDING |
 | `grant_type=refresh_token` support and rotation | HYPOTHESIS | DEVICE_PENDING |
 | GZIC fee item 1/2/3 semantics and units | SOURCE_VERIFIED | DEVICE_PENDING |
 | DXC redirect chain hop-by-hop requirements | SOURCE_VERIFIED | DEVICE_PENDING |
 
-No login attempt with guessed or real credentials was made from the host; the only
-token request sent was an empty-credential control probe, so the captcha-related
-codes stay unconfirmed until the user's own device trace shows them.
+The only token request sent from the host was an empty-credential control probe; every
+credentialed request was made by the user on the phone. That keeps the captcha-related codes
+unconfirmed for this app even though the official client documents them.
 
 ## Hosts
 
@@ -118,6 +122,51 @@ What this changes for the project:
   address, which is identifying. Only a boolean and the redacted
   `blocked=campus-network-only` marker in the log line survive.
 
+## The school's own H5 client (read 2026-10-05)
+
+The card host serves its official mobile client as a Vue SPA, and the assets are
+readable from anywhere (`/plat/js/*` is not covered by the source-address policy that
+blocks the API). Reading it settled four questions this repository had been guessing at.
+
+Sources, archived with their SHA256 outside the repo at `evidence/client/` plus
+`evidence/sha256-2026-10-05T0208.txt`:
+
+| Asset | Role |
+| --- | --- |
+| `/plat/js/app.bc759729.js` | store, axios interceptor, config bootstrap |
+| `/plat/js/login.acc9252b.js` | the login screens and the token payload |
+| `/plat/js/chunk-2d0f0054.fe26bac8.js` | the `security-keyboard` component |
+| `GET /berserker-app/frontInfo?synAccessSource=h5` | SCUT's own login configuration |
+
+`frontInfo` needs no authentication and returns, among other things:
+
+```text
+schoolNameCode = scut
+loginType = [ {key:"card", name:"账号登录",  encryption:"keyboard", value:"一卡通查询密码", openCaptcha:"1"},
+              {key:"sno",  name:"学工号登录", encryption:"keyboard", openCaptcha:"1"},
+              {key:"sso",  name:"统一身份认证登录", url:"/berserker-auth/cas/redirect/neusoft?targetUrl=…"} ]
+passwordRule = a/num/#/leng_8
+```
+
+Consequences, each traceable to that chunk:
+
+1. **The card login is `logintype=card` with `encryption=keyboard` and a captcha from the
+   start** (`openCaptcha:"1"`), which is what this app already sends.
+2. **The submitted password is the password itself** — see the keyboard section below.
+3. **The token field is spelled `loginFrom`**, not `loginForm`:
+   `{username, password, grant_type:"password", scope:"all", loginFrom, logintype, device_token}`.
+   `loginForm` occurs 0 times in the client bundle.
+4. **`synAccessSource` is merged into every `application/x-www-form-urlencoded` POST by the
+   axios interceptor**, so sending it as a form field (as this app does) matches the client.
+5. **`8002` / `8003` are this deployment's captcha codes**: the login handler compares the
+   service code against exactly those two values to decide that a captcha is required and
+   re-opens the captcha dialog. That upgrades them from "sibling-deployment folklore" to
+   SOURCE_VERIFIED; a runtime observation with a real session is still outstanding.
+
+Grade these as SOURCE_VERIFIED (the vendor's own code), not RUNTIME_VERIFIED: the school's
+server accepts other shapes too, and only a successful login proves what this app sends is
+accepted.
+
 ## Captcha
 
 Known endpoint:
@@ -147,56 +196,75 @@ No OCR is planned.
 
 ### Captcha login fields
 
-Not yet verified against a successful SCUT login.
+SOURCE_VERIFIED 2026-10-05 against `/plat/js/login.acc9252b.js`, which builds the token body as:
 
-Candidate names seen in the Synjones ecosystem and used experimentally in the old `cf-web` branch:
-
-```text
-captcha_header_code
-captcha_header_key
+```js
+this.captcha.captchaKey && (this.$set(i, "captcha_header_code", this.loginForm.captchaCode),
+                            this.$set(i, "captcha_header_key", this.captcha.captchaKey))
 ```
 
-Do not mark these as confirmed until a controlled device request proves it.
+so the names this app sends (`captcha_header_code` = what the user typed,
+`captcha_header_key` = the `key` from `/berserker-auth/oauth/captcha`) match the official
+client exactly. `8002` / `8003` are likewise the codes that client treats as
+"captcha required / captcha wrong", and `8001` as "choose a student number".
 
-Codes `8002` / `8003` are commonly captcha-related in similar Synjones systems, but must still be confirmed for the SCUT deployment.
+Still DEVICE_PENDING: a live SCUT answer to *this* app's request. The school validates the
+credential pair before the captcha, so the captcha branch cannot be reached with a wrong
+password — see "Login failures" below.
 
 ## Secure keyboard
 
-The old Node implementation calls the SCUT secure-keyboard endpoint and transforms the password before token login.
+`GET /berserker-secure/keyboard` returns a shuffled on-screen keypad, as images. Its purpose
+is that the user taps glyphs on a layout the attacker cannot replay — it is **not** a
+password transform. The official component (`chunk-2d0f0054.fe26bac8.js`) is unambiguous:
 
-Read and port:
+```js
+click(e, t) {                      // e = index of the tapped tile
+  … s = this.keyboardInfo.numberKeyboard[e]   // the glyph drawn there, i.e. the character
+  this.$emit("input", s, this.keyboardInfo.uuid)
+}
+```
 
-`YanZhao1027/scut-notipay/src/utils/keyboard.ts`
+and the login chunk only appends the identifier:
 
-and the later Cloudflare implementation:
+```js
+"keyboard" === this.loginType.encryption && … && (e = e + "$1$" + this.keyboardUuid)
+```
 
-`YanZhao1027/scut-notipay@cf-web/worker/auth.ts`
+So the value that reaches `/oauth/token` is:
 
-Do not replace this with raw password submission without proving the current official protocol changed.
+```text
+password = <the characters the user chose> + "$1$" + <keyboard uuid>
+```
 
-Ported in `android/app/src/main/java/cn/scut/bombax/scut/auth/SecureKeyboard.kt`; the old
-reference sources are no longer vendored into this repository, so treat that file as the
-port of record.
+The encoding rule above is SOURCE_VERIFIED; the device evidence that the old rule was wrong is
+RUNTIME_VERIFIED 2026-10-05: the mapping `digit -> numberKeyboard[digit]` ported from a
+third-party reference implementation permutes the password, and SCUT answers `code=8000`
+(HTTP 400 with a service code, i.e. the request shape was understood and the credential was
+not). Whether the corrected encoding is accepted still requires one successful login.
 
-RUNTIME_VERIFIED 2026-10-05:
+Because SCUT's `passwordRule` is `a/num/#/leng_8`, letters and symbols are legal and must be
+passed through unchanged; `keyboardOptions:{types:"1"}` on the login screen is why the
+request asks for `type=Standard` (numbers + letters + symbols) rather than `type=Number`.
 
 ```http
 GET /berserker-secure/keyboard?type=Standard&order=0&synAccessSource=h5
 ```
 
-answers HTTP 200 with the envelope `{code, data, msg, success}` and these
-`data` keys:
+answers HTTP 200 with the envelope `{code, data, msg, success}` and these `data` keys:
 
 ```text
-numberKeyboard        exactly 10 characters  -> the digit map the encoder indexes
-uuid                                           -> appended after the "$1$" separator
-numberKeyboardImage   lowerLetterKeyboard    upperLetterKeyboard
-symbolKeyboard       password                …Image variants
+uuid                     -> the only value this app needs
+numberKeyboard           -> 10 characters, the shuffled digit row (display only)
+numberKeyboardImage   lowerLetterKeyboardImage  upperLetterKeyboardImage
+symbolKeyboardImage     …and the plain-text sibling lists
 ```
 
-The 10-character `numberKeyboard` is what makes the ported mapping
-`digit -> numberKeyboard[digit]` meaningful. The letter/symbol keyboards and the
-`data.password` field are ignored by this app and are never logged.
+`SecureKeyboard.kt` keeps `numberKeyboard` in the parsed model to document the shape, but the
+encoder never reads it. The letter/symbol lists and `data.password` are ignored and never
+logged. An empty `uuid` is treated as a protocol change; the password itself is only checked
+for being non-empty (the official client's `maxLength` resolves to 99 for this rule, so
+truncation is not a factor).
 
 ## OAuth token
 
@@ -209,18 +277,23 @@ Content-Type: application/x-www-form-urlencoded
 Authorization: Basic <mobile_service_platform client credentials used by official web client>
 ```
 
-The historical login request used fields similar to:
+The password-grant body this app sends, field for field as the official client builds it
+(`login.acc9252b.js`, plus the captcha pair and the interceptor's `synAccessSource`):
 
 ```text
 username
-password=<secure-keyboard encoded>
+password=<the chosen characters> + "$1$" + <keyboard uuid>
 grant_type=password
 scope=all
-loginForm=h5
+loginFrom=h5
 logintype=card
 device_token=h5
 synAccessSource=h5
+captcha_header_code=<typed>        captcha_header_key=<key>   (when a captcha is shown)
 ```
+
+Note `loginFrom`. The old `cf-web` worker sent `loginForm`, and this repository copied that
+spelling until 2026-10-05; the client bundle contains `loginForm` 0 times.
 
 Successful responses have included:
 
@@ -242,6 +315,11 @@ locSession
 
 These cookies matter particularly for DXC in the existing implementation.
 
+The successful shape is also what the official client reads: `token_type`, `access_token`,
+and the store dispatch on login success. `refresh_token` is not visible in the bundle's
+login path, so whether SCUT issues one for this grant remains UNKNOWN until a real login
+returns it.
+
 ### Login failures (RUNTIME_VERIFIED 2026-10-05)
 
 A token POST with empty `username`/`password` and the public client credential
@@ -259,9 +337,23 @@ Two things follow from that, and only from that:
 - service code `8000` means "account or password rejected", which
   `auth/TokenState.kt` now treats as an explicit signal instead of a fallthrough.
 
-No other service code was observed. `8002` / `8003` remain HYPOTHESIS: proving them
-requires a real login trace, which only happens on the phone with the user's own
-account.
+No other service code was observed there.
+
+On the phone the same day, nine login attempts carrying a real account, a real captcha pair
+and the permuted password each answered `status=400 code=8000`
+(`stage=login.captchaForm result=rejected error=INVALID_CREDENTIALS`). Two conclusions:
+
+- **The credential pair is validated before the captcha.** A request with a wrong password
+  and a correct captcha still returns 8000, never a captcha code, so the captcha branch is
+  unreachable with a bad password. That is why `8002` / `8003` stayed unobserved and why the
+  only way to confirm them is a login with a correct password.
+- **Repeated 8000s are the school saying "wrong password", not the captcha or the network.**
+  Treat a run of them as evidence about the encoding, and stop after two attempts, because
+  the account lockout policy is unknown and undocumented.
+
+`8002` / `8003` are recorded as SOURCE_VERIFIED above from the school's own client, which is
+the strongest evidence available without a successful login; they are still not
+RUNTIME_VERIFIED for this app.
 
 ## Refresh token
 

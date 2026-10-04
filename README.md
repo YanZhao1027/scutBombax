@@ -121,7 +121,7 @@ Implemented and green on the host:
   in-memory first — see `docs/ARCHITECTURE.md` for the persistence decision)
 - Foreground-only auto refresh (off / 5 / 10 / 30 min), no Service, no WorkManager, no alarms
 - Redacted logging through `Diag` (`adb logcat -s ScutBombax`)
-- 63 JVM unit tests + 15 vitest refresh tests passing; `assembleDebug` produces
+- 68 JVM unit tests + 15 vitest refresh tests passing; `assembleDebug` produces
   `android/app/build/outputs/apk/debug/app-debug.apk`
 
 Verified on a physical phone (Android 14, arm64-v8a) on 2026-10-05:
@@ -134,11 +134,19 @@ Verified on a physical phone (Android 14, arm64-v8a) on 2026-10-05:
   no school cookies in the WebView cookie store
 - the school's card host answers `403` for a source address outside campus, over IPv4 and
   IPv6, for `curl` and for OkHttp alike; the app reports that as `CAMPUS_NETWORK_REQUIRED`
-  rather than as an outage
+  rather than as an outage. On the campus network the same requests reach the application
+  layer: captcha `200`, secure keyboard `200`, token `400`
+- nine credentialed login attempts each answered `code=8000 用户名或密码错误` with a valid
+  captcha attached, which proved that SCUT checks the credential pair before the captcha and
+  exposed the real bug: the ported secure-keyboard encoder was permuting the password instead
+  of submitting `<password>$1$<keyboard uuid>`. Fixed the same day against SCUT's own client
+  code (see `docs/PROTOCOL.md`); the corrected build has not logged in yet.
 
-**Not verified:** every SCUT flow that needs a session. The card host refused the phone's
-network location, so captcha enforcement, login, `refresh_token`, GZIC balances, the DXC SSO
-chain and refresh with a live session have never run against the school. The captcha form
-field names and the `8002`/`8003` service codes are documented as hypotheses, not facts —
-see `docs/PROTOCOL.md`. Put the phone on campus Wi-Fi or the school SSL VPN, then work
-through `docs/DEVICE_VERIFICATION.md` on a real phone before treating any of it as working.
+**Not verified:** every SCUT flow that needs a session. Login, `refresh_token`, GZIC
+balances, the DXC SSO chain and refresh with a live session have never completed against
+the school. The captcha field names and the `8002`/`8003` service codes are no longer
+guesses — they are copied from the school's own published login chunk — but they still have
+not been observed in this app's traffic, which requires one successful login. Keep the phone
+on campus Wi-Fi or the school SSL VPN, use the **card query password** (校园卡查询密码,
+letters and digits, not the 6-digit payment PIN), and stop after two failed attempts before
+reading `docs/DEVICE_VERIFICATION.md` §2.1.

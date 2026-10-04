@@ -56,13 +56,15 @@
           </label>
 
           <label class="field">
-            <span>一卡通密码</span>
+            <span>一卡通查询密码（字母 + 数字，不少于 8 位）</span>
             <input
               id="password"
               type="password"
-              inputmode="numeric"
+              inputmode="text"
               autocomplete="off"
-              maxlength="128"
+              autocapitalize="none"
+              spellcheck="false"
+              maxlength="99"
               placeholder="校园卡查询密码"
               required
             />

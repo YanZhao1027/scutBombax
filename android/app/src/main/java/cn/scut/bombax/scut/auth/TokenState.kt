@@ -69,9 +69,15 @@ object ExpiryParser {
 object LoginErrorClassifier {
 
     /**
-     * Captcha-related codes inherited from the old Cloudflare implementation.
-     * They are hypotheses: a device trace has to confirm them for SCUT, and the
-     * observed code is always recorded in the exception detail.
+     * Captcha codes 8002 / 8003 are how the school's own client decides that a
+     * captcha is required or wrong: its token-request handler re-opens the captcha
+     * dialog on exactly those two codes. SCUT's `frontInfo` config also sets
+     * `openCaptcha:"1"` for the card login, so a captcha is expected up front.
+     *
+     * That makes them SOURCE_VERIFIED against the official client, not yet
+     * RUNTIME_VERIFIED for this app — the school validates the credential pair
+     * before the captcha, so they can only be observed with a correct password.
+     * The observed code is always recorded in the exception detail.
      */
     val captchaServiceCodes = setOf("8002", "8003")
 
