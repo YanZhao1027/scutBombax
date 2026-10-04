@@ -1,0 +1,34 @@
+# Node / web
+node_modules/
+dist/
+.vite/
+*.log
+
+# Capacitor / Android generated/local
+android/.gradle/
+android/local.properties
+android/app/build/
+android/build/
+.gradle/
+build/
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.p12
+
+# Temporary
+tmp/
+.cache/
