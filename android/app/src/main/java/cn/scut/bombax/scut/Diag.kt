@@ -1,0 +1,66 @@
+package cn.scut.bombax.scut
+
+import android.util.Log
+import okhttp3.HttpUrl
+
+/**
+ * Redacted diagnostics.
+ *
+ * Everything written through this object is safe to read in `adb logcat`:
+ * stage name, method, host, path, HTTP status, elapsed time and a non-sensitive
+ * upstream service code. Query strings are never printed (the DXC redirect puts
+ * an access token in one), cookie values are never printed, and no identity,
+ * password, captcha answer or token is ever printed.
+ */
+object Diag {
+    const val TAG = "ScutBombax"
+
+    fun request(
+        stage: String,
+        method: String,
+        url: HttpUrl,
+        status: Int,
+        elapsedMs: Long,
+        serviceCode: String? = null
+    ) {
+        val builder = StringBuilder()
+            .append("stage=").append(stage)
+            .append(" method=").append(method)
+            .append(" host=").append(url.host)
+            .append(" path=").append(url.encodedPath)
+            .append(" status=").append(status)
+            .append(" ms=").append(elapsedMs)
+        if (!serviceCode.isNullOrEmpty()) builder.append(" serviceCode=").append(serviceCode)
+        Log.i(TAG, builder.toString())
+    }
+
+    fun ioFailure(stage: String, method: String, url: HttpUrl, elapsedMs: Long, kind: String) {
+        Log.w(
+            TAG,
+            "stage=$stage method=$method host=${url.host} path=${url.encodedPath} " +
+                "status=-1 ms=$elapsedMs io=$kind"
+        )
+    }
+
+    /** Coarse, credential-free progress events (e.g. "login=ok campus=GZIC"). */
+    fun event(message: String) {
+        Log.i(TAG, message)
+    }
+
+    fun warn(message: String) {
+        Log.w(TAG, message)
+    }
+
+    /**
+     * Best-effort sanitizer for any text that might reach a log line: strips
+     * anything that looks like a bearer token, a cookie pair, a secret or a long
+     * opaque value. Used only as a second line of defence.
+     */
+    fun scrub(text: String): String =
+        text
+            .replace(
+                Regex("(?i)(authorization|cookie|synjones-auth|password|access_token|refresh_token|token|secret|captcha)\\s*[=:]\\s*[^&\\s,;]+"),
+                "$1=<redacted>"
+            )
+            .replace(Regex("[A-Za-z0-9+/=_-]{40,}"), "<opaque>")
+}

@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f4f7fb" />
+    <!--
+      Defense in depth for the project rule "the WebView never talks to SCUT":
+      only same-origin assets and data: captcha images are allowed, and
+      connect-src keeps fetch()/XHR inside the local app origin.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'"
+    />
+    <meta name="description" content="华南理工大学宿舍电费、水费与空调费余额查询。" />
+    <title>SCUT Bombax</title>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="brand-row">
+        <span class="brand">
+          <span class="brand-mark" aria-hidden="true">S</span>
+          <span>SCUT <span class="brand-light">BOMBAX</span></span>
+        </span>
+        <span class="live-pill" id="session-pill"><i></i> 未登录</span>
+      </header>
+
+      <section class="panel" id="login-panel">
+        <p class="eyebrow">CAMPUS UTILITIES</p>
+        <h1>宿舍余额查询</h1>
+        <p class="lede">登录校园一卡通，查询宿舍电费、水费与空调费余额。</p>
+
+        <form id="login-form" class="form" novalidate>
+          <label class="field">
+            <span>所在校区</span>
+            <select id="campus" autocomplete="off">
+              <option value="GZIC">GZIC · 广州国际校区</option>
+              <option value="DXC">DXC · 大学城校区</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>一卡通账号 / 学号</span>
+            <input
+              id="username"
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck="false"
+              maxlength="100"
+              placeholder="校园卡账号或学号"
+              required
+            />
+          </label>
+
+          <label class="field">
+            <span>一卡通密码</span>
+            <input
+              id="password"
+              type="password"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="128"
+              placeholder="校园卡查询密码"
+              required
+            />
+          </label>
+
+          <div class="captcha-heading">
+            <span class="field-title">图形验证码</span>
+            <button id="captcha-refresh" class="text-button" type="button">换一张</button>
+          </div>
+          <div class="captcha-row">
+            <button
+              id="captcha-image"
+              class="captcha-image"
+              type="button"
+              aria-label="验证码图片，点击换一张"
+            >
+              <span class="captcha-placeholder">加载中…</span>
+            </button>
+            <input
+              id="captcha-code"
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              autocapitalize="characters"
+              spellcheck="false"
+              maxlength="32"
+              placeholder="输入验证码"
+            />
+          </div>
+
+          <button id="login-button" class="primary-button" type="submit">
+            <span>登录并查询</span><span aria-hidden="true">↗</span>
+          </button>
+
+          <p class="privacy-note">
+            密码仅用于本次登录，不会写入任何存储。所有校园请求由 Android 原生代码发出。
+          </p>
+          <p id="login-status" class="status" role="status" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section class="panel" id="results-panel" hidden>
+        <div class="results-head">
+          <div>
+            <p class="eyebrow">YOUR ROOM</p>
+            <h1 id="room-name">宿舍</h1>
+            <p class="subtle" id="user-name"></p>
+          </div>
+          <button id="logout-button" class="quiet-button" type="button">退出</button>
+        </div>
+
+        <div class="balance-grid" aria-live="polite">
+          <article class="balance-card electric">
+            <div class="balance-label"><span class="icon" aria-hidden="true">ϟ</span>电费余额</div>
+            <p class="balance-value" id="electric-value">—</p>
+            <p class="balance-unit" id="electric-unit">平台返回余额 · 元</p>
+          </article>
+          <article class="balance-card water">
+            <div class="balance-label"><span class="icon" aria-hidden="true">≈</span>水费余额</div>
+            <p class="balance-value" id="water-value">—</p>
+            <p class="balance-unit" id="water-unit">平台返回余额 · 元</p>
+          </article>
+          <article class="balance-card ac">
+            <div class="balance-label"><span class="icon" aria-hidden="true">✳</span>空调费余额</div>
+            <p class="balance-value" id="ac-value">—</p>
+            <p class="balance-unit" id="ac-unit">平台返回余额 · 元</p>
+          </article>
+        </div>
+
+        <div class="updated-row">
+          <span class="dot" aria-hidden="true"></span>
+          <span>最后更新 <strong id="updated-at">等待查询</strong></span>
+          <span id="query-state" class="query-state"></span>
+        </div>
+
+        <button id="query-button" class="primary-button" type="button">
+          <span>立即刷新</span><span aria-hidden="true">↻</span>
+        </button>
+
+        <fieldset class="refresh-options">
+          <legend>自动刷新</legend>
+          <div class="refresh-choices" id="refresh-choices">
+            <label><input type="radio" name="refresh" value="0" checked /><span>关闭</span></label>
+            <label><input type="radio" name="refresh" value="5" /><span>5 分钟</span></label>
+            <label><input type="radio" name="refresh" value="10" /><span>10 分钟</span></label>
+            <label><input type="radio" name="refresh" value="30" /><span>30 分钟</span></label>
+          </div>
+          <p class="foreground-note">
+            仅在应用处于前台时刷新；切到后台立即停止，回到前台且已超过所选间隔时只补查一次。
+          </p>
+        </fieldset>
+
+        <p id="results-status" class="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="panel compact" id="diagnostics-panel">
+        <details>
+          <summary>会话与诊断</summary>
+          <div class="diag-row">
+            <span id="session-state">会话：未登录</span>
+          </div>
+          <div class="diag-actions">
+            <button id="refresh-token-btn" class="text-button" type="button">
+              测试 refresh_token
+            </button>
+            <button id="health-btn" class="text-button" type="button">健康检查</button>
+            <button id="clear-btn" class="text-button danger" type="button">清除登录状态</button>
+          </div>
+          <pre class="log" id="native-log" aria-live="polite"></pre>
+        </details>
+      </section>
+
+      <footer class="footer">
+        <span>华南理工大学 · 校园生活服务</span>
+        <span>余额由一卡通平台实时返回</span>
+      </footer>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
