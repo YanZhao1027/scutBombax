@@ -9,8 +9,8 @@ SCUT flow has ever run**, because this machine has no Android device attached
 
 | Required item | Result | Grade |
 | --- | --- | --- |
-| commit SHA | `6d5a031` implementation, `1ef80d3` docs (branch `main`) | RUNTIME_VERIFIED |
-| APK path | `android/app/build/outputs/apk/debug/app-debug.apk` — 4,778,453 bytes, sha256 `32619d63383426fedb6d81d56a128b2c79978e0c34e5487135efe0d3dabe5884` | RUNTIME_VERIFIED |
+| commit SHA | `6d5a031` implementation, `1ef80d3` + `cd8f62a` docs and checks (branch `main`) | RUNTIME_VERIFIED |
+| APK path | `android/app/build/outputs/apk/debug/app-debug.apk` — 4,778,465 bytes, sha256 `c68a9db159a18df9c484deeeeb372ac7d01f7f9dd13641adae4e123cc07084c3` | RUNTIME_VERIFIED |
 | tested Android version / device | none. `minSdk 24`, `targetSdk 36` are what the build *declares*; no device has executed it | NOT_TESTED |
 | captcha behavior | endpoint + `{key, image}` shape confirmed from the host (HTTP 200, 32-hex key, `data:image/png;base64,` prefix). Whether SCUT **enforces** captcha at login is unproven | RUNTIME_VERIFIED (shape) / DEVICE_PENDING (enforcement) |
 | exact verified captcha request field names | **not verified.** The app sends `captcha_header_code` / `captcha_header_key`; these come from the old `cf-web` branch and sibling Synjones deployments, i.e. HYPOTHESIS | HYPOTHESIS |

@@ -177,3 +177,10 @@ covers `AutoRefresher` transitions, including backgrounding and the bounded retr
 Device integration is deliberately not automated: it needs the user's real credentials and
 hits school services, so it stays manual, sparse and rate-limited through
 [DEVICE_VERIFICATION.md](DEVICE_VERIFICATION.md).
+
+Two host-side checks run without a device:
+
+```bash
+pnpm check:dom    # index.html <-> main.ts id/selector contract, plus the CSP directives
+./scripts/check-env.sh   # javac, build-tools aapt2 presence, authorized adb devices
+```

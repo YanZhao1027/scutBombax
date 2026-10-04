@@ -368,6 +368,9 @@ const boot = async (): Promise<void> => {
   } catch (error) {
     appendLog(describeError(error));
     setStatus(els.loginStatus, '原生桥不可用，请在 Android 设备上运行。', 'error');
+    // No captcha request was ever issued on this path, so the tile must not keep
+    // claiming it is still loading.
+    els.captchaImage.innerHTML = '<span class="captcha-placeholder">不可用</span>';
   }
 };
 
