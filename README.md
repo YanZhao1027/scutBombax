@@ -82,6 +82,7 @@ Read:
 2. [AGENTS.md](AGENTS.md)
 3. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 4. [docs/PROTOCOL.md](docs/PROTOCOL.md)
+5. [docs/DEVICE_VERIFICATION.md](docs/DEVICE_VERIFICATION.md)
 
 Environment sanity check:
 
@@ -89,18 +90,41 @@ Environment sanity check:
 ./scripts/check-env.sh
 ```
 
-Once the Android project exists, the expected build loop is:
+Verified build loop (Java 21 must be a full JDK; see `docs/UBUNTU24.md` §9):
 
 ```bash
-pnpm build
+pnpm install
+pnpm build          # tsc --noEmit && vite build
+pnpm test           # vitest: refresh-state machine
 pnpm exec cap sync android
+
 cd android
-./gradlew assembleDebug
+JAVA_HOME="$HOME/opt/jdk-21.0.12.1+1" ./gradlew clean testDebugUnitTest assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb logcat -s ScutBombax:V
 ```
 
 Use a physical Android phone for protocol testing. An emulator is not required.
 
-## Status
+## Current status
 
-This repository is a handoff/bootstrap repository. The next coding agent should follow `AGENTS.md` and create the Capacitor/Android implementation incrementally, verifying SCUT behavior on a real device rather than guessing undocumented protocol fields.
+Implemented and green on the host:
+
+- Capacitor 8 shell in `cn.scut.bombax`, app-local `ScutApi` plugin, single-threaded
+  native IO so only one SCUT query can ever be in flight
+- Kotlin/OkHttp ports of captcha, secure keyboard, OAuth password login, refresh attempt,
+  GZIC fee items and the DXC manual-redirect chain
+- Session held in memory only, all secrets staying in Kotlin; "clear login state" is an
+  explicit action and the card password is never persisted (AGENTS.md Phase 6 asks for
+  in-memory first — see `docs/ARCHITECTURE.md` for the persistence decision)
+- Foreground-only auto refresh (off / 5 / 10 / 30 min), no Service, no WorkManager, no alarms
+- Redacted logging through `Diag` (`adb logcat -s ScutBombax`)
+- 58 JVM unit tests + 15 vitest refresh tests passing; `assembleDebug` produces
+  `android/app/build/outputs/apk/debug/app-debug.apk`
+
+**Not verified:** every SCUT network behavior. No Android device has been attached to this
+machine (`adb devices` lists nothing), so captcha enforcement, login, `refresh_token`, GZIC
+balances, the DXC SSO chain and foreground refresh have never run against the school. The
+captcha form field names and the `8002`/`8003` service codes are documented as hypotheses,
+not facts — see `docs/PROTOCOL.md`. Work through `docs/DEVICE_VERIFICATION.md` on a real
+phone before treating any of it as working.

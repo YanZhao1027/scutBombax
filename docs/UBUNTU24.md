@@ -4,10 +4,13 @@ Android Studio is not required to build, install or debug this project.
 
 ## 1. Base packages
 
+A **JDK** is required, not a JRE. Android Gradle Plugin 8.13 with this project's
+`compileSdk 36` / `jvmTarget 21` settings needs a Java 21 compiler:
+
 ```bash
 sudo apt update
 sudo apt install -y \
-  openjdk-17-jdk \
+  openjdk-21-jdk \
   git \
   curl \
   unzip \
@@ -19,10 +22,12 @@ Verify:
 
 ```bash
 java -version
+javac -version
 adb version
 ```
 
-If the generated Android Gradle Plugin later requires a different supported JDK, follow that project's explicit requirement rather than installing Android Studio.
+`javac: command not found` means only the `-jre` / `-jre-headless` package is present.
+If `sudo` is unavailable, see section 9 for the user-local JDK this machine used.
 
 ## 2. Node and pnpm
 
@@ -74,19 +79,23 @@ sdkmanager --version
 
 ## 4. Install the SDK components the project actually needs
 
-After the agent creates the Capacitor Android project, inspect its `compileSdk` / build configuration.
-
-Then install matching components. Example only:
+Use the generated project's real requirement, not a copied API level. This project is
+`compileSdk 36` / `targetSdk 36` / `minSdk 24` (`android/variables.gradle`), so:
 
 ```bash
 sdkmanager --licenses
 sdkmanager \
   "platform-tools" \
-  "platforms;android-<compileSdk>" \
-  "build-tools;<matching-build-tools-version>"
+  "platforms;android-36" \
+  "build-tools;36.1.0"
 ```
 
-Do not blindly copy an old API level from documentation. Use the generated project's actual requirement.
+`buildToolsVersion` is deliberately **not** pinned in `variables.gradle`; AGP chooses a
+compatible one (it auto-installed `35.0.0` here) and a complete build-tools directory is
+required for `aapt2`. See section 9 for the empty leftover directory this machine has.
+
+`android/local.properties` records `sdk.dir` for this host only and is git-ignored, so a
+fresh clone needs either that file or `ANDROID_HOME`.
 
 ## 5. Use a physical phone
 
@@ -96,22 +105,38 @@ Enable Developer options and USB debugging on the Android device.
 adb devices
 ```
 
-Accept the authorization prompt on the phone.
+Accept the authorization prompt on the phone. Until that prompt is accepted the row
+reads `<serial> unauthorized` and nothing can be installed.
 
-A physical device is preferred for SCUT protocol testing because the request should originate from a real user network and no emulator is necessary.
+Two `adb` binaries usually coexist here — the distro package and the SDK
+`platform-tools` copy (on this host: `34.0.4-debian` vs `37.0.1`). If they disagree you
+get `adb server version (NN) doesn't match this client (MM); killing...` in a loop.
+Always put the SDK copy first in `PATH` and use only that one:
+
+```bash
+export PATH="$HOME/Android/Sdk/platform-tools:$PATH"
+```
+
+An empty "List of devices attached" means no phone is reachable — it is not something the
+build can work around. A physical device is required for SCUT protocol testing because the
+request should originate from a real user network, and no emulator is necessary.
 
 ## 6. CLI build loop
 
-Once the Capacitor project is initialized:
+Verified on this host (Node 22.19.0, pnpm 10.15.0, Capacitor 8.5.2, AGP 8.13.0, Gradle
+wrapper 8.14.3, Kotlin plugin 2.2.20):
 
 ```bash
 pnpm install
 pnpm build
+pnpm test
 pnpm exec cap sync android
 
 cd android
-./gradlew assembleDebug
+JAVA_HOME=/home/zyubuntu/opt/jdk-21.0.12.1+1 ./gradlew clean testDebugUnitTest assembleDebug
 ```
+
+The native JVM unit tests run on the host — no device and no emulator is needed for them.
 
 APK:
 
@@ -125,13 +150,14 @@ Install:
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-View app logs without Android Studio:
+View app logs without Android Studio. The single native log tag is `ScutBombax`
+(`Diag.kt`), and its lines are redacted by design:
 
 ```bash
-adb logcat
+adb logcat -c && adb logcat -s ScutBombax:V *:S
 ```
 
-Filter by a chosen application tag once the agent defines one.
+See [docs/DEVICE_VERIFICATION.md](DEVICE_VERIFICATION.md) for which stage names mean what.
 
 ## 7. Useful terminal tools
 
@@ -151,4 +177,106 @@ Run:
 ./scripts/check-env.sh
 ```
 
-It reports missing pieces without installing anything automatically.
+It reports missing pieces without installing anything automatically. It checks `javac`
+(not just `java`), lists which installed build-tools directories contain `aapt2`, and
+counts authorized `adb` devices, because those are the four things that actually stopped
+this project from building.
+
+## 9. Verified environment on this machine (2026-10-05)
+
+Measured, not copied from a guide:
+
+| Piece | Value |
+| --- | --- |
+| OS | Ubuntu 24.04 (GNU/Linux, x86_64) |
+| Node | v22.19.0 (nvm) |
+| pnpm | 10.15.0 |
+| Capacitor CLI / core / android | 8.5.2 |
+| Gradle | wrapper 8.14.3 (`gradle-8.14.3-all.zip`) |
+| Android Gradle Plugin | 8.13.0 |
+| Kotlin Gradle plugin | 2.2.20, `jvmTarget 21` |
+| SDK | `$HOME/Android/Sdk` — platform-tools, `platforms;android-36`, build-tools 35.0.0 + 36.1.0, cmdline-tools (`sdkmanager 19.0`) |
+| Java used to build | Temurin JDK 21.0.12.1+1 at `$HOME/opt/jdk-21.0.12.1+1` |
+| adb | SDK copy 37.0.1; distro `/usr/bin/adb` is 34.0.4-debian |
+| Device attached | **none** — `adb devices` lists no rows |
+
+Everything below is a trap that cost real time here.
+
+### 9.1 The distro Java is a JRE and there is no sudo
+
+`dpkg -l | grep openjdk` shows only `openjdk-21-jre` and `openjdk-21-jre-headless`;
+`javac` is not on `PATH`, and installing `openjdk-21-jdk` requires root, which this
+account does not have. Gradle's message in that state is unhelpful:
+
+```text
+Toolchain installation '/usr/lib/jvm/java-21-openjdk-amd64' does not provide the
+required capabilities: [JAVA_COMPILER]
+```
+
+Fix without root: unpack a full JDK into the user directory and point `JAVA_HOME` at it.
+
+```bash
+mkdir -p "$HOME/opt"
+curl -L -o /tmp/jdk21.tar.gz \
+  "https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jdk/hotspot/normal/eclipse"
+sha256sum /tmp/jdk21.tar.gz   # must equal the "checksum" from the Adoptium release API
+tar -xzf /tmp/jdk21.tar.gz -C "$HOME/opt"
+```
+
+This host has `$HOME/opt/jdk-21.0.12.1+1` from a tarball whose SHA-256
+`ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94` matched the checksum
+published by `https://api.adoptium.net/v3/assets/latest/21/hotspot`. Verify before
+extracting; the Tsinghua Adoptium mirror serves the same bytes but publishes no `.sha256.txt`,
+so take the expected value from the API instead of the mirror.
+
+`JAVA_HOME` must be exported **inside the same shell invocation as `gradlew`** — an
+agent's tool calls do not share shell state, and a build re-run without it fails with the
+same `[JAVA_COMPILER]` message.
+
+### 9.2 Seeding the Gradle distribution by hand
+
+The wrapper downloads ~215 MB before it can run. If the mirror in use throttles mid-file,
+resume with `curl -C -` in a loop and check the digest against
+`https://services.gradle.org/distributions/gradle-8.14.3-all.zip.sha256`
+(`ed1a8d686605fd7c23bdf62c7fc7add1c5b23b2bbc3721e661934ef4a4911d7c`).
+
+Gradle looks for the unpacked distribution in a directory named after the **base-36 of the
+MD5 of `distributionUrl`**, so a manual download only helps once that path exists:
+
+```bash
+python3 - <<'PY'
+import hashlib
+url = "https://services.gradle.org/distributions/gradle-8.14.3-all.zip"
+n = int(hashlib.md5(url.encode()).hexdigest(), 16)
+digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+out = ""
+while n:
+    n, r = divmod(n, 36)
+    out = digits[r] + out
+print(out)          # -> 10utluxaxniiv4wxiphsi49nj for this project's wrapper
+PY
+
+dist="$HOME/.gradle/wrapper/dists/gradle-8.14.3-all/10utluxaxniiv4wxiphsi49nj"
+mkdir -p "$dist"
+unzip -q /tmp/gradle-dl/gradle-8.14.3-all.zip -d "$dist"
+touch "$dist/gradle-8.14.3-all.zip.ok" "$dist/gradle-8.14.3-all.zip.lck"
+```
+
+That is the verified end state on this machine — the directory holds the extracted
+`gradle-8.14.3/`, the `.ok` marker and a `.lck` file, and no archive. Missing or renamed
+markers make the wrapper re-download the whole 215 MB.
+
+### 9.3 An empty build-tools directory
+
+`$ANDROID_HOME/build-tools/36.0.0` is a 12 KB leftover with no `aapt2`, while 36.1.0
+(150 MB) and 35.0.0 (147 MB) are complete. `android/variables.gradle` deliberately does not
+pin `buildToolsVersion`, so AGP picks a complete one and the build is unaffected. If a future
+change pins `36.0.0`, packaging fails with a missing-`aapt2` error; delete the stub or install
+the real package rather than adding a pin.
+
+### 9.4 Not yet verified
+
+The whole SCUT protocol surface. `adb devices` returns an empty list on this machine, so
+Phase 0 step 3 of `AGENTS.md` is not met and captcha, login, refresh, GZIC, DXC and
+foreground refresh have never been executed against the school. Do not infer otherwise from
+the passing unit tests; run [docs/DEVICE_VERIFICATION.md](DEVICE_VERIFICATION.md) instead.

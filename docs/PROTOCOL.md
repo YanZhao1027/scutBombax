@@ -1,12 +1,41 @@
 # SCUT protocol notes
 
 This document separates **known observations** from **items that still require device verification**.
+Every `DEVICE_PENDING` row below is closed by working through
+[DEVICE_VERIFICATION.md](DEVICE_VERIFICATION.md) on a physical phone.
 
 Source references:
 
 - `Naptie/scut-notipay`
 - `YanZhao1027/scut-notipay`
 - `YanZhao1027/scut-notipay` branch `cf-web`
+
+## Evidence grades used here
+
+```text
+RUNTIME_VERIFIED  observed in a response body/status from this workstation on the
+                  date given, with no user credentials involved
+SOURCE_VERIFIED   taken from the old working implementation's source code
+HYPOTHESIS        inherited assumption, not yet proven against SCUT
+DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
+```
+
+| Item | Grade | Still open |
+| --- | --- | --- |
+| captcha endpoint and `{key, image}` shape | RUNTIME_VERIFIED 2026-10-05 | no |
+| secure-keyboard endpoint and `data.numberKeyboard` / `data.uuid` shape | RUNTIME_VERIFIED 2026-10-05 | no |
+| OAuth error envelope and `code=8000` = credential failure | RUNTIME_VERIFIED 2026-10-05 (empty-credential probe) | no |
+| login form field names other than the captcha pair | SOURCE_VERIFIED | accepted values on a real account |
+| `captcha_header_code` / `captcha_header_key` | HYPOTHESIS | DEVICE_PENDING |
+| service codes `8002` / `8003` as captcha signals | HYPOTHESIS | DEVICE_PENDING |
+| successful login, `expires_in` unit, `refresh_token` presence | SOURCE_VERIFIED | DEVICE_PENDING |
+| `grant_type=refresh_token` support and rotation | HYPOTHESIS | DEVICE_PENDING |
+| GZIC fee item 1/2/3 semantics and units | SOURCE_VERIFIED | DEVICE_PENDING |
+| DXC redirect chain hop-by-hop requirements | SOURCE_VERIFIED | DEVICE_PENDING |
+
+No login attempt with guessed or real credentials was made from the host; the only
+token request sent was an empty-credential control probe, so the captcha-related
+codes stay unconfirmed until the user's own device trace shows them.
 
 ## Hosts
 
@@ -53,6 +82,11 @@ Observed JSON shape:
 }
 ```
 
+RUNTIME_VERIFIED 2026-10-05: HTTP 200, body contains exactly the two keys above,
+`key` is a 32-character hex string and `image` already carries the
+`data:image/png;base64,` prefix. `auth/CaptchaService.kt` therefore accepts both a
+prefixed and a bare base64 value.
+
 The user should manually enter the image code.
 
 No OCR is planned.
@@ -85,6 +119,30 @@ and the later Cloudflare implementation:
 `YanZhao1027/scut-notipay@cf-web/worker/auth.ts`
 
 Do not replace this with raw password submission without proving the current official protocol changed.
+
+Ported in `android/app/src/main/java/cn/scut/bombax/scut/auth/SecureKeyboard.kt`; the old
+reference sources are no longer vendored into this repository, so treat that file as the
+port of record.
+
+RUNTIME_VERIFIED 2026-10-05:
+
+```http
+GET /berserker-secure/keyboard?type=Standard&order=0&synAccessSource=h5
+```
+
+answers HTTP 200 with the envelope `{code, data, msg, success}` and these
+`data` keys:
+
+```text
+numberKeyboard        exactly 10 characters  -> the digit map the encoder indexes
+uuid                                           -> appended after the "$1$" separator
+numberKeyboardImage   lowerLetterKeyboard    upperLetterKeyboard
+symbolKeyboard       password                …Image variants
+```
+
+The 10-character `numberKeyboard` is what makes the ported mapping
+`digit -> numberKeyboard[digit]` meaningful. The letter/symbol keyboards and the
+`data.password` field are ignored by this app and are never logged.
 
 ## OAuth token
 
@@ -129,6 +187,27 @@ locSession
 ```
 
 These cookies matter particularly for DXC in the existing implementation.
+
+### Login failures (RUNTIME_VERIFIED 2026-10-05)
+
+A token POST with empty `username`/`password` and the public client credential
+answers HTTP 400 with:
+
+```json
+{ "status": 400, "message": "用户名或密码错误", "code": 8000, "data": null }
+```
+
+Two things follow from that, and only from that:
+
+- the auth error envelope is `status` / `message` / `code` / `data`, which is
+  **not** the `code` / `msg` / `map` envelope used by the fee-item API, so the two
+  parsers must stay separate;
+- service code `8000` means "account or password rejected", which
+  `auth/TokenState.kt` now treats as an explicit signal instead of a fallthrough.
+
+No other service code was observed. `8002` / `8003` remain HYPOTHESIS: proving them
+requires a real login trace, which only happens on the phone with the user's own
+account.
 
 ## Refresh token
 
