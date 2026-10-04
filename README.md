@@ -83,6 +83,8 @@ Read:
 3. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 4. [docs/PROTOCOL.md](docs/PROTOCOL.md)
 5. [docs/DEVICE_VERIFICATION.md](docs/DEVICE_VERIFICATION.md)
+6. [docs/HANDOFF.md](docs/HANDOFF.md) — status report for 2026-10-05, including what is
+   and is not verified
 
 Environment sanity check:
 
