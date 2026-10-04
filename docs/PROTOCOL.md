@@ -13,8 +13,9 @@ Source references:
 ## Evidence grades used here
 
 ```text
-RUNTIME_VERIFIED  observed in a response body/status from this workstation on the
-                  date given, with no user credentials involved
+RUNTIME_VERIFIED  observed in a live response (status and/or body) on the date
+                  given, from this workstation or from the physical device, with
+                  no user credentials involved
 SOURCE_VERIFIED   taken from the old working implementation's source code
 HYPOTHESIS        inherited assumption, not yet proven against SCUT
 DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
@@ -25,6 +26,7 @@ DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 | captcha endpoint and `{key, image}` shape | RUNTIME_VERIFIED 2026-10-05 | no |
 | secure-keyboard endpoint and `data.numberKeyboard` / `data.uuid` shape | RUNTIME_VERIFIED 2026-10-05 | no |
 | OAuth error envelope and `code=8000` = credential failure | RUNTIME_VERIFIED 2026-10-05 (empty-credential probe) | no |
+| card host answers `403` for any off-campus source address | RUNTIME_VERIFIED 2026-10-05 (physical device, both address families) | no |
 | login form field names other than the captcha pair | SOURCE_VERIFIED | accepted values on a real account |
 | `captcha_header_code` / `captcha_header_key` | HYPOTHESIS | DEVICE_PENDING |
 | service codes `8002` / `8003` as captcha signals | HYPOTHESIS | DEVICE_PENDING |
@@ -63,6 +65,58 @@ browser direct captcha:
 ```
 
 This is why the Android app must use native networking.
+
+### 2026-10-05 on-device: the card host restricts by source address
+
+The first physical-device run reached the school's edge and was refused by it:
+
+| Request | Phone (off-campus uplink) | This workstation |
+| --- | --- | --- |
+| `GET /berserker-auth/oauth/captcha?synAccessSource=h5` | `403` | `200` |
+| `GET /berserker-secure/keyboard` | `403` | `200` |
+| `GET /` on the card host | `403` | `200` |
+| `GET https://dfyc.utc.scut.edu.cn/sdms-weixin-pay-sp/newWeixin/index.html` | `200` | `200` |
+
+The 403 is an HTML page rather than an API answer, and it states its own reason:
+
+```text
+HTTP/1.1 403 Forbidden
+Server: rump/e
+Content-Type: text/html
+
+403 抱歉，页面无法访问
+校外可通过学校SSLVPN访问本网站。
+访问IP：<the page echoes the caller's own public address — never logged, never stored>
+```
+
+Established by repeating the same request from the phone under control:
+
+- Identical over IPv4 and IPv6 (`403` both times, the page echoing the v4 and the
+  v6 source address respectively), so it is not a DNS or address-family problem.
+- Identical for `/system/bin/curl` on the device and for the app's own OkHttp
+  client, with `Server: rump/e` in both cases and certificate validation intact
+  (`curl` reported `ssl_verify_result=0`), so it is not a client-library, header
+  or TLS-fingerprint problem.
+- Both hosts resolved to the same dual-stack edge (`202.38.251.178` /
+  `2001:da8:2000:2251::178`) and only `ecardwxnew` refused, so the policy is
+  per-vhost, not a campus-wide block, and the phone's network itself is fine.
+- This workstation reaches the card host through its local `Meta`/Tailscale tunnel
+  (fake-IP answer `198.18.0.33`), which is why every earlier `RUNTIME_VERIFIED`
+  row above came from an address the school accepts.
+
+What this changes for the project:
+
+- The app classifies this page as `CAMPUS_NETWORK_REQUIRED` instead of
+  `UPSTREAM_UNAVAILABLE`, because the school's own remedy — campus network or its
+  SSL VPN — is actionable and "try again later" is not. See
+  `scut/network/NetworkAccess.kt`.
+- No captcha, login, refresh or GZIC item can be closed from a device whose
+  uplink is outside the campus address space. The phone has to join campus Wi-Fi
+  or the school SSL VPN. Per AGENTS.md no proxy or other bypass may be built into
+  the app, and none is needed: this is an ordinary network-location requirement.
+- The block page body is dropped at the boundary: it carries the device's public
+  address, which is identifying. Only a boolean and the redacted
+  `blocked=campus-network-only` marker in the log line survive.
 
 ## Captcha
 

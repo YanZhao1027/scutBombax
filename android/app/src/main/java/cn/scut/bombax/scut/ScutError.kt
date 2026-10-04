@@ -15,7 +15,8 @@ enum class AppError(val wire: String) {
     NO_SESSION("NO_SESSION"),
     BUSY("BUSY"),
     INVALID_INPUT("INVALID_INPUT"),
-    NETWORK("NETWORK");
+    NETWORK("NETWORK"),
+    CAMPUS_NETWORK_REQUIRED("CAMPUS_NETWORK_REQUIRED");
 
     /**
      * The user-facing line for this code. Raw upstream text never crosses the
@@ -32,6 +33,7 @@ enum class AppError(val wire: String) {
         BUSY -> "已有请求在进行中"
         INVALID_INPUT -> "账号或密码填写不完整"
         NETWORK -> "网络请求失败"
+        CAMPUS_NETWORK_REQUIRED -> "当前网络无法访问一卡通服务，请连接校园网或使用学校 SSLVPN 后重试"
     }
 }
 

@@ -24,7 +24,14 @@ class ScutResponse(
     val location: String?,
     val cookieNames: List<String>,
     /** name to value for this hop only; never logged and never sent to JS. */
-    val cookiePairs: Map<String, String>
+    val cookiePairs: Map<String, String>,
+    /**
+     * True when the school's edge answered with its off-campus block page. Such
+     * a response never reaches a caller: [ScutHttp.send] turns it into
+     * [AppError.CAMPUS_NETWORK_REQUIRED] and drops the body, which echoes the
+     * device's public IP.
+     */
+    val blockedByNetworkPolicy: Boolean = false
 ) {
     val isRedirect: Boolean get() = status in 300..399 && !location.isNullOrEmpty()
 
@@ -92,7 +99,10 @@ class ScutHttp(private val client: OkHttpClient) {
      * Executes [request] and always logs a redacted line for it.
      *
      * Transient I/O problems become [AppError.NETWORK]; a non-2xx/non-3xx answer
-     * is returned untouched so callers can classify it themselves.
+     * is returned untouched so callers can classify it themselves. The single
+     * exception is the school's off-campus block page, which becomes
+     * [AppError.CAMPUS_NETWORK_REQUIRED] here because it means the same thing
+     * at every stage and its body must not be retained.
      */
     fun send(stage: String, request: Request): ScutResponse {
         val started = SystemClock.elapsedRealtime()
@@ -123,6 +133,7 @@ class ScutHttp(private val client: OkHttpClient) {
             }
             val setCookieHeaders = live.headers("Set-Cookie")
             val cookiePairs = CookieExtractor.parse(setCookieHeaders)
+            val blocked = NetworkAccess.isBlocked(live.code, text)
 
             Diag.request(
                 stage = stage,
@@ -130,8 +141,20 @@ class ScutHttp(private val client: OkHttpClient) {
                 url = request.url,
                 status = live.code,
                 elapsedMs = elapsed,
-                serviceCode = json?.opt("code")?.toString()
+                serviceCode = json?.opt("code")?.toString(),
+                blocked = blocked
             )
+
+            if (blocked) {
+                // Every documented SCUT answer is JSON; this one is the school's
+                // own "connect from campus or use the SSL VPN" page, which no
+                // caller can act on and which must not be kept or forwarded.
+                throw ScutException(
+                    AppError.CAMPUS_NETWORK_REQUIRED,
+                    AppError.CAMPUS_NETWORK_REQUIRED.human(),
+                    "$stage/${live.code}"
+                )
+            }
 
             return ScutResponse(
                 stage = stage,
@@ -140,7 +163,8 @@ class ScutHttp(private val client: OkHttpClient) {
                 rawLength = text?.length ?: 0,
                 location = if (live.code in 300..399) resolved else null,
                 cookieNames = cookiePairs.keys.sorted(),
-                cookiePairs = cookiePairs
+                cookiePairs = cookiePairs,
+                blockedByNetworkPolicy = blocked
             )
         }
     }

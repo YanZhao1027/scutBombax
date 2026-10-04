@@ -198,7 +198,7 @@ Measured, not copied from a guide:
 | SDK | `$HOME/Android/Sdk` — platform-tools, `platforms;android-36`, build-tools 35.0.0 + 36.1.0, cmdline-tools (`sdkmanager 19.0`) |
 | Java used to build | Temurin JDK 21.0.12.1+1 at `$HOME/opt/jdk-21.0.12.1+1` |
 | adb | SDK copy 37.0.1; distro `/usr/bin/adb` is 34.0.4-debian |
-| Device attached | **none** — `adb devices` lists no rows |
+| Device attached | Redmi K50, Android 14 (API 34), arm64-v8a — authorized, `install -r` and `logcat` verified (its serial is deliberately not recorded anywhere) |
 
 Everything below is a trap that cost real time here.
 
@@ -274,9 +274,28 @@ pin `buildToolsVersion`, so AGP picks a complete one and the build is unaffected
 change pins `36.0.0`, packaging fails with a missing-`aapt2` error; delete the stub or install
 the real package rather than adding a pin.
 
-### 9.4 Not yet verified
+### 9.4 A device is not enough: the school checks the source address
 
-The whole SCUT protocol surface. `adb devices` returns an empty list on this machine, so
-Phase 0 step 3 of `AGENTS.md` is not met and captcha, login, refresh, GZIC, DXC and
-foreground refresh have never been executed against the school. Do not infer otherwise from
-the passing unit tests; run [docs/DEVICE_VERIFICATION.md](DEVICE_VERIFICATION.md) instead.
+A phone plugged in over USB still has its own network route, and
+`ecardwxnew.scut.edu.cn` answers `403` + `校外可通过学校SSLVPN访问本网站` for any source
+address outside the campus range. `/system/bin/curl` is present on Android 14, so this is
+worth checking before reading anything as an app failure:
+
+```bash
+$ADB shell curl -sS -o /dev/null -m 12 -w 'HTTP=%{http_code} remote=%{remote_ip}\n' \
+  'https://ecardwxnew.scut.edu.cn/berserker-auth/oauth/captcha?synAccessSource=h5'
+```
+
+`403` on both IPv4 and IPv6 with `Server: rump/e`, for `curl` and for the app's OkHttp
+alike, means the network location is the problem — put the phone on campus Wi-Fi or the
+school SSL VPN. This workstation reaches the same URL only through its local
+`Meta`/Tailscale tunnel, which is why host-side probes returned `200` all along. Do not
+"fix" this by giving the app a proxy.
+
+### 9.5 Not yet verified
+
+Captcha enforcement at login, login itself, `refresh_token`, GZIC balances, the DXC SSO
+chain and refresh with a live session: the device is attached and the bridge works, but the
+card host refuses the phone's current network location, so no credential-bearing request
+has ever been made. Do not infer otherwise from the passing unit tests; run
+[docs/DEVICE_VERIFICATION.md](DEVICE_VERIFICATION.md) instead.

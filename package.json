@@ -15,9 +15,9 @@
     "check:dom": "node scripts/check-dom.mjs",
     "check:env": "./scripts/check-env.sh",
     "android": "pnpm build && cap sync android",
-    "apk": "cd android && ./gradlew assembleDebug",
-    "native:test": "cd android && ./gradlew testDebugUnitTest",
-    "install:device": "adb install -r android/app/build/outputs/apk/debug/app-debug.apk"
+    "apk": "cd android && ../scripts/with-jdk.sh ./gradlew assembleDebug",
+    "native:test": "cd android && ../scripts/with-jdk.sh ./gradlew testDebugUnitTest",
+    "install:device": "${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools/adb install -r android/app/build/outputs/apk/debug/app-debug.apk"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

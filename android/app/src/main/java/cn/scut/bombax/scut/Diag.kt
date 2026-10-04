@@ -21,7 +21,8 @@ object Diag {
         url: HttpUrl,
         status: Int,
         elapsedMs: Long,
-        serviceCode: String? = null
+        serviceCode: String? = null,
+        blocked: Boolean = false
     ) {
         val builder = StringBuilder()
             .append("stage=").append(stage)
@@ -31,6 +32,9 @@ object Diag {
             .append(" status=").append(status)
             .append(" ms=").append(elapsedMs)
         if (!serviceCode.isNullOrEmpty()) builder.append(" serviceCode=").append(serviceCode)
+        // The school's off-campus block page carries the caller's public IP, so
+        // the only thing recorded about it is that it happened.
+        if (blocked) builder.append(" blocked=campus-network-only")
         Log.i(TAG, builder.toString())
     }
 

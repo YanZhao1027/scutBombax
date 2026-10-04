@@ -37,7 +37,8 @@ const KNOWN_CODES: ScutErrorCode[] = [
   'NO_SESSION',
   'BUSY',
   'INVALID_INPUT',
-  'NETWORK'
+  'NETWORK',
+  'CAMPUS_NETWORK_REQUIRED'
 ];
 
 /**

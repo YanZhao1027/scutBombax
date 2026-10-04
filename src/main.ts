@@ -171,6 +171,14 @@ const query = async (source: 'manual' | 'auto' | 'login'): Promise<TickOutcome> 
         setStatus(els.resultsStatus, '网络暂时不可用，稍后自动重试一次。', 'wait');
         return 'network';
       }
+      if (error.code === 'CAMPUS_NETWORK_REQUIRED') {
+        // The school's edge answers 403 for any off-campus source address. The
+        // wording is the native layer's so the SSL VPN advice stays in one
+        // place; the outcome is still 'network' because the device may move
+        // back onto an allowed network, and the retry stays bounded at one.
+        setStatus(els.resultsStatus, describeError(error), 'error');
+        return 'network';
+      }
       setStatus(els.resultsStatus, describeError(error), 'error');
       return 'error';
     }

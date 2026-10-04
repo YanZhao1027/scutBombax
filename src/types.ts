@@ -11,7 +11,8 @@ export type ScutErrorCode =
   | 'NO_SESSION'
   | 'BUSY'
   | 'INVALID_INPUT'
-  | 'NETWORK';
+  | 'NETWORK'
+  | 'CAMPUS_NETWORK_REQUIRED';
 
 export class BridgeError extends Error {
   constructor(

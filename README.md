@@ -121,12 +121,24 @@ Implemented and green on the host:
   in-memory first — see `docs/ARCHITECTURE.md` for the persistence decision)
 - Foreground-only auto refresh (off / 5 / 10 / 30 min), no Service, no WorkManager, no alarms
 - Redacted logging through `Diag` (`adb logcat -s ScutBombax`)
-- 58 JVM unit tests + 15 vitest refresh tests passing; `assembleDebug` produces
+- 63 JVM unit tests + 15 vitest refresh tests passing; `assembleDebug` produces
   `android/app/build/outputs/apk/debug/app-debug.apk`
 
-**Not verified:** every SCUT network behavior. No Android device has been attached to this
-machine (`adb devices` lists nothing), so captcha enforcement, login, `refresh_token`, GZIC
-balances, the DXC SSO chain and foreground refresh have never run against the school. The
-captcha form field names and the `8002`/`8003` service codes are documented as hypotheses,
-not facts — see `docs/PROTOCOL.md`. Work through `docs/DEVICE_VERIFICATION.md` on a real
-phone before treating any of it as working.
+Verified on a physical phone (Android 14, arm64-v8a) on 2026-10-05:
+
+- the APK installs and starts, `ScutApi` registers, `health()` returns over the bridge, and
+  the Chinese UI renders at 1440×3200 without layout damage
+- a native error reaches the screen intact, i.e. the whole
+  WebView → plugin → Kotlin → OkHttp → classification → rejection path works
+- nothing session-shaped is persisted: the app's own data directory has no session file and
+  no school cookies in the WebView cookie store
+- the school's card host answers `403` for a source address outside campus, over IPv4 and
+  IPv6, for `curl` and for OkHttp alike; the app reports that as `CAMPUS_NETWORK_REQUIRED`
+  rather than as an outage
+
+**Not verified:** every SCUT flow that needs a session. The card host refused the phone's
+network location, so captcha enforcement, login, `refresh_token`, GZIC balances, the DXC SSO
+chain and refresh with a live session have never run against the school. The captcha form
+field names and the `8002`/`8003` service codes are documented as hypotheses, not facts —
+see `docs/PROTOCOL.md`. Put the phone on campus Wi-Fi or the school SSL VPN, then work
+through `docs/DEVICE_VERIFICATION.md` on a real phone before treating any of it as working.

@@ -118,10 +118,16 @@ once in `src/types.ts` (`ScutErrorCode`) and mirrored by `AppError` in `ScutErro
 also carries the wire string and the Chinese `human()` line shown in the UI:
 
 `CAPTCHA_REQUIRED`, `CAPTCHA_INVALID`, `INVALID_CREDENTIALS`, `REAUTH_REQUIRED`,
-`UPSTREAM_UNAVAILABLE`, `PROTOCOL_CHANGED`, `NO_SESSION`, `BUSY`, `INVALID_INPUT`, `NETWORK`
+`UPSTREAM_UNAVAILABLE`, `PROTOCOL_CHANGED`, `NO_SESSION`, `BUSY`, `INVALID_INPUT`,
+`NETWORK`, `CAMPUS_NETWORK_REQUIRED`
 
 Adding a code means updating both lists and the `every error code has its own user-facing
 line` test, so a missing translation fails the build rather than showing a raw enum name.
+
+`CAMPUS_NETWORK_REQUIRED` is the one case `ScutHttp.send` classifies itself: the school's
+edge answers `403` with an HTML page for any source address outside the campus range, and
+that page echoes the caller's public IP, so `NetworkAccess` matches the text, keeps a
+boolean, and drops the body (see `docs/PROTOCOL.md`).
 
 Alongside the code, each rejection carries a redacted `detail` such as `status=400 code=8000`
 or `dxc.getCode/302` — status and service code only, never a body.
@@ -170,9 +176,14 @@ persisted entry as well as the in-memory one.
 JVM unit tests (`android/app/src/test`) cover the parsers and decisions that were written
 against observed payloads: captcha response shape, secure-keyboard mapping, login error /
 service-code classification, token expiry maths, cookie extraction, log-line scrubbing, GZIC
-balance parsing and the DXC redirect resolution (58 tests across seven classes). Vitest
-covers `AutoRefresher` transitions, including backgrounding and the bounded retry
-(15 tests).
+balance parsing, the DXC redirect resolution and the school's off-campus block page
+(63 tests across eight classes). Vitest covers `AutoRefresher` transitions, including
+backgrounding and the bounded retry (15 tests).
+
+`pnpm native:test` and `pnpm apk` wrap Gradle in `scripts/with-jdk.sh`, which locates a JDK
+that has `javac`; this machine's PATH `java` is a JRE and there is no sudo to fix it.
+`pnpm install:device` uses the SDK's `adb`, since the distro package ships an older one that
+does not see modern devices.
 
 Device integration is deliberately not automated: it needs the user's real credentials and
 hits school services, so it stays manual, sparse and rate-limited through

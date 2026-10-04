@@ -1,9 +1,15 @@
 # Device verification checklist
 
-Everything in this file is **NOT_TESTED** until it is executed on a physical Android
-phone with the user's own SCUT credentials. The repository ships a green build and
-58 passing JVM unit tests; those prove the code parses the shapes it has already
-observed, not that a real login works.
+The credential-bearing steps below stay **NOT_TESTED** until they are executed on a
+physical Android phone with the user's own SCUT credentials. The repository ships a
+green build and 63 passing JVM unit tests; those prove the code parses the shapes it
+has already observed, not that a real login works.
+
+What the device has already confirmed (2026-10-05, Android 14 / API 34, arm64-v8a):
+the native↔WebView bridge round trip, the captcha tile's failure path, the redacted
+log format, that nothing session-shaped is persisted, and that the card host refuses
+off-campus source addresses (§0.1). Those are RUNTIME_VERIFIED. Everything that needs
+a logged-in session is still DEVICE_PENDING.
 
 Fill in the recording template at the bottom as you go, and give each line an
 evidence grade (see `docs/PROTOCOL.md`): RUNTIME_VERIFIED / SOURCE_VERIFIED /
@@ -33,6 +39,43 @@ adb logcat -c && adb logcat -s ScutBombax:V *:S | tee /tmp/scutbombax.log
 captcha answer, a token or a cookie **value** — only hosts, paths, methods, statuses,
 elapsed milliseconds, service codes and presence flags. Do not paste this log into a
 public issue if it contains a real student number that the user typed into the UI.
+
+### 0.1 Network prerequisite (check this before anything else)
+
+The card host only answers requests whose **source address** is inside the campus
+address space. From a phone whose Wi-Fi egresses on a carrier address, every path on
+`ecardwxnew.scut.edu.cn` returns the school's HTML block page and §1–§8 cannot start.
+
+```bash
+ADB="$ANDROID_HOME/platform-tools/adb"      # the SDK adb, not the distro one
+$ADB shell curl -sS -o /dev/null -m 12 \
+  -w 'HTTP=%{http_code} remote=%{remote_ip} tls=%{ssl_verify_result}\n' \
+  'https://ecardwxnew.scut.edu.cn/berserker-auth/oauth/captcha?synAccessSource=h5'
+```
+
+`/system/bin/curl` is present on the tested Android 14 build, which makes this a
+one-line check that does not depend on the app at all.
+
+| Output | Meaning | Next step |
+| --- | --- | --- |
+| `HTTP=200` | this network location is allowed | continue with §1 |
+| `HTTP=403` | refused by source address | join campus Wi-Fi, or connect the school's SSL VPN client on the phone, then re-run this check |
+
+A 403 here is not an app defect: the app reports `CAMPUS_NETWORK_REQUIRED` for it and
+the upstream page states its own remedy (校外可通过学校SSLVPN访问本网站). Do not route
+the phone through a proxy or tunnel to defeat that check — AGENTS.md forbids adding
+proxies and bypass mechanisms, and the school's sanctioned off-campus route is its own
+VPN.
+
+Log line and on-screen text produced by this case, both observed on the device:
+
+```text
+stage=captcha method=GET host=ecardwxnew.scut.edu.cn path=/berserker-auth/oauth/captcha status=403 ms=797 blocked=campus-network-only
+验证码加载失败：CAMPUS_NETWORK_REQUIRED [captcha/403]: 当前网络无法访问一卡通服务，请连接校园网或使用学校 SSLVPN 后重试
+```
+
+Record which network the phone ended up using, because every RUNTIME_VERIFIED row
+below inherits from it.
 
 ## 1. Captcha display
 
