@@ -97,7 +97,8 @@ password. `docs/DEVICE_VERIFICATION.md` §2 keeps the step that closes it.
    bundles and `GET /berserker-app/frontInfo` are readable without credentials from any
    network, so field names, login types and captcha codes can be settled without guessing.
    The copies used for this are archived outside the repository under `evidence/client/`
-   (third-party minified code is deliberately not vendored into the repo).
+   (third-party minified code is deliberately not vendored into the repo), with checksums
+   listed in [`EVIDENCE_INDEX.md`](EVIDENCE_INDEX.md).
 
 ## To close the remaining phases
 

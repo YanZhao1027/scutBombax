@@ -85,6 +85,8 @@ Read:
 5. [docs/DEVICE_VERIFICATION.md](docs/DEVICE_VERIFICATION.md)
 6. [docs/HANDOFF.md](docs/HANDOFF.md) — status report for 2026-10-05, including what is
    and is not verified
+7. [docs/EVIDENCE_INDEX.md](docs/EVIDENCE_INDEX.md) — checksums for the device captures and
+   the school's own client bundles that the `SOURCE_VERIFIED` claims were read from
 
 Environment sanity check:
 
