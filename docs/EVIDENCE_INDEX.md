@@ -18,33 +18,60 @@ Re-check the archive:
 cd /home/zyubuntu/scutbombax/evidence && sha256sum -c sha256-2026-10-05T0208.txt
 ```
 
-## Offline git backup
+## Pushing from this workstation, and the offline backup
 
-`origin` is an HTTPS URL and this workstation has no GitHub write credential for it, so the
-commits below `origin/main` exist only here. Until they are pushed, a full-history bundle
-stands in for the remote:
+`origin` is an HTTPS URL and no HTTPS credential is stored on this machine (no credential
+helper, no `gh`), so pushes go over SSH to the explicit remote URL — which leaves the
+configured `origin` untouched:
+
+```bash
+cd /home/zyubuntu/scutbombax/scutBombax
+GIT_SSH_COMMAND='ssh -F /dev/null -o IdentityAgent=none -o IdentitiesOnly=yes \
+  -o StrictHostKeyChecking=accept-new -i ~/.ssh/scutbombax_deploy' \
+  git push git@github.com:YanZhao1027/scutBombax.git main:main
+```
+
+`~/.ssh/scutbombax_deploy` is a repository-scoped deploy key (`ubuntu24-scutbombax`,
+`SHA256:/3v/j/kclFOKuagXkyOACRyTEFlrCsIHfU6WoPRMUC8`) with read/write on this project only.
+It is deliberately not this machine's account key, and it is revocable on its own.
+
+The `-F /dev/null -o IdentityAgent=none` part is not decoration. `~/.ssh/config` binds
+`github.com` to `~/.ssh/github_nix_builder` with `IdentitiesOnly yes`, and ssh offers **that**
+key even when `-i` names another one — GitHub then answers
 
 ```text
-scutBombax-main-full.bundle   as of commit 35c2a05; sha256 8452867c610f2c1eb0a0059018ed85276e100e8d458c666a4f357908a5707ee8
-                              verified with: git bundle verify ../evidence/scutBombax-main-full.bundle
+ERROR: The key you are authenticating with has been marked as read only.
+```
+
+which reads like a permission problem on this repository but is really the other repository's
+read-only deploy key being accepted. `ssh -T git@github.com` gives it away: the greeting names
+the repo the key belongs to. Expect `Hi YanZhao1027/scutBombax!`; anything else means the
+wrong key was offered.
+
+As a second line of defence against local loss, a full-history bundle is kept next to the
+evidence:
+
+```text
+scutBombax-main-full.bundle   regenerate after any commit worth keeping; verify with
+                              git bundle verify ../evidence/scutBombax-main-full.bundle
                               ("The bundle records a complete history")
 ```
 
 A bundle cannot record its own creation, so its checksum is only meaningful until the next
-commit. Read the actual head instead of trusting the number above:
+commit. Read the actual head instead of trusting a number copied from here:
 
 ```bash
 git bundle list-heads ../evidence/scutBombax-main-full.bundle
 ```
 
-Restore or push from it without this machine:
+Restore or push from it on another machine:
 
 ```bash
 git clone scutBombax-main-full.bundle scutBombax        # a complete repository
-git push git@github.com:YanZhao1027/scutBombax.git main:main   # from inside the clone
+cd scutBombax && git push git@github.com:YanZhao1027/scutBombax.git main:main
 ```
 
-Regenerate it after any commit worth keeping:
+Refresh it with:
 
 ```bash
 cd /home/zyubuntu/scutbombax/scutBombax && git bundle create ../evidence/scutBombax-main-full.bundle --branches --tags
