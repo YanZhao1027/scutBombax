@@ -18,6 +18,38 @@ Re-check the archive:
 cd /home/zyubuntu/scutbombax/evidence && sha256sum -c sha256-2026-10-05T0208.txt
 ```
 
+## Offline git backup
+
+`origin` is an HTTPS URL and this workstation has no GitHub write credential for it, so the
+commits below `origin/main` exist only here. Until they are pushed, a full-history bundle
+stands in for the remote:
+
+```text
+scutBombax-main-full.bundle   as of commit 35c2a05; sha256 8452867c610f2c1eb0a0059018ed85276e100e8d458c666a4f357908a5707ee8
+                              verified with: git bundle verify ../evidence/scutBombax-main-full.bundle
+                              ("The bundle records a complete history")
+```
+
+A bundle cannot record its own creation, so its checksum is only meaningful until the next
+commit. Read the actual head instead of trusting the number above:
+
+```bash
+git bundle list-heads ../evidence/scutBombax-main-full.bundle
+```
+
+Restore or push from it without this machine:
+
+```bash
+git clone scutBombax-main-full.bundle scutBombax        # a complete repository
+git push git@github.com:YanZhao1027/scutBombax.git main:main   # from inside the clone
+```
+
+Regenerate it after any commit worth keeping:
+
+```bash
+cd /home/zyubuntu/scutbombax/scutBombax && git bundle create ../evidence/scutBombax-main-full.bundle --branches --tags
+```
+
 ## 2026-10-05
 
 | SHA256 | Artifact | What it establishes |
