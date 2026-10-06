@@ -30,15 +30,15 @@ DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 | card host answers `403` for any off-campus source address | RUNTIME_VERIFIED 2026-10-05 (physical device, both address families) | no |
 | `code=8002` = the captcha was rejected, and it is evaluated before the credential check | RUNTIME_VERIFIED 2026-10-06 (device, stale captcha + otherwise valid request) | whether `8003` also appears |
 | SCUT login types: `card` / `sno` (both `encryption:"keyboard"`, `openCaptcha:"1"`), `sso` | SOURCE_VERIFIED 2026-10-05 (`frontInfo`, credential-free) | no |
-| which login type the user's account belongs to | reported by the user 2026-10-06: the control login on `/plat-h5/` used 学工号登录 (`sno`), while the app had been sending `card` | the login itself |
-| password submitted as `<row-substituted characters>$1$<keyboard uuid>` | SOURCE_VERIFIED 2026-10-06 (official component + the server's own tile images) | accepted by the server on a real login |
+| which login type the user's account belongs to | **RUNTIME_VERIFIED 2026-10-06**: `logintype=sno` (学工号登录) logged in; `card` never did | whether any account needs `card` |
+| password submitted as `<row-substituted characters>$1$<keyboard uuid>` | **RUNTIME_VERIFIED 2026-10-06** — a login with it returned HTTP 200 and a session | no |
 | token field spelling `loginFrom` (not `loginForm`) | SOURCE_VERIFIED 2026-10-05 | no |
 | `captcha_header_code` / `captcha_header_key` | SOURCE_VERIFIED 2026-10-05, and a fresh captcha pair was accepted by the server on 2026-10-06 (the answer moved to `8000`, past the captcha stage) | no |
 | service codes `8002` / `8003` as captcha signals | `8002` RUNTIME_VERIFIED 2026-10-06; `8003` SOURCE_VERIFIED | `8003` |
-| successful login, `expires_in` unit, `refresh_token` presence | SOURCE_VERIFIED | DEVICE_PENDING |
+| successful login and `refresh_token` presence | **RUNTIME_VERIFIED 2026-10-06** — `stage=login.captchaForm status=200`, `result=ok campus=DXC refreshToken=present cookies=TGC,error_times,locSession` | `expires_in` unit (guarded by `ExpiryParser`) |
 | `grant_type=refresh_token` support and rotation | HYPOTHESIS | DEVICE_PENDING |
 | GZIC fee item 1/2/3 semantics and units | SOURCE_VERIFIED | DEVICE_PENDING |
-| DXC redirect chain hop-by-hop requirements | SOURCE_VERIFIED | DEVICE_PENDING |
+| DXC redirect chain hop-by-hop requirements | **RUNTIME_VERIFIED 2026-10-06** — `redirect 302 → thirdLogin 302 (JSESSIONID issued) → authorize 302 → getCode 302 → userinfo/ammeterBalance/waterBalance 200` | whether `error_times` or any cookie is load-bearing beyond what worked |
 
 The only token request sent from the host was an empty-credential control probe; every
 credentialed request was made by the user on the phone.
@@ -338,6 +338,35 @@ The successful shape is also what the official client reads: `token_type`, `acce
 and the store dispatch on login success. `refresh_token` is not visible in the bundle's
 login path, so whether SCUT issues one for this grant remains UNKNOWN until a real login
 returns it.
+
+### First successful login (RUNTIME_VERIFIED 2026-10-06)
+
+With `logintype=sno` and the row-substituted password, one request from the phone closed the
+whole chain:
+
+```text
+stage=keyboard           GET  /berserker-secure/keyboard      200
+stage=login.captchaForm  POST /berserker-auth/oauth/token     200   (260 ms)
+stage=login.captchaForm  result=ok campus=DXC refreshToken=present cookies=TGC,error_times,locSession
+```
+
+so the token response does carry `access_token`, `expires_in`, `token_type` and a
+**`refresh_token`**, and the card host sets `TGC`, `locSession` and — new to this project's
+notes — **`error_times`**. That last cookie is the school's own failed-attempt counter, which
+is the concrete reason this repository caps live login attempts: eleven `code=8000` responses
+were recorded against one account before the two client-side bugs were found.
+
+The same session then completed the DXC chain without any client change beyond login:
+
+```text
+dxc.redirect 302 → dxc.thirdLogin 302 (JSESSIONID issued) → dxc.authorize 302
+  → dxc.getCode 302 (session-established)
+  → dxc.userInfo 200 → dxc.ammeterBalance 200 → dxc.waterBalance 200
+stage=dxc result=ok room=present electric=true water=true ac=none
+```
+
+`ac=none` is a real shape, not a failure: this dormitory has no air-conditioning fee item, and
+the UI says 该校区无空调费数据 rather than showing a zero.
 
 ### Login failures (RUNTIME_VERIFIED 2026-10-05)
 

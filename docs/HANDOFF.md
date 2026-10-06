@@ -2,11 +2,15 @@
 
 Scope of this report: what `AGENTS.md` asked for, what exists now, and what has **not**
 been verified. The app is implemented, builds cleanly, installs and runs on a physical
-phone. Two blockers have been cleared in sequence — the missing device, then the network
-location (the school's card host refuses off-campus source addresses; the phone now sits on
-the campus wireless network and reaches it). What still stands between this build and a
-verified session is the **password encoding**, which was found and fixed on 2026-10-05 by
-reading SCUT's own published client; the corrected build has not yet been used to log in.
+phone, and **login now works**: on 2026-10-06 23:50 a DXC session was established and the
+whole DXC balance chain ran end to end on the phone. What it took was clearing three blockers
+in sequence — no device, then the network location (the card host refuses off-campus source
+addresses), then two independent client bugs found by reading SCUT's own published client and
+its served keyboard images: the secure-keyboard encoding is a per-session substitution table,
+and the account belongs to 学工号登录 (`sno`), not the hardcoded `card`.
+
+Remaining: `grant_type=refresh_token` acceptance, a GZIC dormitory, and the foreground-refresh
+rules with a live session.
 
 ## AGENTS.md handoff items
 
@@ -20,10 +24,10 @@ reading SCUT's own published client; the corrected build has not yet been used t
 | captcha behavior | endpoint + `{key, image}` shape confirmed on the device (HTTP 200, 32-hex key, `data:image/png;base64,` prefix, a new `key` on every reload). `frontInfo` sets `openCaptcha:"1"` for the `card` login, so a captcha belongs on every attempt, which the app does. **Enforcement is now observed:** a stale captcha answered `code=8002`, a freshly fetched one was accepted and the answer moved to `code=8000` — so the captcha is evaluated before the credential pair whenever the captcha fields are present | RUNTIME_VERIFIED 2026-10-06 |
 | network location | `ecardwxnew.scut.edu.cn` answers `403` + "校外可通过学校SSLVPN访问本网站" for an off-campus source address, over IPv4 and IPv6, for `curl` and for OkHttp alike, while `dfyc.utc.scut.edu.cn` answers `200` on the same connection. The phone was then moved onto the campus wireless network and every card-host request in the second session returned 200/400, never 403 | RUNTIME_VERIFIED |
 | exact verified captcha request field names | `captcha_header_code` / `captcha_header_key` — **accepted by the school.** They are copied from SCUT's own login chunk, and on 2026-10-06 a freshly loaded captcha paired with those names moved the answer from `8002` to `8000`, i.e. past the captcha stage | RUNTIME_VERIFIED 2026-10-06 |
-| login result | **still failing.** Eleven attempts across two days answered `code=8000 用户名或密码错误`. Two encodings have been tried and both were wrong: digits-only substitution (2026-10-05) and submitting the characters verbatim (2026-10-05/06). The endpoint's real contract, established 2026-10-06 by decoding the server's own tile images, is a per-session substitution over fixed layouts — digits `0-9`, letters in QWERTY order, a 29-glyph symbol row — so every character must be mapped through its own row before `"$1$" + uuid`. That is implemented but **not yet attempted**, because the account has already absorbed eleven rejections. **A second, independent cause was found the same evening:** the app hardcoded `logintype=card`, while the user's control login on `/plat-h5/` was made under **学工号登录 (`sno`)** — a valid password presented in the wrong account namespace is also answered `code=8000`. The login screen now asks for the type (default 学工号登录), the bridge refuses an unknown value rather than guessing, and a refresh replays the type that obtained the token. Build `35c80c04f15f22d73d2c9d00ae08a1d4054f10261fc8cc8b3ec173be2151fbbf` carries both fixes and is installed (assets and dex verified by unpacking); one attempt is pending the user's go-ahead | RUNTIME_VERIFIED (rejection path, ordering, field names) / NOT_TESTED (success) |
-| refresh_token result | unverified. `grant_type=refresh_token` is implemented standards-style and fails closed to `REAUTH_REQUIRED`; whether SCUT issues a refresh token at all is unknown | NOT_TESTED |
+| login result | **succeeded on 2026-10-06 23:50** after two independent client fixes: the keyboard row substitution and `logintype=sno`. `stage=login.captchaForm POST /berserker-auth/oauth/token status=200 ms=260` then `result=ok campus=DXC refreshToken=present cookies=TGC,error_times,locSession`. The eleven earlier `code=8000` answers were the school rejecting a valid password presented in the wrong account namespace, encoded with a transform it does not use | RUNTIME_VERIFIED 2026-10-06 |
+| refresh_token result | a refresh token **is issued at login** (RUNTIME_VERIFIED 2026-10-06, `refreshToken=present`). Whether `grant_type=refresh_token` is accepted at `/oauth/token`, whether it rotates, and what `expires_in` is really in — all still open; the 会话与诊断 → 刷新 token button exercises it in one tap | PARTLY RUNTIME_VERIFIED (issued) / NOT_TESTED (accepted) |
 | GZIC result | unverified. Requests, header (`Synjones-Auth: bearer …`) and the `code/msg/map` parser are written and unit-tested against the old implementation's shapes. The card host is the one GZIC needs, so this is the blocked path | NOT_TESTED |
-| DXC result | unverified. Manual redirect chain implemented (`redirect → thirdLogin → authorize → getCode → userinfo/ammeterBalance/waterBalance`). `dfyc` itself is reachable from the phone, but the chain starts on the card host | NOT_TESTED |
+| DXC result | **verified end to end on the same session**: `redirect 302 → thirdLogin 302 (JSESSIONID issued) → authorize 302 → getCode 302 session-established → userinfo 200 → ammeterBalance 200 → waterBalance 200`, then `stage=dxc result=ok room=present electric=true water=true ac=none`. `ac=none` is a real shape: this dormitory has no air-conditioning fee item and the UI says 该校区无空调费数据 rather than showing 0 | RUNTIME_VERIFIED 2026-10-06 |
 | foreground refresh result | `@capacitor/app` `isActive` events were observed on the device (`{"isActive":true}` in the bridge log), but the timer semantics are verified only by 15 vitest state-machine cases; no logged-in refresh has run | NOT_TESTED (with a session) |
 | remaining protocol uncertainty | see below | — |
 

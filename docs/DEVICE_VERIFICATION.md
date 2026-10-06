@@ -504,3 +504,35 @@ photographed — the device is on its lock screen and unlocking it is the user's
 
 **Next, in this order:** one attempt with 学工号登录 selected and a freshly loaded captcha.
 Nothing else. If it answers `8000`, stop and re-open §2.1 from step 1 rather than trying again.
+
+### 2026-10-06, 23:50 — login succeeded, and the DXC chain came with it
+
+One attempt, after both fixes (row substitution + `logintype=sno`) and a captcha refreshed
+seconds before submitting:
+
+```text
+23:50:24.888  stage=keyboard 200
+23:50:25.153  stage=login.captchaForm POST /berserker-auth/oauth/token status=200 ms=260
+23:50:25.159  stage=login.captchaForm result=ok campus=DXC refreshToken=present
+              cookies=TGC,error_times,locSession
+23:50:25.2xx  dxc.redirect 302 → dxc.thirdLogin 302 (jsessionid=obtained) → dxc.authorize 302
+              → dxc.getCode 302 (result=session-established)
+              → dxc.userInfo 200 → dxc.ammeterBalance 200 → dxc.waterBalance 200
+23:50:25.679  stage=dxc result=ok room=present electric=true water=true ac=none
+```
+
+Screen: room rendered, 电费 and 水费 cards populated, 空调 card says 该校区无空调费数据,
+最后更新 timestamp shown, 登录成功. (The screenshot is kept in `evidence/` only — it carries
+the room identifier and must not be committed.)
+
+Grades this closes: §4 successful login = RUNTIME_VERIFIED; §7 DXC chain = RUNTIME_VERIFIED
+end to end for a DXC dormitory; `refresh_token` is issued at login = RUNTIME_VERIFIED (its
+acceptance at `/oauth/token` is §5, still open); captcha field names = RUNTIME_VERIFIED.
+
+New fact worth keeping: the card host sets an **`error_times`** cookie, i.e. it counts failed
+attempts per session/account. That is the documented reason §2.1 caps live attempts at two —
+and, in hindsight, the eleven `code=8000` responses were the counter climbing.
+
+Still open: §5 `grant_type=refresh_token` (next: the 刷新 token button in 会话与诊断),
+§6 GZIC (this account is a DXC dormitory; a GZIC query needs a GZIC room), §8 foreground
+refresh with a live session, and whether the displayed numbers match the school's own page.

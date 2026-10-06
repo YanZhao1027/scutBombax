@@ -137,23 +137,26 @@ Verified on a physical phone (Android 14, arm64-v8a) on 2026-10-05 and 2026-10-0
 - the school's card host answers `403` for a source address outside campus, over IPv4 and
   IPv6, for `curl` and for OkHttp alike; the app reports that as `CAMPUS_NETWORK_REQUIRED`
   rather than as an outage. On the campus network the same requests reach the application
-  layer: captcha `200`, secure keyboard `200`, token `400`
+  layer: captcha `200`, secure keyboard `200`, and — once the two bugs below were fixed — token `200`
 - the captcha path works end to end: a stale captcha answers `code=8002` and a freshly loaded
   one is accepted, which also settles the order — the school checks the captcha first, then
   the credential pair
-- login still does **not** succeed. Credentialed attempts answer `code=8000`, and the
-  secure-keyboard encoding turned out to be harder than it looked: the endpoint returns a
-  per-session **substitution table** over fixed tile layouts (digits `0-9`, letters in QWERTY
-  order, a 29-glyph symbol row), so the submitted password is neither the raw characters
-  (2026-10-05, wrong) nor a digits-only substitution (2026-10-05 and earlier, also wrong) but
-  every character mapped through its own row plus `"$1$" + uuid`. Implemented and pinned by
-  tests on 2026-10-06. A second, independent cause came with it: the app hardcoded
-  `logintype=card`, while the account logs in on the official page under **学工号登录 (`sno`)** —
-  the school answers a wrong namespace with the same `code=8000` as a wrong password. The login
-  screen now asks which type to use (default 学工号登录) and the bridge refuses an unknown value.
+- login took two client fixes before it worked, because the school answers every credential
+  problem with the same `code=8000`: the secure keyboard is a **per-session substitution
+  table** over fixed tile layouts (digits `0-9`, letters in QWERTY order, a 29-glyph symbol
+  row), so the submitted password is each character mapped through its own row plus
+  `"$1$" + uuid` — neither the raw characters nor a digits-only mapping is accepted; and the
+  account belongs to 学工号登录 (`logintype=sno`), while the app had hardcoded `card`. The
+  login screen now asks for the type, and the bridge refuses an unknown value rather than
+  guessing.
 
-**Not verified:** every SCUT flow that needs a session. Login, `refresh_token`, GZIC balances,
-the DXC SSO chain and refresh with a live session have never completed against the school.
+**Verified on 2026-10-06:** login (HTTP 200, `result=ok`, a refresh token issued) and the
+complete DXC chain — `redirect → thirdLogin → authorize → getCode → userinfo / ammeterBalance /
+waterBalance` — with the room and both balances rendered on screen and the air-conditioning
+card correctly reporting that the campus has no such fee item.
+
+**Not verified:** `grant_type=refresh_token` acceptance, GZIC balances (this account's
+dormitory is DXC), and the foreground-refresh rules with a live session.
 Keep the phone on campus Wi-Fi or the school SSL VPN, use the **card query password**
 (校园卡查询密码, letters and digits, not the 6-digit payment PIN), stop after two `8000`
 attempts, and work through `docs/DEVICE_VERIFICATION.md` §2.1 before trying a third.
