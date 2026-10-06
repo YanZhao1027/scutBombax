@@ -595,3 +595,32 @@ and, in hindsight, the eleven `code=8000` responses were the counter climbing.
 Still open: §5 `grant_type=refresh_token` (next: the 刷新 token button in 会话与诊断),
 §6 GZIC (this account is a DXC dormitory; a GZIC query needs a GZIC room), §8 foreground
 refresh with a live session, and whether the displayed numbers match the school's own page.
+
+### §9 / §10 re-audited 2026-10-07 01:05 — with a real session live
+
+The earlier audits ran when no session had ever existed, which made them weaker than they
+looked. This one ran while the app held a logged-in DXC session (access token, refresh token,
+`TGC`, `locSession`, a DFYC `JSESSIONID` and the school's `error_times` all live in memory):
+
+```text
+run-as cn.scut.bombax ls -laR          → app_textures, app_webview, cache, code_cache, files,
+                                        shared_prefs only
+shared_prefs                           → AwOriginVisitLoggerPrefs.xml (mtime today),
+                                        CapWebViewSettings.xml, WebViewChromiumPrefs.xml
+app_webview/Default/Cookies            → mtime still 2026-10-05 01:16, i.e. never written since
+                                        install, and 0 rows in the cookies table
+grep -ril "TGC|locSession|JSESSIONID|access_token|berserker|scut"
+     shared_prefs, Local Storage, Session Storage, files   → no matches
+```
+
+And over the whole 94-line session log (`evidence/logcat-2026-10-07T0101-dxc-reuse-verified.txt`),
+covering captcha, keyboard, login, the DXC chain, its reuse and the failed refresh grant:
+
+```text
+TGC=<value>  locSession=<value>  JSESSIONID=<value>  synjones-auth=<value>
+access_token  Bearer <token>  refresh_token=<value>  password=  → 0 hits each
+any 11+ digit run (student number)  any 32-hex string  any IPv4  device serial  → 0 hits each
+```
+
+So "session state is memory-only, and the password is never persisted" is now verified against a
+live session rather than argued from the code. §9 and §10 are closed.
