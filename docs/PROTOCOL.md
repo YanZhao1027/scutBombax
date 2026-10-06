@@ -29,7 +29,8 @@ DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 | OAuth error envelope and `code=8000` = credential failure | RUNTIME_VERIFIED 2026-10-05 (empty-credential probe) | no |
 | card host answers `403` for any off-campus source address | RUNTIME_VERIFIED 2026-10-05 (physical device, both address families) | no |
 | `code=8002` = the captcha was rejected, and it is evaluated before the credential check | RUNTIME_VERIFIED 2026-10-06 (device, stale captcha + otherwise valid request) | whether `8003` also appears |
-| SCUT login types: `card` / `sno` (both `encryption:"keyboard"`, `openCaptcha:"1"`), `sso` | SOURCE_VERIFIED 2026-10-05 (`frontInfo`, credential-free) | which one the user's account belongs to |
+| SCUT login types: `card` / `sno` (both `encryption:"keyboard"`, `openCaptcha:"1"`), `sso` | SOURCE_VERIFIED 2026-10-05 (`frontInfo`, credential-free) | no |
+| which login type the user's account belongs to | reported by the user 2026-10-06: the control login on `/plat-h5/` used 学工号登录 (`sno`), while the app had been sending `card` | the login itself |
 | password submitted as `<row-substituted characters>$1$<keyboard uuid>` | SOURCE_VERIFIED 2026-10-06 (official component + the server's own tile images) | accepted by the server on a real login |
 | token field spelling `loginFrom` (not `loginForm`) | SOURCE_VERIFIED 2026-10-05 | no |
 | `captcha_header_code` / `captcha_header_key` | SOURCE_VERIFIED 2026-10-05, and a fresh captcha pair was accepted by the server on 2026-10-06 (the answer moved to `8000`, past the captcha stage) | no |
@@ -149,8 +150,10 @@ passwordRule = a/num/#/leng_8
 
 Consequences, each traceable to that chunk:
 
-1. **The card login is `logintype=card` with `encryption=keyboard` and a captcha from the
-   start** (`openCaptcha:"1"`), which is what this app already sends.
+1. **Both password logins use `encryption=keyboard` and show a captcha from the start**
+   (`openCaptcha:"1"`), and the account type is part of the credential: `card` for a campus-card
+   account, `sno` for a student/staff number. The app asks which one, and sends the answer on
+   login and on every refresh.
 2. **The submitted password is a substitution of it** — see the keyboard section below. (A
    first reading of the component said "the password itself"; the server's own tile images
    show that is wrong.)
@@ -289,11 +292,12 @@ The password-grant body this app sends, field for field as the official client b
 
 ```text
 username
-password=<the chosen characters> + "$1$" + <keyboard uuid>
+password=<each character substituted through its keyboard row> + "$1$" + <keyboard uuid>
 grant_type=password
 scope=all
 loginFrom=h5
-logintype=card
+logintype=card            (账号登录, a campus-card account)
+logintype=sno             (学工号登录, a student/staff number)
 device_token=h5
 synAccessSource=h5
 captcha_header_code=<typed>        captcha_header_key=<key>   (when a captcha is shown)
@@ -301,6 +305,14 @@ captcha_header_code=<typed>        captcha_header_key=<key>   (when a captcha is
 
 Note `loginFrom`. The old `cf-web` worker sent `loginForm`, and this repository copied that
 spelling until 2026-10-05; the client bundle contains `loginForm` 0 times.
+
+`logintype` is not a detail to guess at. `card` and `sno` are separate account namespaces, the
+school answers the wrong pairing with `code=8000` — byte for byte the same response as a wrong
+password — and `frontInfo` publishes both for SCUT. This app therefore asks the user, with
+**学工号登录 (`sno`) as the default** because that is the tab the verified control login on
+`/plat-h5/` succeeded under (reported by the user 2026-10-06); the native layer rejects a
+missing or unknown value instead of falling back, and a refresh replays the type that obtained
+the token.
 
 Successful responses have included:
 

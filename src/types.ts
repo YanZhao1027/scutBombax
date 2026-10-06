@@ -1,5 +1,13 @@
 export type Campus = 'GZIC' | 'DXC';
 
+/**
+ * Which of the school's card login types the account belongs to, as `frontInfo` names them:
+ * `card` = 账号登录 (a campus-card account), `sno` = 学工号登录 (a student/staff number).
+ * Sending the wrong one is answered `code=8000`, i.e. indistinguishable from a wrong
+ * password, so it is an explicit user choice rather than a guess.
+ */
+export type LoginType = 'card' | 'sno';
+
 /** Stable app-level errors. Raw upstream text never crosses the bridge. */
 export type ScutErrorCode =
   | 'CAPTCHA_REQUIRED'
@@ -65,6 +73,8 @@ export interface LoginInput {
   username: string;
   password: string;
   campus: Campus;
+  /** Omitted by older callers; the native layer rejects an unknown value. */
+  loginType?: LoginType;
   captchaKey?: string;
   captchaCode?: string;
 }

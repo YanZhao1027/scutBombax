@@ -5,6 +5,7 @@ import cn.scut.bombax.scut.auth.AuthRepository
 import cn.scut.bombax.scut.auth.CaptchaService
 import cn.scut.bombax.scut.auth.Campus
 import cn.scut.bombax.scut.auth.LoginInput
+import cn.scut.bombax.scut.auth.LoginType
 import cn.scut.bombax.scut.auth.SecureKeyboardService
 import cn.scut.bombax.scut.auth.TokenState
 import cn.scut.bombax.scut.billing.BalanceReading
@@ -117,9 +118,19 @@ class ScutApiPlugin : Plugin() {
         val campus = Campus.from(call.getString("campus"))
         val captchaKey = call.getString("captchaKey")
         val captchaCode = call.getString("captchaCode")
+        // No default: `card` and `sno` are different account namespaces and picking the wrong
+        // one looks exactly like a wrong password, so a missing or unknown value is refused.
+        val loginType = LoginType.from(call.getString("loginType"))
         submit(call) {
+            if (loginType == null) {
+                throw ScutException(
+                    AppError.INVALID_INPUT,
+                    "请选择登录方式（学工号登录或账号登录）",
+                    "login/loginType"
+                )
+            }
             val state = auth().login(
-                LoginInput(username, password, campus, captchaKey, captchaCode)
+                LoginInput(username, password, campus, loginType, captchaKey, captchaCode)
             )
             session.save(state)
             sessionJson(session.public(System.currentTimeMillis()))

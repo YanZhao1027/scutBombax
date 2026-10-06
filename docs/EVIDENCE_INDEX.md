@@ -82,6 +82,7 @@ cd /home/zyubuntu/scutbombax/scutBombax && git bundle create ../evidence/scutBom
 | SHA256 | Artifact | What it establishes |
 | --- | --- | --- |
 | `c6255c80d06207ce0f04a7844e8364cad09da7cba776677dbc93835f94f424a5` | `app-debug-2026-10-06T2303-substitution.apk` (4,781,497 B) | the clean build with the full four-row keyboard substitution; installed, not yet exercised |
+| `35c80c04f15f22d73d2c9d00ae08a1d4054f10261fc8cc8b3ec173be2151fbbf` | `app-debug-2026-10-06T2330-logintype.apk` (4,799,939 B) | the build now installed: keyboard substitution **and** the selectable `logintype` (`card` / `sno`, default 学工号登录). Assets and dex verified by unpacking; no login attempted with it |
 | `b66d92a0318bed1febafb2b16f84f142e764993c232095ee77ef22014df7b858` | `logcat-2026-10-06T2238-bombax-attempt.txt` | the three attempts: stale captcha → `8002`, fresh captcha → `8000`, i.e. captcha is evaluated before the credential pair |
 | `e5fd5e1204857c1325f4a7a4f5c6e6483755624c566ccb2cf6b1d572f5b1a42c` | `kb-tiles-number-2026-10-06.png` | the ten digit tiles, rendered from a credential-free `GET /berserker-secure/keyboard`, in the order `0 1 … 9` |
 | `f49c27895a57ef43ecd2ef22ad525df8a380227a2b26b8af449e46169915453c` | `kb-tiles-lower-2026-10-06.png` | the lowercase row in **QWERTY** tile order, not alphabetical |

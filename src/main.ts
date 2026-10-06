@@ -1,7 +1,7 @@
 import { App } from '@capacitor/app';
 import * as api from './bridge';
 import { AutoRefresher, type TickOutcome } from './refresh';
-import { isBridgeError, type Bills, type Campus, type SessionInfo } from './types';
+import { isBridgeError, type Bills, type Campus, type LoginType, type SessionInfo } from './types';
 import './styles.css';
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -12,6 +12,7 @@ const $ = <T extends HTMLElement>(id: string): T => {
 
 const els = {
   campus: $<HTMLSelectElement>('campus'),
+  loginType: $<HTMLSelectElement>('login-type'),
   username: $<HTMLInputElement>('username'),
   password: $<HTMLInputElement>('password'),
   captchaCode: $<HTMLInputElement>('captcha-code'),
@@ -75,6 +76,10 @@ const describeError = (error: unknown): string => {
 };
 
 const campus = (): Campus => (els.campus.value === 'DXC' ? 'DXC' : 'GZIC');
+
+/** The picker only offers the two types `frontInfo` declares; anything else is a bug, so it
+ *  is sent as-is and the native layer refuses it rather than guessing. */
+const loginType = (): LoginType => els.loginType.value as LoginType;
 
 const renderSession = (session: SessionInfo | null): void => {
   state.session = session;
@@ -235,6 +240,7 @@ const submitLogin = async (): Promise<void> => {
       username,
       password,
       campus: campus(),
+      loginType: loginType(),
       captchaKey: state.captchaKey || undefined,
       captchaCode: captchaCode || undefined
     });

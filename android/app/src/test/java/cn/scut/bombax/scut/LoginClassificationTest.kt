@@ -153,7 +153,8 @@ class TokenStateTest {
             locSession = "L",
             previousRefreshToken = "",
             now = now,
-            hadCaptcha = true
+            hadCaptcha = true,
+            loginType = cn.scut.bombax.scut.auth.LoginType.SNO
         )
         assertEquals("A", state.accessToken)
         assertEquals("R", state.refreshToken)
@@ -161,6 +162,7 @@ class TokenStateTest {
         assertEquals("T", state.tgc)
         assertEquals("L", state.locSession)
         assertEquals("张三", state.name)
+        assertEquals(cn.scut.bombax.scut.auth.LoginType.SNO, state.loginType)
     }
 
     @Test
@@ -174,7 +176,8 @@ class TokenStateTest {
             locSession = "",
             previousRefreshToken = "R-old",
             now = now,
-            hadCaptcha = false
+            hadCaptcha = false,
+            loginType = cn.scut.bombax.scut.auth.LoginType.CARD
         )
         assertEquals("R-old", state.refreshToken)
     }
@@ -182,7 +185,8 @@ class TokenStateTest {
     @Test(expected = ScutException::class)
     fun `a token response without expires_in is a protocol change`() {
         val json = JSONObject("""{"access_token":"A"}""")
-        TokenParser.parse(json, 200, cn.scut.bombax.scut.auth.Campus.GZIC, "", "", "", now, false)
+        TokenParser.parse(json, 200, cn.scut.bombax.scut.auth.Campus.GZIC, "", "", "", now, false,
+            cn.scut.bombax.scut.auth.LoginType.CARD)
     }
 
     @Test
@@ -190,7 +194,8 @@ class TokenStateTest {
         val json = JSONObject("""{"code":8002,"message":"验证码"}""")
         var caught: ScutException? = null
         try {
-            TokenParser.parse(json, 400, cn.scut.bombax.scut.auth.Campus.GZIC, "", "", "", now, false)
+            TokenParser.parse(json, 400, cn.scut.bombax.scut.auth.Campus.GZIC, "", "", "", now, false,
+                cn.scut.bombax.scut.auth.LoginType.SNO)
         } catch (failure: ScutException) {
             caught = failure
         }

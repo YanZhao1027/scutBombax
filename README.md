@@ -123,7 +123,7 @@ Implemented and green on the host:
   in-memory first — see `docs/ARCHITECTURE.md` for the persistence decision)
 - Foreground-only auto refresh (off / 5 / 10 / 30 min), no Service, no WorkManager, no alarms
 - Redacted logging through `Diag` (`adb logcat -s ScutBombax`)
-- 74 JVM unit tests + 15 vitest refresh tests passing; `assembleDebug` produces
+- 77 JVM unit tests + 15 vitest refresh tests passing; `assembleDebug` produces
   `android/app/build/outputs/apk/debug/app-debug.apk`
 
 Verified on a physical phone (Android 14, arm64-v8a) on 2026-10-05 and 2026-10-06:
@@ -146,9 +146,11 @@ Verified on a physical phone (Android 14, arm64-v8a) on 2026-10-05 and 2026-10-0
   per-session **substitution table** over fixed tile layouts (digits `0-9`, letters in QWERTY
   order, a 29-glyph symbol row), so the submitted password is neither the raw characters
   (2026-10-05, wrong) nor a digits-only substitution (2026-10-05 and earlier, also wrong) but
-  every character mapped through its own row plus `"$1$" + uuid`. That is implemented and
-  pinned by tests as of 2026-10-06; the next open question is which login type the account
-  belongs to (`card` vs `sno`, both offered by `frontInfo`).
+  every character mapped through its own row plus `"$1$" + uuid`. Implemented and pinned by
+  tests on 2026-10-06. A second, independent cause came with it: the app hardcoded
+  `logintype=card`, while the account logs in on the official page under **学工号登录 (`sno`)** —
+  the school answers a wrong namespace with the same `code=8000` as a wrong password. The login
+  screen now asks which type to use (default 学工号登录) and the bridge refuses an unknown value.
 
 **Not verified:** every SCUT flow that needs a session. Login, `refresh_token`, GZIC balances,
 the DXC SSO chain and refresh with a live session have never completed against the school.

@@ -145,9 +145,13 @@ and rejected the **credential pair**. Check these in order before blaming the ty
 
 1. **the login type.** `frontInfo` offers 账号登录 (`logintype=card`, a 一卡通 account) and
    学工号登录 (`logintype=sno`, a student/staff number), plus 统一身份认证 SSO which involves no
-   card password at all. The app currently sends `card` for whatever the user types. If the
-   control login on the official page was done under 学工号登录 or under SSO, then `card` + that
-   account is a different credential namespace and 8000 is the expected answer;
+   card password at all. Until 2026-10-06 the app sent `card` for whatever the user typed, and
+   the user then reported that the successful control login on `/plat-h5/` was made under
+   **学工号登录** — so all eleven attempts presented a valid password in the wrong account
+   namespace, which the school answers with the same `code=8000` it uses for a wrong password.
+   The login screen now asks (defaulting to 学工号登录) and the native layer refuses an unknown
+   value rather than guessing. If a future attempt still answers `8000`, settle this question
+   again before touching anything else;
 2. **the password encoding.** The submitted value must be
    `<each character substituted through its keyboard row>$1$<keyboard uuid>` — the substitution
    table is the whole point of the endpoint (`docs/PROTOCOL.md` "Secure keyboard"). Neither
@@ -475,3 +479,28 @@ Session restart behaviour: anonymous by construction; the log capture holds no c
 Remaining protocol uncertainty: successful login, expires_in unit, refresh_token presence and
   rotation, GZIC semantics, DXC chain, 8003
 ```
+
+#### 2026-10-06, same evening: the second cause
+
+Asked which tab the successful control login used, the user answered **学工号登录** — i.e.
+`logintype=sno`. The app had been sending `card`, so all eleven attempts presented a valid
+password in the wrong account namespace, and the school answers that with the same
+`code=8000` it uses for a wrong password. That is independent of the keyboard encoding, which
+was also fixed the same evening.
+
+Changes made for it, none of which is exercised yet:
+
+- the login screen asks for the type (default 学工号登录); `index.html` `#login-type`,
+  `src/types.ts` `LoginType`, `src/main.ts` passes it through;
+- `LoginType.from()` returns null for anything but `card` / `sno` and the bridge answers
+  `INVALID_INPUT` with detail `login/loginType` rather than defaulting;
+- `TokenState.loginType` records the type, so `refresh` replays it instead of assuming `card`;
+- `LoginFormTest` pins both wire values on the password and refresh forms.
+
+77 JVM tests green. Build now installed: `35c80c04f15f22d73d2c9d00ae08a1d4054f10261fc8cc8b3ec173be2151fbbf`
+(4,799,939 B, 23:30); its packaged `index.html`, JS bundle and dex were checked by unpacking
+(`#login-type`, `logintype`, `login/loginType` all present). The screen itself could not be
+photographed — the device is on its lock screen and unlocking it is the user's action.
+
+**Next, in this order:** one attempt with 学工号登录 selected and a freshly loaded captcha.
+Nothing else. If it answers `8000`, stop and re-open §2.1 from step 1 rather than trying again.

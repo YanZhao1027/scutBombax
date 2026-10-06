@@ -14,6 +14,7 @@ data class LoginInput(
     val username: String,
     val password: String,
     val campus: Campus,
+    val loginType: LoginType,
     val captchaKey: String?,
     val captchaCode: String?
 )
@@ -28,30 +29,35 @@ data class LoginInput(
  * `application/x-www-form-urlencoded` POST, which is the source of each value below.
  * Note the spelling: the client sends `loginFrom`, not `loginForm`.
  *
+ * `logintype` is the one field this app cannot default: `frontInfo` publishes both `card`
+ * (账号登录) and `sno` (学工号登录), the school answers a mismatch with `code=8000` — the same
+ * code as a wrong password — and the user's account is only valid under one of them. It is
+ * therefore a caller-supplied value on every path, including refresh.
+ *
  * The two captcha names come from the same chunk
  * (`captcha_header_code` = what the user typed, `captcha_header_key` = the `key` returned by
  * `/berserker-auth/oauth/captcha`), and `frontInfo` sets `openCaptcha:"1"` for the card login.
- * Their acceptance by the server is still DEVICE_PENDING: only `code=8000` has been observed,
- * because the school validates the credential pair before the captcha.
+ * Both names were accepted by the school on 2026-10-06: with a fresh captcha the answer moved
+ * from `8002` to `8000`, i.e. past the captcha stage.
  */
 object LoginForm {
     const val FIELD_CAPTCHA_CODE = "captcha_header_code"
     const val FIELD_CAPTCHA_KEY = "captcha_header_key"
 
-    val BASE_FIELDS = listOf(
+    fun baseFields(loginType: LoginType): List<Pair<String, String>> = listOf(
         "grant_type" to "password",
         "scope" to "all",
         "loginFrom" to "h5",
-        "logintype" to "card",
+        "logintype" to loginType.wire,
         "device_token" to "h5",
         "synAccessSource" to "h5"
     )
 
-    val REFRESH_FIELDS = listOf(
+    fun refreshFields(loginType: LoginType): List<Pair<String, String>> = listOf(
         "grant_type" to "refresh_token",
         "scope" to "all",
         "loginFrom" to "h5",
-        "logintype" to "card",
+        "logintype" to loginType.wire,
         "device_token" to "h5",
         "synAccessSource" to "h5"
     )
@@ -60,12 +66,13 @@ object LoginForm {
         username: String,
         encodedPassword: String,
         captchaKey: String?,
-        captchaCode: String?
+        captchaCode: String?,
+        loginType: LoginType
     ): FormBody {
         val builder = FormBody.Builder()
             .add("username", username)
             .add("password", encodedPassword)
-        for ((key, value) in BASE_FIELDS) builder.add(key, value)
+        for ((key, value) in baseFields(loginType)) builder.add(key, value)
         if (!captchaKey.isNullOrEmpty() && !captchaCode.isNullOrEmpty()) {
             builder.add(FIELD_CAPTCHA_CODE, captchaCode)
             builder.add(FIELD_CAPTCHA_KEY, captchaKey)
@@ -73,9 +80,9 @@ object LoginForm {
         return builder.build()
     }
 
-    fun refreshForm(refreshToken: String): FormBody {
+    fun refreshForm(refreshToken: String, loginType: LoginType): FormBody {
         val builder = FormBody.Builder().add("refresh_token", refreshToken)
-        for ((key, value) in REFRESH_FIELDS) builder.add(key, value)
+        for ((key, value) in refreshFields(loginType)) builder.add(key, value)
         return builder.build()
     }
 }
@@ -107,7 +114,13 @@ class AuthRepository(
         val hadCaptcha = !input.captchaKey.isNullOrEmpty() && !input.captchaCode.isNullOrEmpty()
         val stage = if (hadCaptcha) Stages.LOGIN_WITH_CAPTCHA else Stages.LOGIN_WITHOUT_CAPTCHA
 
-        val body = LoginForm.passwordForm(username, encoded, input.captchaKey, input.captchaCode)
+        val body = LoginForm.passwordForm(
+            username,
+            encoded,
+            input.captchaKey,
+            input.captchaCode,
+            input.loginType
+        )
         val request = Request.Builder()
             .url(ScutEndpoints.cardUrl(ScutEndpoints.TOKEN_PATH))
             .header("Authorization", ScutEndpoints.BASIC_AUTH)
@@ -138,7 +151,8 @@ class AuthRepository(
             locSession = cookieJar.value("locSession").orEmpty(),
             previousRefreshToken = "",
             now = System.currentTimeMillis(),
-            hadCaptcha = hadCaptcha
+            hadCaptcha = hadCaptcha,
+            loginType = input.loginType
         )
         Diag.event(
             "stage=$stage result=ok campus=${state.campus.name} " +
@@ -161,7 +175,7 @@ class AuthRepository(
             .url(ScutEndpoints.cardUrl(ScutEndpoints.TOKEN_PATH))
             .header("Authorization", ScutEndpoints.BASIC_AUTH)
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .post(LoginForm.refreshForm(current.refreshToken))
+            .post(LoginForm.refreshForm(current.refreshToken, current.loginType))
             .build()
 
         val response = http.send(Stages.REFRESH, request)
@@ -187,7 +201,8 @@ class AuthRepository(
             locSession = cookieJar.value("locSession") ?: current.locSession,
             previousRefreshToken = current.refreshToken,
             now = System.currentTimeMillis(),
-            hadCaptcha = false
+            hadCaptcha = false,
+            loginType = current.loginType
         )
         val rotated = refreshed.refreshToken != current.refreshToken
         Diag.event(

@@ -14,6 +14,24 @@ enum class Campus {
 }
 
 /**
+ * Which of the school's card login types an account belongs to, using the keys SCUT's own
+ * `frontInfo` publishes: `card` = 账号登录 (a campus-card account), `sno` = 学工号登录 (a
+ * student or staff number). Both carry `encryption:"keyboard"` and `openCaptcha:"1"`.
+ *
+ * The wrong one is answered `code=8000`, exactly like a wrong password, so this is never
+ * inferred: an unknown value is rejected at the bridge instead of falling back to a default.
+ */
+enum class LoginType(val wire: String) {
+    CARD("card"),
+    SNO("sno");
+
+    companion object {
+        fun from(text: String?): LoginType? =
+            values().firstOrNull { it.wire == text?.trim()?.lowercase() }
+    }
+}
+
+/**
  * Everything the native layer keeps private. The WebView only ever sees the
  * public projection built by the plugin.
  */
@@ -26,7 +44,9 @@ data class TokenState(
     val locSession: String,
     val name: String,
     val sno: String,
-    val campus: Campus
+    val campus: Campus,
+    /** A refresh must replay the type that obtained the token, not a default. */
+    val loginType: LoginType = LoginType.CARD
 )
 
 /** Pure expiry decisions, unit-tested on the JVM. */
@@ -147,7 +167,8 @@ object TokenParser {
         locSession: String,
         previousRefreshToken: String,
         now: Long,
-        hadCaptcha: Boolean
+        hadCaptcha: Boolean,
+        loginType: LoginType
     ): TokenState {
         val accessToken = json.optString("access_token")
         if (accessToken.isBlank()) {
@@ -177,7 +198,8 @@ object TokenParser {
             locSession = locSession,
             name = json.optString("name"),
             sno = json.optString("sno"),
-            campus = campus
+            campus = campus,
+            loginType = loginType
         )
     }
 }
