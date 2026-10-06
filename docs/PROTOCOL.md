@@ -25,23 +25,22 @@ DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 | Item | Grade | Still open |
 | --- | --- | --- |
 | captcha endpoint and `{key, image}` shape | RUNTIME_VERIFIED 2026-10-05 | no |
-| secure-keyboard endpoint and `data.uuid` / `data.numberKeyboard` shape | RUNTIME_VERIFIED 2026-10-05 | no |
+| secure-keyboard endpoint and its four token rows + tile layouts | RUNTIME_VERIFIED 2026-10-06 (credential-free; tile images decoded) | no |
 | OAuth error envelope and `code=8000` = credential failure | RUNTIME_VERIFIED 2026-10-05 (empty-credential probe) | no |
 | card host answers `403` for any off-campus source address | RUNTIME_VERIFIED 2026-10-05 (physical device, both address families) | no |
-| credentials are checked before the captcha | RUNTIME_VERIFIED 2026-10-05 (device, nine 8000 responses with a captcha attached) | no |
-| SCUT login types: `card` / `sno` (both `encryption:"keyboard"`, `openCaptcha:"1"`), `sso` | SOURCE_VERIFIED 2026-10-05 (`frontInfo`, credential-free) | no |
-| password submitted as `<chosen characters>$1$<keyboard uuid>` | SOURCE_VERIFIED 2026-10-05 (official `security-keyboard` component) | accepted by the server on a real login |
+| `code=8002` = the captcha was rejected, and it is evaluated before the credential check | RUNTIME_VERIFIED 2026-10-06 (device, stale captcha + otherwise valid request) | whether `8003` also appears |
+| SCUT login types: `card` / `sno` (both `encryption:"keyboard"`, `openCaptcha:"1"`), `sso` | SOURCE_VERIFIED 2026-10-05 (`frontInfo`, credential-free) | which one the user's account belongs to |
+| password submitted as `<row-substituted characters>$1$<keyboard uuid>` | SOURCE_VERIFIED 2026-10-06 (official component + the server's own tile images) | accepted by the server on a real login |
 | token field spelling `loginFrom` (not `loginForm`) | SOURCE_VERIFIED 2026-10-05 | no |
-| `captcha_header_code` / `captcha_header_key` | SOURCE_VERIFIED 2026-10-05 | DEVICE_PENDING |
-| service codes `8002` / `8003` as captcha signals | SOURCE_VERIFIED 2026-10-05 | DEVICE_PENDING |
+| `captcha_header_code` / `captcha_header_key` | SOURCE_VERIFIED 2026-10-05, and a fresh captcha pair was accepted by the server on 2026-10-06 (the answer moved to `8000`, past the captcha stage) | no |
+| service codes `8002` / `8003` as captcha signals | `8002` RUNTIME_VERIFIED 2026-10-06; `8003` SOURCE_VERIFIED | `8003` |
 | successful login, `expires_in` unit, `refresh_token` presence | SOURCE_VERIFIED | DEVICE_PENDING |
 | `grant_type=refresh_token` support and rotation | HYPOTHESIS | DEVICE_PENDING |
 | GZIC fee item 1/2/3 semantics and units | SOURCE_VERIFIED | DEVICE_PENDING |
 | DXC redirect chain hop-by-hop requirements | SOURCE_VERIFIED | DEVICE_PENDING |
 
 The only token request sent from the host was an empty-credential control probe; every
-credentialed request was made by the user on the phone. That keeps the captcha-related codes
-unconfirmed for this app even though the official client documents them.
+credentialed request was made by the user on the phone.
 
 ## Hosts
 
@@ -152,7 +151,9 @@ Consequences, each traceable to that chunk:
 
 1. **The card login is `logintype=card` with `encryption=keyboard` and a captcha from the
    start** (`openCaptcha:"1"`), which is what this app already sends.
-2. **The submitted password is the password itself** — see the keyboard section below.
+2. **The submitted password is a substitution of it** — see the keyboard section below. (A
+   first reading of the component said "the password itself"; the server's own tile images
+   show that is wrong.)
 3. **The token field is spelled `loginFrom`**, not `loginForm`:
    `{username, password, grant_type:"password", scope:"all", loginFrom, logintype, device_token}`.
    `loginForm` occurs 0 times in the client bundle.
@@ -208,24 +209,39 @@ so the names this app sends (`captcha_header_code` = what the user typed,
 client exactly. `8002` / `8003` are likewise the codes that client treats as
 "captcha required / captcha wrong", and `8001` as "choose a student number".
 
-Still DEVICE_PENDING: a live SCUT answer to *this* app's request. The school validates the
-credential pair before the captcha, so the captcha branch cannot be reached with a wrong
-password — see "Login failures" below.
+Closed on 2026-10-06: with a freshly fetched captcha the school answered `code=8000`, i.e. it
+accepted this app's captcha pair and moved on to the credential check. A stale captcha on the
+same request shape answered `8002` instead, so the captcha is evaluated **first** whenever the
+captcha fields are present — see "Login failures".
 
 ## Secure keyboard
 
-`GET /berserker-secure/keyboard` returns a shuffled on-screen keypad, as images. Its purpose
-is that the user taps glyphs on a layout the attacker cannot replay — it is **not** a
-password transform. The official component (`chunk-2d0f0054.fe26bac8.js`) is unambiguous:
+`GET /berserker-secure/keyboard` returns a **substitution table**, not a display hint. The
+tile layouts are fixed; the token strings are random per session. The submitted password is
+therefore a per-session cipher of the real password, and the school's server maps it back
+through the `uuid`.
+
+Established on 2026-10-06 by decoding the server's own tile images from a credential-free
+request (the PNGs are in `data.*Image`, one per tile):
+
+| Row | Tile order shown in the images | Token string length |
+| --- | --- | --- |
+| `numberKeyboard` | `0 1 2 3 4 5 6 7 8 9` | 10 |
+| `lowerLetterKeyboard` | `q w e r t y u i o p a s d f g h j k l z x c v b n m` | 26 |
+| `upperLetterKeyboard` | `Q W E R T Y U I O P A S D F G H J K L Z X C V B N M` | 26 |
+| `symbolKeyboard` | `* \ - [ ] { } / ! , < > ? ~ & @ # . : + \| ` % ' $ ; ^ " _` | 29 |
+
+Example of what one session looked like (`numberKeyboard = ~$JHG8m}q+`, i.e. tile 0 shows
+`0` and submits `~`, tile 1 shows `1` and submits `$`, …). Nothing in the response is the
+password, and nothing sensitive is logged.
+
+The official component confirms the direction — a tap on tile `e` emits `numberKeyboard[e]`:
 
 ```js
-click(e, t) {                      // e = index of the tapped tile
-  … s = this.keyboardInfo.numberKeyboard[e]   // the glyph drawn there, i.e. the character
-  this.$emit("input", s, this.keyboardInfo.uuid)
-}
+click(e, t) { … s = this.keyboardInfo.numberKeyboard[e]; this.$emit("input", s, this.keyboardInfo.uuid) }
 ```
 
-and the login chunk only appends the identifier:
+and the login chunk only appends the session id:
 
 ```js
 "keyboard" === this.loginType.encryption && … && (e = e + "$1$" + this.keyboardUuid)
@@ -234,37 +250,28 @@ and the login chunk only appends the identifier:
 So the value that reaches `/oauth/token` is:
 
 ```text
-password = <the characters the user chose> + "$1$" + <keyboard uuid>
+password = map(each character through its row) + "$1$" + <keyboard uuid>
 ```
 
-The encoding rule above is SOURCE_VERIFIED; the device evidence that the old rule was wrong is
-RUNTIME_VERIFIED 2026-10-05: the mapping `digit -> numberKeyboard[digit]` ported from a
-third-party reference implementation permutes the password, and SCUT answers `code=8000`
-(HTTP 400 with a service code, i.e. the request shape was understood and the credential was
-not). Whether the corrected encoding is accepted still requires one successful login.
+`SecureKeyboard.kt` implements exactly that, and `CaptchaAndKeyboardTest` pins the tile orders
+and a worked example for every row. A character that no row covers (space, non-ASCII) is
+refused rather than dropped, because dropping it would silently change the password.
 
-Because SCUT's `passwordRule` is `a/num/#/leng_8`, letters and symbols are legal and must be
-passed through unchanged; `keyboardOptions:{types:"1"}` on the login screen is why the
-request asks for `type=Standard` (numbers + letters + symbols) rather than `type=Number`.
+**Two earlier readings were both wrong, and each cost device attempts:**
 
-```http
-GET /berserker-secure/keyboard?type=Standard&order=0&synAccessSource=h5
-```
+- digits only, mapped through `numberKeyboard` (before 2026-10-05): correct for digits, but it
+  rejects a legal alphanumeric password outright, and SCUT's `passwordRule` is
+  `a/num/#/leng_8`;
+- characters submitted verbatim with only the `$1$uuid` tail appended (2026-10-05, and the
+  change that this section corrects): the server decodes those as tile tokens and gets a
+  different password, so it answers `code=8000`.
 
-answers HTTP 200 with the envelope `{code, data, msg, success}` and these `data` keys:
+`keyboardOptions:{types:"1"}` on the login screen is why the request asks for `type=Standard`
+(digits + letters + symbols) rather than `type=Number`; `order:0` matches the official client.
+The response also carries a `password` field, which was `null` in the observed session and is
+ignored. The official client's `maxLength` resolves to 99 for this `passwordRule`, so
+truncation is not a factor.
 
-```text
-uuid                     -> the only value this app needs
-numberKeyboard           -> 10 characters, the shuffled digit row (display only)
-numberKeyboardImage   lowerLetterKeyboardImage  upperLetterKeyboardImage
-symbolKeyboardImage     …and the plain-text sibling lists
-```
-
-`SecureKeyboard.kt` keeps `numberKeyboard` in the parsed model to document the shape, but the
-encoder never reads it. The letter/symbol lists and `data.password` are ignored and never
-logged. An empty `uuid` is treated as a protocol change; the password itself is only checked
-for being non-empty (the official client's `maxLength` resolves to 99 for this rule, so
-truncation is not a factor).
 
 ## OAuth token
 
@@ -339,21 +346,31 @@ Two things follow from that, and only from that:
 
 No other service code was observed there.
 
-On the phone the same day, nine login attempts carrying a real account, a real captcha pair
-and the permuted password each answered `status=400 code=8000`
-(`stage=login.captchaForm result=rejected error=INVALID_CREDENTIALS`). Two conclusions:
+### Which check runs first (RUNTIME_VERIFIED 2026-10-06, correcting 2026-10-05)
 
-- **The credential pair is validated before the captcha.** A request with a wrong password
-  and a correct captcha still returns 8000, never a captcha code, so the captcha branch is
-  unreachable with a bad password. That is why `8002` / `8003` stayed unobserved and why the
-  only way to confirm them is a login with a correct password.
-- **Repeated 8000s are the school saying "wrong password", not the captcha or the network.**
-  Treat a run of them as evidence about the encoding, and stop after two attempts, because
-  the account lockout policy is unknown and undocumented.
+Three request shapes, all made by the user on the phone or by an empty-credential probe from
+the host, pin the order down:
 
-`8002` / `8003` are recorded as SOURCE_VERIFIED above from the school's own client, which is
-the strongest evidence available without a successful login; they are still not
-RUNTIME_VERIFIED for this app.
+| Captcha fields | Password | Answer |
+| --- | --- | --- |
+| absent | empty | `8000` — credential check reached |
+| present, **stale** | correct on the official page | `8002` — captcha rejected first |
+| present, **fresh** | correct on the official page | `8000` — captcha passed, credential rejected |
+
+So: when the captcha fields are present the captcha is evaluated **before** the credential
+pair; when they are absent the server goes straight to the credential check. The
+2026-10-05 note in this file claimed the opposite, inferred from nine `8000` responses that
+were later explained by a different bug — see the keyboard section.
+
+Practical consequences:
+
+- `8002` is now RUNTIME_VERIFIED for this app, and it is a *cheap* failure: a stale captcha
+  costs the account nothing. `8000` is the expensive one, because the account lockout policy
+  is undocumented — stop after two of them.
+- A `8000` on a request whose captcha was accepted means the credential pair itself is what
+  the school rejected: the encoding, then which login type the account belongs to
+  (`card` = 一卡通账号 vs `sno` = 学工号; `frontInfo` offers both, and the page also offers
+  统一身份认证 SSO, which involves no card password at all), then the password.
 
 ## Refresh token
 

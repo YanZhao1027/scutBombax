@@ -2,16 +2,16 @@
 
 The credential-bearing steps below stay **NOT_TESTED** until they are executed on a
 physical Android phone with the user's own SCUT credentials. The repository ships a
-green build and 68 passing JVM unit tests; those prove the code parses the shapes it
+green build and 74 passing JVM unit tests; those prove the code parses the shapes it
 has already observed, not that a real login works.
 
-What the device has already confirmed (2026-10-05, Android 14 / API 34, arm64-v8a):
-the native↔WebView bridge round trip, the captcha tile's failure path, the redacted
-log format, that nothing session-shaped is persisted, that the card host refuses
-off-campus source addresses (§0.1), and that nine credentialed requests that carried a
-valid captcha but a permuted password were all answered `code=8000` — which is how the
-encoding bug in §2.1 was found. Those are RUNTIME_VERIFIED. Everything that needs
-a logged-in session is still DEVICE_PENDING.
+What the device has already confirmed (2026-10-05/06, Android 14 / API 34, arm64-v8a):
+the native↔WebView bridge round trip, captcha fetch and rejection (`8002` on a stale code,
+accepted when fresh), the secure-keyboard session, the redacted log format, that nothing
+session-shaped is persisted, that the card host refuses off-campus source addresses (§0.1),
+and that eleven credentialed attempts were rejected with `code=8000` — which is where
+§2.1's checklist now points. Those are RUNTIME_VERIFIED. Login itself, and everything that
+needs a session, is still DEVICE_PENDING.
 
 Fill in the recording template at the bottom as you go, and give each line an
 evidence grade (see `docs/PROTOCOL.md`): RUNTIME_VERIFIED / SOURCE_VERIFIED /
@@ -110,11 +110,12 @@ Read §0.2 and §2.1 first: since 2026-10-05 the field names and the `8002`/`800
 no longer guesses — they are what SCUT's own client does. What this step still has to prove
 is that **this app's** request is accepted by the school.
 
-The school validates the credential pair **before** the captcha, so a deliberately wrong
-captcha only produces a captcha error once the password is correct. If §4 has not passed,
-this step cannot be observed at all: the log will keep saying `code=8000`.
+The school evaluates the captcha **before** the credential pair whenever the captcha fields are
+present (2026-10-06: a stale captcha answered `8002`, a fresh one answered `8000`), so a
+deliberately wrong captcha is a cheap experiment that costs the account nothing — do it before
+retrying a password.
 
-Once login works, submit a deliberately wrong captcha code.
+Submit a deliberately wrong captcha code against a freshly loaded image.
 
 - Expected UI: "验证码不正确或已过期，已为你换一张。" and a fresh image.
 - Expected log: `stage=login.captchaForm result=rejected error=CAPTCHA_INVALID status=<n> code=<service code>`
@@ -134,25 +135,30 @@ captcha was re-fetched) rather than at the names.
 
 ### 2.1 If login keeps answering `code=8000`
 
-Stop after two attempts on the same account. Nine consecutive 8000 responses were logged on
-2026-10-05 before the cause was found, and SCUT's lockout policy is undocumented in this
-repository — a wrong password repeated is the one way this app can damage the user's account.
+Stop after two attempts on the same account. Eleven 8000 responses were logged across
+2026-10-05/06 before the causes were found, and SCUT's lockout policy is undocumented in this
+repository — repeated wrong passwords are the one way this app can damage the user's account.
+A `8002` (captcha) is not in that category: it costs the account nothing.
 
-8000 with the network and captcha steps already green means the **credential pair** is
-rejected, so check these in order before blaming the password the user typed:
+8000 with the network and captcha steps already green means the school accepted the captcha
+and rejected the **credential pair**. Check these in order before blaming the typed password:
 
-1. the password encoding: the submitted value must be
-   `<the characters the user chose>$1$<keyboard uuid>` — not a permutation of it, see
-   `docs/PROTOCOL.md` "Secure keyboard";
-2. the field spelling: `loginFrom`, `logintype=card`, `scope=all`, `device_token=h5`;
-3. that the user's card password follows SCUT's rule (`a/num/#/leng_8` — letters **and**
-   digits, at least 8), i.e. the query password, not the 6-digit payment PIN;
+1. **the login type.** `frontInfo` offers 账号登录 (`logintype=card`, a 一卡通 account) and
+   学工号登录 (`logintype=sno`, a student/staff number), plus 统一身份认证 SSO which involves no
+   card password at all. The app currently sends `card` for whatever the user types. If the
+   control login on the official page was done under 学工号登录 or under SSO, then `card` + that
+   account is a different credential namespace and 8000 is the expected answer;
+2. **the password encoding.** The submitted value must be
+   `<each character substituted through its keyboard row>$1$<keyboard uuid>` — the substitution
+   table is the whole point of the endpoint (`docs/PROTOCOL.md` "Secure keyboard"). Neither
+   the raw characters nor a digits-only substitution is correct;
+3. the field spelling: `loginFrom`, `scope=all`, `device_token=h5`, `synAccessSource=h5`;
 4. **isolate the app from the credential**: on the same phone, open
    `https://ecardwxnew.scut.edu.cn/plat-h5/` in the browser and log in there with the same
-   account and password. The official page is the control group. If it accepts the password
-   and this app still gets 8000, the request this app builds is wrong — keep the log lines and
-   re-read `docs/PROTOCOL.md` "Secure keyboard". If the official page also refuses it, the
-   app is not the problem; reset the query password through the school's own path first;
+   account and password — and **note which tab was used**, because that is the answer to
+   step 1. If the official page accepts it and this app still gets 8000, the request this app
+   builds is wrong; if the official page also refuses it, the app is not the problem and the
+   query password needs the school's own reset path;
 5. only then, the password itself.
 
 ## 3. Login without a captcha
@@ -433,4 +439,39 @@ Cause found the same day (SOURCE_VERIFIED, see docs/PROTOCOL.md): the encoder wa
 Remaining protocol uncertainty: whether the corrected encoding is accepted (needs one
   login), 8002/8003 at runtime, expires_in unit, refresh_token presence and rotation,
   GZIC semantics, DXC chain
+```
+
+### 2026-10-06, third session (three login attempts; captcha path closed, login still open)
+
+```text
+Date / Android version / device model (no serials, no IMEI): 2026-10-06 / Android 14 (API 34) / Redmi K50, arm64-v8a
+APK under test: f9a43d2139b5528ab06ab0c976fc07bd26649b15d1c79c8b46e3b07b0e8ca6d3 (the 2026-10-05 "plaintext" build)
+Control: the user logged in successfully on https://ecardwxnew.scut.edu.cn/plat-h5/ with the same
+  account and query password, so the credential itself is valid. Which tab was used is not yet known.
+Attempt 1, 22:43:04  keyboard 200 -> token 400 code=8002 error=CAPTCHA_REQUIRED
+  the captcha on screen had never been re-fetched (no stage=captcha line between 22:38 and 22:43),
+  so it was stale; the app swapped a fresh one at 22:43:04.769
+Attempt 2, 22:48:15  captcha fetched 22:48:01 -> keyboard 200 -> token 400 code=8000
+Attempt 3, 22:48:28  keyboard 200 -> token 400 code=8000
+Ordering established: with the captcha fields present the captcha is evaluated FIRST
+  (stale -> 8002), and only then the credential pair (fresh captcha -> 8000). The
+  2026-10-05 note claiming the reverse was an over-reading of the nine 8000s.
+Captcha field names: ACCEPTED by the school — a fresh pair moved the answer to 8000, so
+  captcha_header_code / captcha_header_key are no longer DEVICE_PENDING.
+8002: RUNTIME_VERIFIED for this app. 8003: still only SOURCE_VERIFIED.
+Cause of the 8000s, found afterwards: the 2026-10-05 encoding change was itself wrong. The
+  keyboard response is a per-session substitution table over FIXED tile layouts (verified by
+  decoding the server's own tile images: digits 0-9, letters in QWERTY order, a 29-glyph
+  symbol row), so each character must be substituted through its own row. Reimplemented in
+  SecureKeyboard.kt, 74 tests green; the clean build now installed is
+  app-debug.apk sha256 c6255c80d06207ce0f04a7844e8364cad09da7cba776677dbc93835f94f424a5
+  (4781497 bytes, 23:03; the 22:58 incremental build of the same sources hashed
+  18095f723185b11b9cabbe44d729b852fbb63ff262f2d6ccbfd341076a53dfb3) and it has NOT yet been
+  exercised — no further attempts were made against the account.
+Next, in this order (docs/DEVICE_VERIFICATION.md §2.1): confirm which login type the control
+  login used (card vs sno vs SSO), then one attempt with the substitution build.
+Session restart behaviour: anonymous by construction; the log capture holds no credential,
+  cookie, token, IP, SSID or device serial (§10).
+Remaining protocol uncertainty: successful login, expires_in unit, refresh_token presence and
+  rotation, GZIC semantics, DXC chain, 8003
 ```

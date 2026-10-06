@@ -13,14 +13,14 @@ reading SCUT's own published client; the corrected build has not yet been used t
 | Required item | Result | Grade |
 | --- | --- | --- |
 | commit SHA | `6d5a031` implementation, `1ef80d3` + `cd8f62a` docs and checks, `29876cb` bridge fix, `9a0dc76` device findings and `CAMPUS_NETWORK_REQUIRED`, `dc93924` environment honesty + device audit, `347f4ed`/`328d863`/`e85c6c8` corrected keyboard encoding and `loginFrom`, `35c2a05`/`6858e0e` evidence manifest — **pushed to `origin/main` on 2026-10-05** (`633ab13..6858e0e`), see [`EVIDENCE_INDEX.md`](EVIDENCE_INDEX.md) for the deploy-key command | RUNTIME_VERIFIED |
-| APK path | `android/app/build/outputs/apk/debug/app-debug.apk` — 4,779,765 bytes, sha256 `f9a43d2139b5528ab06ab0c976fc07bd26649b15d1c79c8b46e3b07b0e8ca6d3` from a clean `clean testDebugUnitTest assembleDebug` (68 tests green; corrected keyboard encoding + `loginFrom`); installed on the phone, not yet exercised for a login. An intermediate incremental build of the same sources hashed `b66071a392477f1b73394444a67913f48fef5bcf645586eba89bc0178e90c550` — APK bytes are not reproducible here, so treat the sha as a session marker, not a content hash. Previous build `70f3d2fea48d4278ac80d121bb31ad5d99bb630c10b21adcc98089c658088358` (4,779,933 bytes) is the one the nine `code=8000` attempts were made with | RUNTIME_VERIFIED (build/install), DEVICE_PENDING (login with the fix) |
+| APK path | **current build: 4,781,497 bytes, sha256 `c6255c80d06207ce0f04a7844e8364cad09da7cba776677dbc93835f94f424a5`** — full keyboard substitution (all four rows), 74 tests green, installed 2026-10-06 23:03 and **not yet exercised**. Earlier builds: `18095f723185b11b9cabbe44d729b852fbb63ff262f2d6ccbfd341076a53dfb3` (incremental, same sources), `f9a43d2139b5528ab06ab0c976fc07bd26649b15d1c79c8b46e3b07b0e8ca6d3` (2026-10-05, the "submit the characters verbatim" reading — now known to be wrong, used for the three 2026-10-06 attempts) and `70f3d2fea48d4278ac80d121bb31ad5d99bb630c10b21adcc98089c658088358` (2026-10-05, digits-only encoder, used for the nine `code=8000` attempts). APK bytes are not reproducible here, so a sha is a session marker, not a content hash | RUNTIME_VERIFIED (build/install), DEVICE_PENDING (login) |
 | tested Android version / device | Android 14 (API 34), Redmi K50, arm64-v8a, 1440×3200 @ 560dpi. `minSdk 24` / `targetSdk 36` remain the build's declaration; only API 34 has executed it | RUNTIME_VERIFIED (one device) |
 | bridge + UI on device | `plugin=ScutApi ready api=34 release=14`, `health()` returned over the bridge, full Chinese UI rendered without layout breakage, and a native failure reached the screen as `CAMPUS_NETWORK_REQUIRED [captcha/403]: …` | RUNTIME_VERIFIED |
 | nothing session-shaped persisted | `run-as` shows only WebView internals in `shared_prefs`, 0 `scut` rows in the WebView cookie DB, no session file | RUNTIME_VERIFIED |
-| captcha behavior | endpoint + `{key, image}` shape confirmed on the device (HTTP 200, 32-hex key, `data:image/png;base64,` prefix, a new `key` on every reload). SCUT's own `frontInfo` config sets `openCaptcha:"1"` for the `card` login, so a captcha is expected on every attempt — which the app already does. Whether the school *rejects* a bad captcha is still unproven, because credentials are validated first | RUNTIME_VERIFIED (shape, display) / SOURCE_VERIFIED (`openCaptcha`) / DEVICE_PENDING (rejection code) |
+| captcha behavior | endpoint + `{key, image}` shape confirmed on the device (HTTP 200, 32-hex key, `data:image/png;base64,` prefix, a new `key` on every reload). `frontInfo` sets `openCaptcha:"1"` for the `card` login, so a captcha belongs on every attempt, which the app does. **Enforcement is now observed:** a stale captcha answered `code=8002`, a freshly fetched one was accepted and the answer moved to `code=8000` — so the captcha is evaluated before the credential pair whenever the captcha fields are present | RUNTIME_VERIFIED 2026-10-06 |
 | network location | `ecardwxnew.scut.edu.cn` answers `403` + "校外可通过学校SSLVPN访问本网站" for an off-campus source address, over IPv4 and IPv6, for `curl` and for OkHttp alike, while `dfyc.utc.scut.edu.cn` answers `200` on the same connection. The phone was then moved onto the campus wireless network and every card-host request in the second session returned 200/400, never 403 | RUNTIME_VERIFIED |
-| exact verified captcha request field names | `captcha_header_code` / `captcha_header_key` — copied from SCUT's own login chunk (`login.acc9252b.js` builds the token body with exactly these two names). The app has sent them on every device attempt, and the school's answer was `code=8000` (credential), never a schema complaint | SOURCE_VERIFIED 2026-10-05 / DEVICE_PENDING for a captcha-specific code |
-| login result | nine attempts on the phone, each `keyboard 200 → token 400 code=8000 用户名或密码错误`, all with a captcha attached. Cause identified the same day: the ported encoder permuted the password through the shuffled keyboard layout instead of submitting `<chosen characters>$1$<uuid>`, and the token field was spelled `loginForm` where the client sends `loginFrom`. Both fixed in this build; no login has yet succeeded, so success stays unverified and the user was asked to stop retrying (lockout policy unknown) | RUNTIME_VERIFIED (rejection path, ordering) / NOT_TESTED (success) |
+| exact verified captcha request field names | `captcha_header_code` / `captcha_header_key` — **accepted by the school.** They are copied from SCUT's own login chunk, and on 2026-10-06 a freshly loaded captcha paired with those names moved the answer from `8002` to `8000`, i.e. past the captcha stage | RUNTIME_VERIFIED 2026-10-06 |
+| login result | **still failing.** Eleven attempts across two days answered `code=8000 用户名或密码错误`. Two encodings have been tried and both were wrong: digits-only substitution (2026-10-05) and submitting the characters verbatim (2026-10-05/06). The endpoint's real contract, established 2026-10-06 by decoding the server's own tile images, is a per-session substitution over fixed layouts — digits `0-9`, letters in QWERTY order, a 29-glyph symbol row — so every character must be mapped through its own row before `"$1$" + uuid`. That is implemented and installed but **not yet attempted**, because the account has already absorbed eleven rejections and because `frontInfo` offers two login types (`card` = 一卡通账号, `sno` = 学工号) and the app hardcodes `card`; the control login on the official page may have used the other one, or SSO | RUNTIME_VERIFIED (rejection path, ordering, field names) / NOT_TESTED (success) |
 | refresh_token result | unverified. `grant_type=refresh_token` is implemented standards-style and fails closed to `REAUTH_REQUIRED`; whether SCUT issues a refresh token at all is unknown | NOT_TESTED |
 | GZIC result | unverified. Requests, header (`Synjones-Auth: bearer …`) and the `code/msg/map` parser are written and unit-tested against the old implementation's shapes. The card host is the one GZIC needs, so this is the blocked path | NOT_TESTED |
 | DXC result | unverified. Manual redirect chain implemented (`redirect → thirdLogin → authorize → getCode → userinfo/ammeterBalance/waterBalance`). `dfyc` itself is reachable from the phone, but the chain starts on the card host | NOT_TESTED |
@@ -29,15 +29,13 @@ reading SCUT's own published client; the corrected build has not yet been used t
 
 Service codes `8002` / `8003` are no longer folklore: the login chunk compares the token
 response's service code against exactly those two values to decide "captcha required /
-captcha wrong" (and `8001` = "pick a student number"). They are therefore SOURCE_VERIFIED
-for this deployment and still not RUNTIME_VERIFIED for this app — the school checks the
-credential pair first, so they can only appear in a trace that starts from a correct
-password. `docs/DEVICE_VERIFICATION.md` §2 keeps the step that closes it.
+captcha wrong" (and `8001` = "pick a student number"). `8002` was observed live on
+2026-10-06 from this app's own request; `8003` is still only documented by the client.
 
 ## What is actually proven
 
 - `pnpm build` (`tsc --noEmit && vite build`), `pnpm test` (15 vitest),
-  `pnpm check:dom`, and `./gradlew clean testDebugUnitTest assembleDebug` (68 tests across
+  `pnpm check:dom`, and `./gradlew clean testDebugUnitTest assembleDebug` (74 tests across
   nine classes, BUILD SUCCESSFUL) all pass on this host, with no Android Studio and no IDE.
   `pnpm native:test` / `pnpm apk` now route through `scripts/with-jdk.sh`, which finds a
   JDK with `javac` instead of relying on an exported `JAVA_HOME`.
@@ -87,18 +85,27 @@ password. `docs/DEVICE_VERIFICATION.md` §2 keeps the step that closes it.
    echoes the caller's public IP (identifying), means the same thing at every stage, and
    would otherwise be reported as an upstream outage. Every other non-2xx answer still goes
    back to the caller untouched for stage-specific classification.
-7. **The secure keyboard is an anti-keylogger UI, not a password transform.** `SecureKeyboardEncoder`
-   submits `<chosen characters>$1$<uuid>`. The digit-permuting version that came from a
-   third-party port of the old Node implementation was the reason nine logins returned
-   `code=8000`; `CaptchaAndKeyboardTest` pins the corrected behaviour and names the mistake,
-   so it cannot be "re-fixed" the other way. Corroborated against SCUT's own
-   `security-keyboard` component and its `login` chunk.
+7. **The secure keyboard is a per-session substitution cipher over fixed tile layouts.**
+   `SecureKeyboardEncoder` maps every character of the password through the row it belongs to
+   (digits `0-9`, lowercase and uppercase in QWERTY order, a fixed 29-glyph symbol row) and
+   appends `"$1$" + uuid`. Two earlier readings were both wrong and each cost device
+   attempts: digits-only substitution (rejects a legal alphanumeric password) and submitting
+   the characters verbatim (the server reads those as tile tokens). The layouts were settled
+   on 2026-10-06 by decoding the server's own tile images from a credential-free request, not
+   by reasoning about the component; `CaptchaAndKeyboardTest` pins each row and names both
+   mistakes so the file cannot be "re-fixed" the other way again.
 8. **The school's published client is the reference for protocol spelling** — its `/plat/js/*`
    bundles and `GET /berserker-app/frontInfo` are readable without credentials from any
    network, so field names, login types and captcha codes can be settled without guessing.
    The copies used for this are archived outside the repository under `evidence/client/`
    (third-party minified code is deliberately not vendored into the repo), with checksums
    listed in [`EVIDENCE_INDEX.md`](EVIDENCE_INDEX.md).
+9. **`logintype` is hardcoded to `card` and that is an open risk, not a verified fact.**
+   `frontInfo` offers 账号登录 (`card`, a 一卡通 account) and 学工号登录 (`sno`, a student/staff
+   number), both with `encryption:"keyboard"`. The value came from the old `cf-web` worker. If
+   the user's control login on the official page used the other tab, every Bombax attempt will
+   answer `code=8000` no matter how the password is encoded. Settling this needs one question
+   answered by the user, not another login attempt.
 
 ## To close the remaining phases
 

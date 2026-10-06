@@ -123,10 +123,10 @@ Implemented and green on the host:
   in-memory first — see `docs/ARCHITECTURE.md` for the persistence decision)
 - Foreground-only auto refresh (off / 5 / 10 / 30 min), no Service, no WorkManager, no alarms
 - Redacted logging through `Diag` (`adb logcat -s ScutBombax`)
-- 68 JVM unit tests + 15 vitest refresh tests passing; `assembleDebug` produces
+- 74 JVM unit tests + 15 vitest refresh tests passing; `assembleDebug` produces
   `android/app/build/outputs/apk/debug/app-debug.apk`
 
-Verified on a physical phone (Android 14, arm64-v8a) on 2026-10-05:
+Verified on a physical phone (Android 14, arm64-v8a) on 2026-10-05 and 2026-10-06:
 
 - the APK installs and starts, `ScutApi` registers, `health()` returns over the bridge, and
   the Chinese UI renders at 1440×3200 without layout damage
@@ -138,17 +138,20 @@ Verified on a physical phone (Android 14, arm64-v8a) on 2026-10-05:
   IPv6, for `curl` and for OkHttp alike; the app reports that as `CAMPUS_NETWORK_REQUIRED`
   rather than as an outage. On the campus network the same requests reach the application
   layer: captcha `200`, secure keyboard `200`, token `400`
-- nine credentialed login attempts each answered `code=8000 用户名或密码错误` with a valid
-  captcha attached, which proved that SCUT checks the credential pair before the captcha and
-  exposed the real bug: the ported secure-keyboard encoder was permuting the password instead
-  of submitting `<password>$1$<keyboard uuid>`. Fixed the same day against SCUT's own client
-  code (see `docs/PROTOCOL.md`); the corrected build has not logged in yet.
+- the captcha path works end to end: a stale captcha answers `code=8002` and a freshly loaded
+  one is accepted, which also settles the order — the school checks the captcha first, then
+  the credential pair
+- login still does **not** succeed. Credentialed attempts answer `code=8000`, and the
+  secure-keyboard encoding turned out to be harder than it looked: the endpoint returns a
+  per-session **substitution table** over fixed tile layouts (digits `0-9`, letters in QWERTY
+  order, a 29-glyph symbol row), so the submitted password is neither the raw characters
+  (2026-10-05, wrong) nor a digits-only substitution (2026-10-05 and earlier, also wrong) but
+  every character mapped through its own row plus `"$1$" + uuid`. That is implemented and
+  pinned by tests as of 2026-10-06; the next open question is which login type the account
+  belongs to (`card` vs `sno`, both offered by `frontInfo`).
 
-**Not verified:** every SCUT flow that needs a session. Login, `refresh_token`, GZIC
-balances, the DXC SSO chain and refresh with a live session have never completed against
-the school. The captcha field names and the `8002`/`8003` service codes are no longer
-guesses — they are copied from the school's own published login chunk — but they still have
-not been observed in this app's traffic, which requires one successful login. Keep the phone
-on campus Wi-Fi or the school SSL VPN, use the **card query password** (校园卡查询密码,
-letters and digits, not the 6-digit payment PIN), and stop after two failed attempts before
-reading `docs/DEVICE_VERIFICATION.md` §2.1.
+**Not verified:** every SCUT flow that needs a session. Login, `refresh_token`, GZIC balances,
+the DXC SSO chain and refresh with a live session have never completed against the school.
+Keep the phone on campus Wi-Fi or the school SSL VPN, use the **card query password**
+(校园卡查询密码, letters and digits, not the 6-digit payment PIN), stop after two `8000`
+attempts, and work through `docs/DEVICE_VERIFICATION.md` §2.1 before trying a third.

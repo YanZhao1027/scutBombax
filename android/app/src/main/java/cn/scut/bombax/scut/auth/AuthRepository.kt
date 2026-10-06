@@ -97,10 +97,10 @@ class AuthRepository(
         }
 
         val keyboard = keyboardService.fetch()
-        val encoded = SecureKeyboardEncoder.encode(input.password, keyboard.uuid)
+        val encoded = SecureKeyboardEncoder.encode(input.password, keyboard)
             ?: throw ScutException(
                 AppError.INVALID_INPUT,
-                "请填写一卡通查询密码",
+                "一卡通查询密码包含校园卡安全键盘之外的字符",
                 "login/encode"
             )
 

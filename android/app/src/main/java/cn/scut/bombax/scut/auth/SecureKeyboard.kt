@@ -8,41 +8,108 @@ import cn.scut.bombax.scut.network.ScutHttp
 import okhttp3.Request
 import org.json.JSONObject
 
-data class Keyboard(val uuid: String, val numberKeyboard: String = "")
+/**
+ * One secure-keyboard session: the four token rows plus the id the server binds them to.
+ *
+ * Each row is a per-session random string of the same length as a **fixed** on-screen layout.
+ * Tile `i` of a row shows a known character and submits `row[i]`, so the wire value is a
+ * substitution of the password, not the password:
+ *
+ * ```text
+ * digits    0123456789                     -> numberKeyboard
+ * lowercase qwertyuiopasdfghjklzxcvbnm     -> lowerLetterKeyboard
+ * uppercase QWERTYUIOPASDFGHJKLZXCVBNM     -> upperLetterKeyboard
+ * symbols   *\-[ ]{}/!<,>?~&#.:+|`%'$;^"_  -> symbolKeyboard
+ * ```
+ *
+ * The layouts were read off the server's own tile images on 2026-10-06 (a credential-free
+ * `GET /berserker-secure/keyboard?type=Standard`, decoded to PNGs): the digits run 0-9 in
+ * order, the letters are QWERTY, and the symbols are in the order above — none of them is
+ * shuffled, only the token strings are. That is why the mapping can be done here at all: a
+ * human taps glyphs on the school's keyboard, and an app that already holds the characters
+ * can look up the same tile index.
+ */
+data class Keyboard(
+    val uuid: String,
+    val numberKeyboard: String = "",
+    val lowerLetterKeyboard: String = "",
+    val upperLetterKeyboard: String = "",
+    val symbolKeyboard: String = ""
+) {
+
+    /** The token the school expects for one typed character, or null if no row covers it. */
+    fun tokenFor(char: Char): Char? {
+        val (order, tokens) = when {
+            char in DIGIT_ORDER -> DIGIT_ORDER to numberKeyboard
+            char in LOWER_ORDER -> LOWER_ORDER to lowerLetterKeyboard
+            char in UPPER_ORDER -> UPPER_ORDER to upperLetterKeyboard
+            char in SYMBOL_ORDER -> SYMBOL_ORDER to symbolKeyboard
+            else -> return null
+        }
+        val index = order.indexOf(char)
+        return if (index in tokens.indices) tokens[index] else null
+    }
+
+    companion object {
+        const val DIGIT_ORDER = "0123456789"
+        const val LOWER_ORDER = "qwertyuiopasdfghjklzxcvbnm"
+        const val UPPER_ORDER = "QWERTYUIOPASDFGHJKLZXCVBNM"
+
+        /**
+         * Tile order of the symbol row, read off the server's own images:
+         * `* \ - [ ] { } / ! , < > ? ~ & @ # . : + | ` % ' $ ; ^ " _`
+         */
+        const val SYMBOL_ORDER = "*\\-[]{}/!<,>?~&@#.:+|`%'\$;^\"_"
+
+        /** Every character a row covers, used for the "no row covers this" diagnostic. */
+        val SUPPORTED: String = DIGIT_ORDER + LOWER_ORDER + UPPER_ORDER + SYMBOL_ORDER
+    }
+}
 
 /**
- * Secure-keyboard encoding.
+ * Secure-keyboard encoding:
  *
  * ```
- * submitted = the characters the user chose + "$1$" + uuid
+ * submitted = map(each password character through its keyboard row) + "$1$" + uuid
  * ```
  *
- * Verified against SCUT's own client on 2026-10-05 (`/plat/js/chunk-2d0f0054.fe26bac8.js`,
- * the `security-keyboard` component): a tap on tile `i` emits `numberKeyboard[i]`, i.e. the
- * **character drawn on that tile**, and the login chunk only appends `"$1$" + keyboardUuid`.
- * The server shuffles the layout and remembers it under `uuid`, so the scrambling exists to
- * defeat keyloggers and screen recording — the value that reaches `/oauth/token` is the real
- * password. Mapping the digits through the layout here (an earlier port of a third-party
- * reference implementation) permutes the password and the school answers `code=8000`.
+ * Verified against SCUT's own client on 2026-10-06. The `security-keyboard` component
+ * (`/plat/js/chunk-2d0f0054.fe26bac8.js`) emits `numberKeyboard[tileIndex]` for a tap, and
+ * the login chunk (`/plat/js/login.acc9252b.js`) only appends `"$1$" + keyboardUuid`.
  *
- * SCUT's `frontInfo` config sets the card login to `encryption: "keyboard"` and
- * `passwordRule: "a/num/#/leng_8"`, so letters and symbols are legal and must be passed
- * through unchanged.
+ * Two earlier readings of this were both wrong and both cost a device attempt:
+ * substituting digits only (this file before 2026-10-05) silently rejects a legal
+ * alphanumeric password, and submitting the characters verbatim (2026-10-05) sends a
+ * password the server then decodes into nonsense. Both answer `code=8000`.
+ *
+ * A character outside all four rows cannot be encoded at all, so it is reported rather than
+ * replaced or dropped.
  */
 object SecureKeyboardEncoder {
     const val SEPARATOR = "$1$"
 
-    fun encode(password: String, uuid: String): String? {
-        if (password.isEmpty() || uuid.isEmpty()) return null
-        return password + SEPARATOR + uuid
+    fun encode(password: String, keyboard: Keyboard): String? {
+        if (password.isEmpty() || keyboard.uuid.isEmpty()) return null
+        val out = StringBuilder(password.length + SEPARATOR.length + keyboard.uuid.length)
+        for (char in password) {
+            val token = keyboard.tokenFor(char) ?: return null
+            out.append(token)
+        }
+        return out.append(SEPARATOR).append(keyboard.uuid).toString()
     }
 
-    /** `{"data":{"uuid":"...","numberKeyboard":"..."}}` — only `uuid` is required. */
+    /** `{"data":{"uuid":"...","numberKeyboard":"...","lowerLetterKeyboard":"...", …}}` */
     fun parse(json: JSONObject): Keyboard? {
         val data = json.optJSONObject("data") ?: return null
-        val uuid = data.optString("uuid")
-        if (uuid.isBlank()) return null
-        return Keyboard(uuid.trim(), data.optString("numberKeyboard"))
+        val uuid = data.optString("uuid").trim()
+        if (uuid.isEmpty()) return null
+        return Keyboard(
+            uuid = uuid,
+            numberKeyboard = data.optString("numberKeyboard"),
+            lowerLetterKeyboard = data.optString("lowerLetterKeyboard"),
+            upperLetterKeyboard = data.optString("upperLetterKeyboard"),
+            symbolKeyboard = data.optString("symbolKeyboard")
+        )
     }
 }
 

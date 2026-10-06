@@ -77,6 +77,24 @@ Refresh it with:
 cd /home/zyubuntu/scutbombax/scutBombax && git bundle create ../evidence/scutBombax-main-full.bundle --branches --tags
 ```
 
+## 2026-10-06
+
+| SHA256 | Artifact | What it establishes |
+| --- | --- | --- |
+| `c6255c80d06207ce0f04a7844e8364cad09da7cba776677dbc93835f94f424a5` | `app-debug-2026-10-06T2303-substitution.apk` (4,781,497 B) | the clean build with the full four-row keyboard substitution; installed, not yet exercised |
+| `b66d92a0318bed1febafb2b16f84f142e764993c232095ee77ef22014df7b858` | `logcat-2026-10-06T2238-bombax-attempt.txt` | the three attempts: stale captcha → `8002`, fresh captcha → `8000`, i.e. captcha is evaluated before the credential pair |
+| `e5fd5e1204857c1325f4a7a4f5c6e6483755624c566ccb2cf6b1d572f5b1a42c` | `kb-tiles-number-2026-10-06.png` | the ten digit tiles, rendered from a credential-free `GET /berserker-secure/keyboard`, in the order `0 1 … 9` |
+| `f49c27895a57ef43ecd2ef22ad525df8a380227a2b26b8af449e46169915453c` | `kb-tiles-lower-2026-10-06.png` | the lowercase row in **QWERTY** tile order, not alphabetical |
+| `93766ff79880f0a387502b9a08bec9df4e3fa8fee70215625a99224ba85ef899` | `kb-tiles-upper-2026-10-06.png` | the uppercase row, same QWERTY order |
+| `3a30553b6632d08b37c2cf8f8b8e42230862187ff2169503ec280878f6dbc801` | `kb-tiles-symbol-2026-10-06.png` | the 29-glyph symbol row, whose order `SecureKeyboard.SYMBOL_ORDER` copies |
+
+These four strips are the evidence behind the keyboard claim in `PROTOCOL.md`: the response's
+token strings are random per session, but the **layouts are fixed**, which is what makes the
+substitution computable without a human tapping tiles. They contain no session value — the
+`uuid` and the token strings are not in them, and the per-session JSON was deliberately not
+archived.
+
+
 ## 2026-10-05
 
 | SHA256 | Artifact | What it establishes |
