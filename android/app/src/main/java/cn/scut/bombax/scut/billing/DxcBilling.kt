@@ -68,6 +68,16 @@ object DxcParser {
         return url
     }
 
+    /**
+     * Whether a hop already lands on the DFYC index page.
+     *
+     * `thirdLogin` answers this instead of bouncing back through `/oauth/authorize` when the
+     * school still holds a live DFYC session for the user — the handshake is finished, so it
+     * sends you where you were going. In a browser that is invisible; for the chain it means
+     * "already established", not "unexpected status".
+     */
+    fun landsOnIndex(url: HttpUrl): Boolean = url.encodedPath == ScutEndpoints.DFYC_INDEX
+
     /** The final hop of the chain is expected to land on the DFYC index page. */
     fun isIndexPage(location: String?, stage: String): Boolean {
         val path = location?.trim()

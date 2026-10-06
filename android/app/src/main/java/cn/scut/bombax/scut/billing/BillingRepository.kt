@@ -137,7 +137,40 @@ class BillingRepository(
         return url
     }
 
+    /**
+     * DXC needs a DFYC session, and that session is established by walking the SSO chain.
+     *
+     * The chain is only good once: while the school still holds the DFYC session it created,
+     * `thirdLogin` short-circuits to the DFYC index page instead of bouncing back through
+     * `/berserker-auth/oauth/authorize`, so a second walk of the same session fails on the
+     * `authorize` hop with "expected 302, got 200" (observed on a device on 2026-10-07, which
+     * is also what a 5-minute foreground timer hits on its first tick after login). So:
+     * reuse the session, and rebuild it only when the reuse is refused — once, never in a loop.
+     */
     private fun queryDxc(state: TokenState, now: Long): BalanceReading {
+        val held = state.dxcJsession
+        if (held.isNotBlank()) {
+            val direct = runCatching { readDxcBalances(held, now) }
+            val failure = direct.exceptionOrNull()
+            if (failure == null) return direct.getOrThrow()
+            if (failure !is ScutException || !isDxcSessionRefused(failure)) throw failure
+            Diag.warn("stage=dxc result=rebuild reason=session-refused")
+        }
+        val established = establishDxcSession(state)
+        session.save(state.copy(dxcJsession = established))
+        return readDxcBalances(established, now)
+    }
+
+    /**
+     * Only these two justify a rebuild: the DFYC session is gone (redirected to a login page or
+     * answered with a page instead of JSON). Every other failure is reported as it is, because
+     * rebuilding would just hide a protocol change behind a second identical error.
+     */
+    private fun isDxcSessionRefused(failure: ScutException): Boolean =
+        failure.error == AppError.REAUTH_REQUIRED || failure.error == AppError.PROTOCOL_CHANGED
+
+    /** Walks the SSO chain and returns the DFYC `JSESSIONID` it leaves behind. */
+    private fun establishDxcSession(state: TokenState): String {
         val startUrl = ScutEndpoints.cardUrl(ScutEndpoints.REDIRECT_PATH)
             .newBuilder()
             .addQueryParameter("appId", "360")
@@ -179,7 +212,14 @@ class BillingRepository(
         }
         Diag.event("stage=${Stages.DXC_THIRD_LOGIN} jsessionid=obtained")
 
-        val authorizeUrl = follow(thirdLogin, thirdLoginUrl, Stages.DXC_THIRD_LOGIN)
+        val hop = follow(thirdLogin, thirdLoginUrl, Stages.DXC_THIRD_LOGIN)
+        if (DxcParser.landsOnIndex(hop)) {
+            // The school already holds a live DFYC session for this user: the handshake is
+            // finished, so it sends us to the landing page instead of through /oauth/authorize.
+            Diag.event("stage=${Stages.DXC_THIRD_LOGIN} result=already-established")
+            return jsessionid
+        }
+
         val ssoCookies = cookieHeader(
             "JSESSIONID" to jsessionid,
             "TGC" to state.tgc,
@@ -188,11 +228,11 @@ class BillingRepository(
         )
         val authorize = http.send(
             Stages.DXC_AUTHORIZE,
-            Request.Builder().url(authorizeUrl).applyHeader("Cookie", ssoCookies).get().build()
+            Request.Builder().url(hop).applyHeader("Cookie", ssoCookies).get().build()
         )
         expectStatus(authorize, 302, Stages.DXC_AUTHORIZE)
 
-        val getCodeUrl = follow(authorize, authorizeUrl, Stages.DXC_AUTHORIZE)
+        val getCodeUrl = follow(authorize, hop, Stages.DXC_AUTHORIZE)
         val getCode = http.send(
             Stages.DXC_GET_CODE,
             Request.Builder().url(getCodeUrl).applyHeader("Cookie", ssoCookies).get().build()
@@ -200,7 +240,11 @@ class BillingRepository(
         expectStatus(getCode, 302, Stages.DXC_GET_CODE)
         DxcParser.isIndexPage(getCode.location, Stages.DXC_GET_CODE)
         Diag.event("stage=${Stages.DXC_GET_CODE} result=session-established")
+        return jsessionid
+    }
 
+    /** The three DFYC reads, with nothing but the session cookie they need. */
+    private fun readDxcBalances(jsessionid: String, now: Long): BalanceReading {
         val dfcCookies = cookieHeader("JSESSIONID" to jsessionid)
         val userInfo = http.send(
             Stages.DXC_USER_INFO,

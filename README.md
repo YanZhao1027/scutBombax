@@ -161,8 +161,13 @@ bogus-token probe answered HTTP 401 `Cannot convert access token to JSON`, and S
 client never sends the grant. The app therefore fails closed to re-login and never replays a
 stored password; the foreground timer only re-queries, it does not call the grant.
 
-**Not verified:** GZIC balances (this account's dormitory is DXC) and the foreground-refresh
-rules with a live session.
+**Not verified:** GZIC balances (this account's dormitory is DXC), and the foreground timer's
+pause-when-hidden rule — its 5-minute tick did fire exactly once and on time, but the query
+behind it exposed a real bug: the DXC SSO chain is single-use, so re-walking it while the
+school still holds the DFYC session makes `thirdLogin` redirect to the landing page and
+`authorize` answer 200 where 302 was expected. The app now keeps the DFYC session and goes
+straight to the three balance reads (3 requests instead of 7), rebuilding the chain only if
+a read refuses it. Awaiting one on-device re-login to confirm.
 Keep the phone on campus Wi-Fi or the school SSL VPN, use the **card query password**
 (校园卡查询密码, letters and digits, not the 6-digit payment PIN), stop after two `8000`
 attempts, and work through `docs/DEVICE_VERIFICATION.md` §2.1 before trying a third.

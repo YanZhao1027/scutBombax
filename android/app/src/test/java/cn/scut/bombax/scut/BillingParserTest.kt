@@ -5,6 +5,7 @@ import cn.scut.bombax.scut.billing.GzicParser
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -226,6 +227,32 @@ class DxcParserTest {
             caught = failure
         }
         assertEquals(AppError.PROTOCOL_CHANGED, caught?.error)
+    }
+
+    @Test
+    fun `a thirdLogin that lands on the index page means the session is already there`() {
+        // Observed on a device on 2026-10-07: walking the chain again while the school still
+        // holds the DFYC session redirects to the landing page instead of /oauth/authorize.
+        assertTrue(
+            DxcParser.landsOnIndex(
+                "https://dfyc.utc.scut.edu.cn/sdms-weixin-pay-sp/newWeixin/index.html".toHttpUrl()
+            )
+        )
+        assertTrue(
+            DxcParser.landsOnIndex(
+                "https://dfyc.utc.scut.edu.cn/sdms-weixin-pay-sp/newWeixin/index.html?x=1".toHttpUrl()
+            )
+        )
+        assertFalse(
+            DxcParser.landsOnIndex(
+                "https://ecardwxnew.scut.edu.cn/berserker-auth/oauth/authorize?appId=360".toHttpUrl()
+            )
+        )
+        assertFalse(
+            DxcParser.landsOnIndex(
+                "https://dfyc.utc.scut.edu.cn/sdms-weixin-pay-sp/service/ykt/getCode".toHttpUrl()
+            )
+        )
     }
 
     @Test

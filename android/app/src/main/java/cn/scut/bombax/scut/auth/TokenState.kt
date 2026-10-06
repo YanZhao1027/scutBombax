@@ -46,7 +46,15 @@ data class TokenState(
     val sno: String,
     val campus: Campus,
     /** A refresh must replay the type that obtained the token, not a default. */
-    val loginType: LoginType = LoginType.CARD
+    val loginType: LoginType = LoginType.CARD,
+    /**
+     * The DFYC (`dxc`) session cookie once the SSO chain has been walked, so a second query
+     * can go straight to the balance endpoints. It is not optional for correctness: re-running
+     * the chain with a live DFYC session makes `thirdLogin` short-circuit to the landing page
+     * instead of back through `/oauth/authorize`, which is not the shape the chain expects.
+     * In memory only, never sent to JavaScript, and never written to disk.
+     */
+    val dxcJsession: String = ""
 )
 
 /** Pure expiry decisions, unit-tested on the JVM. */

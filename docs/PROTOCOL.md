@@ -40,6 +40,7 @@ DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 | `grant_type=refresh_token` | **RUNTIME_VERIFIED 2026-10-06/07: not usable** — a real token answers HTTP 500, a bogus one HTTP 401 `Cannot convert access token to JSON`, and the school's own client never sends the grant | nothing to fix client-side |
 | GZIC fee item 1/2/3 semantics and units | SOURCE_VERIFIED | DEVICE_PENDING |
 | DXC redirect chain hop-by-hop requirements | **RUNTIME_VERIFIED 2026-10-06** — `redirect 302 → thirdLogin 302 (JSESSIONID issued) → authorize 302 → getCode 302 → userinfo/ammeterBalance/waterBalance 200` | whether `error_times` or any cookie is load-bearing beyond what worked |
+| the chain is single-use: re-walking it with a live DFYC session short-circuits at `thirdLogin` and breaks `authorize` | **RUNTIME_VERIFIED 2026-10-07** — `authorize` got 200 where 302 was expected; fixed by keeping and reusing the DFYC `JSESSIONID` | no |
 
 The only token request sent from the host was an empty-credential control probe; every
 credentialed request was made by the user on the phone.
@@ -513,9 +514,39 @@ dfyc session established
         +--> /service/waterBalance?type=3&systemType=1
 ```
 
-Use the old `src/utils/billing.ts` as the reference implementation.
+Verified on a physical device on 2026-10-06/07, for a DXC dormitory, with the app's own chain:
 
-Important: preserve manual redirect handling until each step is verified on Android. Automatic redirect following can hide cookies and Location headers needed by the flow.
+```text
+redirect 302 → thirdLogin 302 (sets JSESSIONID) → authorize 302 → getCode 302 → index page
+userinfo 200 · ammeterBalance?type=1 200 · waterBalance?type=3&systemType=1 200
+```
+
+**The chain is good for one DFYC session, and walking it twice is not idempotent.** While the
+school still holds the DFYC session the chain created, `thirdLogin` answers with a 302 straight
+to `/sdms-weixin-pay-sp/newWeixin/index.html` instead of bouncing back through
+`/berserker-auth/oauth/authorize`. Observed on 2026-10-07 as the first thing a 5-minute
+foreground timer does after login:
+
+```text
+dxc.thirdLogin 302 → hop host=dfyc.utc.scut.edu.cn path=/sdms-weixin-pay-sp/newWeixin/index.html
+dxc.authorize  GET  …/newWeixin/index.html  status=200     ← "expected 302, got 200"
+```
+
+In a browser that redirect is invisible — it means "you are already signed in, here is where
+you were going". So the app treats it that way:
+
+- the `JSESSIONID` obtained from a successful walk is kept in the in-memory session
+  (`TokenState.dxcJsession`, never sent to JavaScript, never written to disk);
+- a later query goes straight to the three DFYC reads — 3 requests instead of 7 — and the log
+  shows `dxc.userInfo/ammeterBalance/waterBalance` with no chain hops;
+- the chain is re-walked only when a read refuses the session (`REAUTH_REQUIRED` /
+  `PROTOCOL_CHANGED`), once, and the refusal is reported if the rebuild also fails;
+- a hop that lands on the index page is recognised by `DxcParser.landsOnIndex` rather than fed
+  to `authorize` as if it were a handshake step.
+
+Important: preserve manual redirect handling. Automatic redirect following hides the cookies
+and Location headers this flow depends on, and it would also silently swallow the
+already-established answer above.
 
 ## Diagnostics
 

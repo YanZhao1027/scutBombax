@@ -320,6 +320,28 @@ Record:
       experiment; the old Node code kept both)
 
 ## 8. Foreground-only refresh
+### 2026-10-07: the timer fired, and that is how the single-use chain was found
+
+With 自动刷新 = 5 分钟, a login at `00:17:23` was followed by a query at `00:22:23.040` —
+exactly one interval later, one query, no retry. The timing behaviour is right. The query itself
+failed, because it re-walked the DXC chain while the school still held the DFYC session that the
+login walk had created:
+
+```text
+dxc.thirdLogin 302 → hop …/sdms-weixin-pay-sp/newWeixin/index.html
+dxc.authorize  GET …/newWeixin/index.html status=200     → "dxc.authorize 期望 302，实际 200"
+```
+
+Fixed by keeping the DFYC `JSESSIONID` in the in-memory session and going straight to the three
+reads on every later query, re-walking the chain only if a read refuses the session. See
+`docs/PROTOCOL.md` "DXC billing".
+
+**Still to confirm with the user:** whether the app was in the foreground or the background at
+`00:22:23`. The timer is supposed to stop when the WebView is not visible, and an interval tick
+landing exactly on +5:00.0 is what a still-running timer looks like. If it fired while
+backgrounded, §8 is not satisfied and the pause path needs fixing — one question, no more
+attempts needed.
+
 
 AGENTS.md requires: no background service, no WorkManager, no alarms, at most one
 in-flight query, one bounded retry for transient failures, and captcha/reauth
