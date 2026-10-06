@@ -36,7 +36,7 @@ DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 | `captcha_header_code` / `captcha_header_key` | SOURCE_VERIFIED 2026-10-05, and a fresh captcha pair was accepted by the server on 2026-10-06 (the answer moved to `8000`, past the captcha stage) | no |
 | service codes `8002` / `8003` as captcha signals | `8002` RUNTIME_VERIFIED 2026-10-06; `8003` SOURCE_VERIFIED | `8003` |
 | successful login and `refresh_token` presence | **RUNTIME_VERIFIED 2026-10-06** — `stage=login.captchaForm status=200`, `result=ok campus=DXC refreshToken=present cookies=TGC,error_times,locSession` | `expires_in` unit (guarded by `ExpiryParser`) |
-| `grant_type=refresh_token` support and rotation | HYPOTHESIS | DEVICE_PENDING |
+| `grant_type=refresh_token` | **RUNTIME_VERIFIED 2026-10-06/07: not usable** — a real token answers HTTP 500, a bogus one HTTP 401 `Cannot convert access token to JSON`, and the school's own client never sends the grant | nothing to fix client-side |
 | GZIC fee item 1/2/3 semantics and units | SOURCE_VERIFIED | DEVICE_PENDING |
 | DXC redirect chain hop-by-hop requirements | **RUNTIME_VERIFIED 2026-10-06** — `redirect 302 → thirdLogin 302 (JSESSIONID issued) → authorize 302 → getCode 302 → userinfo/ammeterBalance/waterBalance 200` | whether `error_times` or any cookie is load-bearing beyond what worked |
 
@@ -415,21 +415,45 @@ Practical consequences:
 
 ## Refresh token
 
-Unverified on SCUT.
+**A refresh token is issued but the school does not accept the refresh grant.** Established on
+2026-10-06/07 from the phone:
 
-The Android implementation should test a standards-style request only after obtaining a real refresh token through normal user login.
+```text
+login:            result=ok … refreshToken=present        (the token IS handed out)
+our real attempt: POST /berserker-auth/oauth/token  grant_type=refresh_token
+                  → HTTP 500, body {"status":…,"code":400}
+bogus token     : same request with refresh_token=not-a-real-token-0000
+                  → HTTP 401, {"status":400,"message":"Cannot convert access token to JSON","code":400}
+                  identical with and without logintype / device_token / synAccessSource / loginFrom
+```
 
-Questions to answer:
+The bogus-token probe is credential-free and runs from the phone (`curl` on the campus
+network); it reaches a JWT parser, so the grant is wired up at all. The difference between
+`401` for a garbage token and `500` for the school's own token means the real token parses and
+the server then fails inside the refresh path — and the form fields are not the variable, since
+the minimal OAuth body and this app's full body produce byte-identical answers.
 
-- does `grant_type=refresh_token` succeed?
-- which extra form fields are required?
-- does the refresh token rotate?
-- what is the new `expires_in`?
-- are TGC and locSession refreshed?
-- does the refreshed access token work for GZIC?
-- can DXC rebuild SSO after refresh?
+Corroborating the conclusion, SCUT's own published client **never sends the grant**: the string
+`grant_type:"refresh_token"` occurs 0 times in its bundles, `refreshObj` (where it stores
+`refresh_token`, `expires_in`, `login_time`, `logintype`) is written but never read, and the
+only `grant_type` values anywhere are `password`. The school's H5 client re-authenticates with
+the password instead of refreshing.
 
-Failure must fall back to interactive reauthentication, not stored-password replay.
+Consequences for this app, already implemented:
+
+- `refreshSession()` fails closed to `REAUTH_REQUIRED`; the stored password is never replayed
+  (AGENTS.md), and the captcha is re-armed so the next login is ready to go;
+- the foreground timer never calls the grant — a tick is `getBills()` only — so an interval
+  selection cannot spam a request the school rejects;
+- the diagnostics panel states the finding next to the button that reproduces it;
+- "does the refreshed access token work for GZIC / can DXC rebuild SSO after refresh" are
+  therefore **not applicable**: there is no refreshed access token. Re-login re-runs the DXC
+  chain from `berserker-base/redirect`, which is verified working.
+
+Open only in the sense of curiosity: whether `expires_in` is seconds or milliseconds.
+`ExpiryParser` guards both, and the session pill prints the value it computed, so one glance at
+会话与诊断 answers it without another request.
+
 
 ## GZIC billing
 

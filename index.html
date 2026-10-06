@@ -181,6 +181,11 @@
             <button id="health-btn" class="text-button" type="button">健康检查</button>
             <button id="clear-btn" class="text-button danger" type="button">清除登录状态</button>
           </div>
+          <p class="privacy-note">
+            一卡通登录会下发 refresh_token，但实测学校端不接受
+            <code>grant_type=refresh_token</code>（官方网页客户端也从不刷新，只用密码授权重新登录）。
+            这个按钮用于复现该结论；token 到期后请重新登录。
+          </p>
           <pre class="log" id="native-log" aria-live="polite"></pre>
         </details>
       </section>

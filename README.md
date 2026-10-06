@@ -155,8 +155,14 @@ complete DXC chain — `redirect → thirdLogin → authorize → getCode → us
 waterBalance` — with the room and both balances rendered on screen and the air-conditioning
 card correctly reporting that the campus has no such fee item.
 
-**Not verified:** `grant_type=refresh_token` acceptance, GZIC balances (this account's
-dormitory is DXC), and the foreground-refresh rules with a live session.
+**Refresh:** a refresh token is issued, but the school does not accept
+`grant_type=refresh_token` — a real-token attempt answered HTTP 500, a credential-free
+bogus-token probe answered HTTP 401 `Cannot convert access token to JSON`, and SCUT's own
+client never sends the grant. The app therefore fails closed to re-login and never replays a
+stored password; the foreground timer only re-queries, it does not call the grant.
+
+**Not verified:** GZIC balances (this account's dormitory is DXC) and the foreground-refresh
+rules with a live session.
 Keep the phone on campus Wi-Fi or the school SSL VPN, use the **card query password**
 (校园卡查询密码, letters and digits, not the 6-digit payment PIN), stop after two `8000`
 attempts, and work through `docs/DEVICE_VERIFICATION.md` §2.1 before trying a third.

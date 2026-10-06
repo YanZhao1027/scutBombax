@@ -90,7 +90,7 @@ const renderSession = (session: SessionInfo | null): void => {
   els.sessionState.textContent = authed
     ? `会话：${session?.campus ?? '?'} · ${session?.name || '未命名'} · token 剩余 ${
         session && session.expiresIn >= 0 ? `${session.expiresIn}s` : '未知'
-      } · refresh_token ${session?.canRefresh ? '可用' : '无'}`
+      } · refresh_token ${session?.canRefresh ? '已下发' : '无'}`
     : '会话：未登录';
   if (!authed) {
     state.bills = null;
@@ -322,7 +322,7 @@ const wire = (): void => {
         );
         setStatus(
           els.resultsStatus,
-          result.refreshed ? 'token 刷新成功。' : 'token 刷新未成功，需要重新登录。',
+          result.refreshed ? 'token 刷新成功。' : '学校端不接受 token 刷新，token 到期后请重新登录。',
           result.refreshed ? 'ok' : 'error'
         );
         if (!result.refreshed) void loadCaptcha();

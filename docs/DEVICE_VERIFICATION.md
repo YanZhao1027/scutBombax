@@ -196,6 +196,35 @@ wrong password should land on `error=INVALID_CREDENTIALS`.
 
 ## 5. refresh_token
 
+### Resolved 2026-10-06/07: the school does not accept the refresh grant
+
+```text
+stage=token.refresh POST /berserker-auth/oauth/token status=500 serviceCode=400
+stage=token.refresh result=failed status=500 code=400
+```
+
+A credential-free control from the phone's own `curl` — same URL, same public client
+credential, `refresh_token=not-a-real-token-0000` — answers **HTTP 401**
+`{"status":400,"message":"Cannot convert access token to JSON","code":400}`, identically for the
+minimal OAuth body and for this app's full body, so the form fields are not the variable and the
+grant is wired up at all. The school's own token therefore parses and the server then fails
+inside its refresh path. SCUT's published client never sends the grant either
+(`grant_type:"refresh_token"` appears 0 times; it writes `refreshObj` and never reads it), which
+is the strongest available evidence that this is the deployment's intended behaviour.
+
+What the app does about it, and what §5 therefore no longer asks:
+
+- `refreshSession()` fails closed to `REAUTH_REQUIRED`; the stored password is never replayed;
+- the captcha is re-armed so re-login is one tap away;
+- a foreground tick is `getBills()` only — the timer never calls the grant, so no interval can
+  hammer a request the school rejects;
+- "does the refreshed token work for GZIC / can DXC rebuild SSO after refresh" are **not
+  applicable**: there is no refreshed token. Re-login re-runs the DXC chain, verified working.
+
+The only thing still worth reading off the screen is the `expires_in` unit: 会话与诊断 prints
+`token 剩余 <n>s`, so a plausible two-hour session means seconds. Do not send another refresh
+request to find out more — nothing about this answer changes.
+
 Press **测试 refresh_token** in the diagnostics row.
 
 Success:
