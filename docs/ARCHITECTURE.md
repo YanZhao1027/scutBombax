@@ -177,7 +177,7 @@ JVM unit tests (`android/app/src/test`) cover the parsers and decisions that wer
 against observed payloads: captcha response shape, secure-keyboard mapping, login error /
 service-code classification, token expiry maths, cookie extraction, log-line scrubbing, GZIC
 balance parsing, the DXC redirect resolution and the school's off-campus block page
-(68 tests across nine classes). Vitest covers `AutoRefresher` transitions, including
+(77 tests across ten classes). Vitest covers `AutoRefresher` transitions, including
 backgrounding and the bounded retry (15 tests).
 
 `pnpm native:test` and `pnpm apk` wrap Gradle in `scripts/with-jdk.sh`, which locates a JDK

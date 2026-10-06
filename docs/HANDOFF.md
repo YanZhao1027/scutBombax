@@ -35,8 +35,8 @@ captcha wrong" (and `8001` = "pick a student number"). `8002` was observed live 
 ## What is actually proven
 
 - `pnpm build` (`tsc --noEmit && vite build`), `pnpm test` (15 vitest),
-  `pnpm check:dom`, and `./gradlew clean testDebugUnitTest assembleDebug` (74 tests across
-  nine classes, BUILD SUCCESSFUL) all pass on this host, with no Android Studio and no IDE.
+  `pnpm check:dom`, and `./gradlew clean testDebugUnitTest assembleDebug` (77 tests across
+  ten classes, BUILD SUCCESSFUL) all pass on this host, with no Android Studio and no IDE.
   `pnpm native:test` / `pnpm apk` now route through `scripts/with-jdk.sh`, which finds a
   JDK with `javac` instead of relying on an exported `JAVA_HOME`.
 - The APK installs (`adb install -r` → Success) and starts on Android 14, and the bridge
