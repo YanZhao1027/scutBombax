@@ -221,9 +221,11 @@ What the app does about it, and what §5 therefore no longer asks:
 - "does the refreshed token work for GZIC / can DXC rebuild SSO after refresh" are **not
   applicable**: there is no refreshed token. Re-login re-runs the DXC chain, verified working.
 
-The only thing still worth reading off the screen is the `expires_in` unit: 会话与诊断 prints
-`token 剩余 <n>s`, so a plausible two-hour session means seconds. Do not send another refresh
-request to find out more — nothing about this answer changes.
+**`expires_in` is in seconds, and the value is `6048000` = 70 days** (the session pill read
+`token 剩余 6047998s` two seconds after login, 2026-10-07). That also explains the negative
+above: a client that only has to log in once every ten weeks has no reason to implement refresh,
+and SCUT's own web client indeed does not. No further refresh requests are needed or wanted —
+nothing about this answer changes, and each one costs a needless round trip to the school.
 
 Press **测试 refresh_token** in the diagnostics row.
 

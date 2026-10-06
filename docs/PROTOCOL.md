@@ -35,7 +35,8 @@ DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 | token field spelling `loginFrom` (not `loginForm`) | SOURCE_VERIFIED 2026-10-05 | no |
 | `captcha_header_code` / `captcha_header_key` | SOURCE_VERIFIED 2026-10-05, and a fresh captcha pair was accepted by the server on 2026-10-06 (the answer moved to `8000`, past the captcha stage) | no |
 | service codes `8002` / `8003` as captcha signals | `8002` RUNTIME_VERIFIED 2026-10-06; `8003` SOURCE_VERIFIED | `8003` |
-| successful login and `refresh_token` presence | **RUNTIME_VERIFIED 2026-10-06** — `stage=login.captchaForm status=200`, `result=ok campus=DXC refreshToken=present cookies=TGC,error_times,locSession` | `expires_in` unit (guarded by `ExpiryParser`) |
+| successful login and `refresh_token` presence | **RUNTIME_VERIFIED 2026-10-06** — `stage=login.captchaForm status=200`, `result=ok campus=DXC refreshToken=present cookies=TGC,error_times,locSession` | no |
+| `expires_in` is seconds, and SCUT issues a **70-day** access token (`6048000`) | **RUNTIME_VERIFIED 2026-10-07** — the session pill read `token 剩余 6047998s` two seconds after login | no |
 | `grant_type=refresh_token` | **RUNTIME_VERIFIED 2026-10-06/07: not usable** — a real token answers HTTP 500, a bogus one HTTP 401 `Cannot convert access token to JSON`, and the school's own client never sends the grant | nothing to fix client-side |
 | GZIC fee item 1/2/3 semantics and units | SOURCE_VERIFIED | DEVICE_PENDING |
 | DXC redirect chain hop-by-hop requirements | **RUNTIME_VERIFIED 2026-10-06** — `redirect 302 → thirdLogin 302 (JSESSIONID issued) → authorize 302 → getCode 302 → userinfo/ammeterBalance/waterBalance 200` | whether `error_times` or any cookie is load-bearing beyond what worked |
@@ -450,9 +451,12 @@ Consequences for this app, already implemented:
   therefore **not applicable**: there is no refreshed access token. Re-login re-runs the DXC
   chain from `berserker-base/redirect`, which is verified working.
 
-Open only in the sense of curiosity: whether `expires_in` is seconds or milliseconds.
-`ExpiryParser` guards both, and the session pill prints the value it computed, so one glance at
-会话与诊断 answers it without another request.
+And the reason the grant is unused becomes obvious with the expiry in hand: **`expires_in` is
+`6048000`, i.e. 70 days** (the session pill read `token 剩余 6047998s` two seconds after login,
+RUNTIME_VERIFIED 2026-10-07). A campus client that re-authenticates at most once every ten weeks
+has no use for token refresh — which is consistent with the official client never sending the
+grant. `ExpiryParser`'s seconds/milliseconds guard stays, but the seconds branch is now the
+observed one.
 
 
 ## GZIC billing

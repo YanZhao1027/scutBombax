@@ -115,12 +115,31 @@ captcha wrong" (and `8001` = "pick a student number"). `8002` was observed live 
    the second independent reason login has failed; the first is the keyboard encoding
    (decision 7).
 
+10. **No background refresh, no stored password, no captcha OCR — and the 70-day token is why
+    none of them are needed.** Three tempting "convenience" additions were considered and
+    rejected on 2026-10-07, after login was verified:
+    - *a resident background refresh.* AGENTS.md forbids a Service, WorkManager and alarms, and
+      the requirement it protects is gone: the access token lasts `6048000` seconds (70 days),
+      so there is nothing to keep alive, and balances only matter while the screen is up. The
+      school also counts failed attempts (`error_times`), so background retries would poll a
+      rate-limited endpoint for no benefit.
+    - *storing the card password.* AGENTS.md says never persist it by default, and refresh
+      cannot be built on top of it anyway ("do not automatically replay a stored password").
+      Re-login is at most once per ten weeks. If typing the password is the pain, the answer is
+      Android's own autofill / the user's password manager (`autocomplete="current-password"`),
+      which keeps the credential under the OS and never in this app's files — see
+      `docs/ARCHITECTURE.md` for the session-storage decision this follows.
+    - *an on-device model that solves the captcha.* AGENTS.md states "No OCR is planned", and
+      the deeper problem is that solving it is defeating an anti-automation control the school
+      deliberately put on its own login, next to a lockout counter. This belongs to the same
+      category as the proxy/bypass that was already refused: the app asks a human, and a human
+      answers, once every ten weeks.
+
 ## To close the remaining phases
 
-A phone is attached, authorized, on the campus wireless network, and running the corrected
-build. The next thing to observe is a **successful login** (§4), and it needs the user's own
-card query password typed on the phone — never by the assistant. Two attempts max, then stop
-and read the log; SCUT's lockout policy is undocumented.
+Login works (§4) and the DXC chain runs end to end (§7), so the protocol questions that
+needed a session are closed. What is left is narrower than the original checklist and mostly
+needs a different account rather than more attempts with this one.
 
 ```bash
 ./scripts/check-env.sh           # should report "1 authorized device(s) attached"
@@ -130,11 +149,20 @@ $adb shell curl -sS -o /dev/null -w 'HTTP=%{http_code}\n' \
 $adb logcat -c && $adb logcat -s ScutBombax:V
 ```
 
-Then work through [`DEVICE_VERIFICATION.md`](DEVICE_VERIFICATION.md): §4 (login) unblocks
-§2 (deliberately wrong captcha → the runtime captcha service code), §5 (`refresh_token`),
-§6 (GZIC), §7 (DXC) and §8 (foreground refresh). Nothing there should be marked working
-until its log lines appear. If §4 answers `code=8000` again, follow §2.1 in that file before
-retrying: the encoding, then the field spelling, then which password the user typed.
+Remaining items in [`DEVICE_VERIFICATION.md`](DEVICE_VERIFICATION.md):
+
+- **§8 foreground refresh with a live session** — the only behavioural check left that this
+  account can exercise: pick 5 minutes, background the app for ~6, return, and confirm exactly
+  one catch-up query and zero requests while hidden.
+- **§6 GZIC** — needs a GZIC dormitory. This account's room is DXC, so the fee-item semantics
+  and units stay SOURCE_VERIFIED; do not "verify" them by querying GZIC with a DXC room.
+- **§2's wrong-captcha case** — `8002` is already observed; `8003` is not worth chasing, the
+  classifier treats both identically.
+- **§9/§10 re-audit after a session exists** — the on-disk and logcat leakage checks were run
+  when no session had ever existed; re-run them now that TGC/locSession/JSESSIONID have been
+  live in memory. The install with the current wording changes (`4644f297…`) is built but was
+  deliberately not pushed to the phone in order to keep the session alive; it goes on with the
+  next re-login.
 
 Deliberately not done: routing the phone's traffic through this workstation's tunnel to
 make its source address acceptable. That is an access-control bypass of the school's own
@@ -144,14 +172,22 @@ the phone by the user.
 
 ## Remaining protocol uncertainty
 
-- whether the corrected password encoding is the one SCUT accepts (one login settles it)
-- the service codes the school actually returns for each captcha state (`8002` / `8003` are
-  documented by its own client, not yet observed here)
-- whether `expires_in` is seconds or millis in practice (guarded by `ExpiryParser`), and
-  whether a refresh token is issued, rotates, or is even accepted by `/oauth/token`
-- whether `TGC` and `locSession` are both required for the DXC chain, and whether the
-  `getCode` hop still terminates on `/sdms-weixin-pay-sp/newWeixin/index.html`
-- the exact unit semantics of each GZIC fee item string (yuan vs kWh vs cubic metres), and
-  whether fee item `2` exists for every dormitory
-- whether any SCUT logout endpoint exists — the app only clears client-side state, and does
-  not invent an endpoint
+Closed since the first successful login: the password encoding, the login type, the captcha
+field names, `8002`, `expires_in` (**seconds; `6048000` = 70 days**) and the refresh grant
+(issued but not accepted, and unnecessary at a 70-day lifetime).
+
+What is genuinely still unknown:
+
+- `8003` — documented by the school's own client as the other captcha code, never observed here.
+  No reason to chase it: the classifier already treats both identically.
+- Whether `TGC` and `locSession` are each individually required by the DXC chain. The chain
+  works while the app sends both, so removing one would be an experiment against the school for
+  no user benefit.
+- GZIC fee-item semantics and units, and whether fee item `2` exists for every dormitory. This
+  account's dormitory is DXC, so GZIC needs a GZIC room to verify — the parser is unit-tested
+  against the old implementation's shapes and nothing more.
+- Whether any SCUT logout endpoint exists. The app clears client-side state only and does not
+  invent an endpoint.
+- `error_times`: the card host sets this cookie, so it counts failed attempts, but the threshold
+  and the lockout behaviour are undocumented. That is an argument for the two-attempt cap in
+  `DEVICE_VERIFICATION.md` §2.1, not for testing it.
