@@ -40,7 +40,7 @@ DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 | `grant_type=refresh_token` | **RUNTIME_VERIFIED 2026-10-06/07: not usable** — a real token answers HTTP 500, a bogus one HTTP 401 `Cannot convert access token to JSON`, and the school's own client never sends the grant | nothing to fix client-side |
 | GZIC fee item 1/2/3 semantics and units | SOURCE_VERIFIED | DEVICE_PENDING |
 | DXC redirect chain hop-by-hop requirements | **RUNTIME_VERIFIED 2026-10-06** — `redirect 302 → thirdLogin 302 (JSESSIONID issued) → authorize 302 → getCode 302 → userinfo/ammeterBalance/waterBalance 200` | whether `error_times` or any cookie is load-bearing beyond what worked |
-| the chain is single-use: re-walking it with a live DFYC session short-circuits at `thirdLogin` and breaks `authorize` | **RUNTIME_VERIFIED 2026-10-07** — `authorize` got 200 where 302 was expected; fixed by keeping and reusing the DFYC `JSESSIONID` | no |
+| the chain is single-use: re-walking it with a live DFYC session short-circuits at `thirdLogin` and breaks `authorize` | **RUNTIME_VERIFIED 2026-10-07** — `authorize` got 200 where 302 was expected; the fix (keep and reuse the DFYC `JSESSIONID`) is **also RUNTIME_VERIFIED**: two refreshes after a login sent only the three balance reads | no |
 
 The only token request sent from the host was an empty-credential control probe; every
 credentialed request was made by the user on the phone.
@@ -533,7 +533,10 @@ dxc.authorize  GET  …/newWeixin/index.html  status=200     ← "expected 302, 
 ```
 
 In a browser that redirect is invisible — it means "you are already signed in, here is where
-you were going". So the app treats it that way:
+you were going". So the app treats it that way, and the reuse was confirmed on the device on
+2026-10-07: one login walked the chain, and the two refreshes nine and ten seconds later each
+sent only `dxc.userInfo`, `dxc.ammeterBalance` and `dxc.waterBalance` (3 requests instead of 7,
+all 200, `stage=dxc result=ok`) with no chain hops at all:
 
 - the `JSESSIONID` obtained from a successful walk is kept in the in-memory session
   (`TokenState.dxcJsession`, never sent to JavaScript, never written to disk);

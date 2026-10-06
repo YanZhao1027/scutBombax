@@ -336,6 +336,12 @@ Fixed by keeping the DFYC `JSESSIONID` in the in-memory session and going straig
 reads on every later query, re-walking the chain only if a read refuses the session. See
 `docs/PROTOCOL.md` "DXC billing".
 
+**Confirmed 01:01 on 2026-10-07:** after a login that walked the chain, two manual refreshes
+nine and ten seconds later each produced only `dxc.userInfo` + `dxc.ammeterBalance` +
+`dxc.waterBalance` (200, `stage=dxc result=ok`) with **no** `redirect`/`thirdLogin`/`authorize`/
+`getCode` lines — the DFYC session is reused, 3 requests instead of 7, and the second query no
+longer fails. §7 is closed for good.
+
 **Still to confirm with the user:** whether the app was in the foreground or the background at
 `00:22:23`. The timer is supposed to stop when the WebView is not visible, and an interval tick
 landing exactly on +5:00.0 is what a still-running timer looks like. If it fired while

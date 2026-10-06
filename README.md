@@ -167,7 +167,8 @@ behind it exposed a real bug: the DXC SSO chain is single-use, so re-walking it 
 school still holds the DFYC session makes `thirdLogin` redirect to the landing page and
 `authorize` answer 200 where 302 was expected. The app now keeps the DFYC session and goes
 straight to the three balance reads (3 requests instead of 7), rebuilding the chain only if
-a read refuses it. Awaiting one on-device re-login to confirm.
+a read refuses it — confirmed on the device: two refreshes after a login produced only the
+three reads, all 200.
 Keep the phone on campus Wi-Fi or the school SSL VPN, use the **card query password**
 (校园卡查询密码, letters and digits, not the 6-digit payment PIN), stop after two `8000`
 attempts, and work through `docs/DEVICE_VERIFICATION.md` §2.1 before trying a third.
