@@ -390,21 +390,36 @@ Never written anywhere: the card password, the captcha answer, the keyboard uuid
 field in `TokenState` for any of them, and `SessionPersistenceTest` pins the exact key set of
 the serialised record so a future field cannot add one quietly.
 
-Expected behaviour now:
+Verified on the device on 2026-10-07, in this order, with one login:
 
-- [ ] log in, then `adb shell am force-stop cn.scut.bombax`, relaunch → the app shows **已登录**
-      and the balances without asking for a password. (`stage=session result=restored
-      campus=… expiresIn=…s` in logcat.) A restart that still logs out means the Keystore or
-      the file write failed — look for `result=disk-disabled` / `result=not-persisted`.
-- [ ] pressing **Back** to leave the app must NOT log out: the plugin's destroy path calls
-      `dropMemory()`, not `clear()`. This is the trap the first implementation fell into.
-- [ ] **退出** / **清除登录状态** wipes both copies: the file is gone and the next start is
-      anonymous.
-- [ ] an expired record is dropped on arrival (`result=discarded reason=expired`), never shown
-      as logged in.
-- [ ] deleting the Keystore key (or copying the file to another device) yields
-      `result=discarded reason=undecryptable` and an anonymous start — not a crash.
-- [ ] the password field stays empty on restart and no autofill offers a stored credential.
+- [x] **the record is written and is opaque.** `no_backup/scut-session.bin`, 1561 bytes, mode
+      `-rw-------`, first bytes `01 0c …` (envelope version, then a 12-byte nonce length).
+      Grepping the file for `accessToken`, `TGC`, `locSession`, `JSESSIONID`, `DXC`, `sno` or
+      the display name returns nothing.
+- [x] **a process death does not log out.** `am force-stop` + relaunch →
+      `stage=session result=restored campus=DXC refreshToken=present expiresIn=6047797s`, the
+      pill shows 已登录, and the page then queries on its own: three reads
+      (`dxc.userInfo` / `ammeterBalance` / `waterBalance`, all 200) with **no** chain hops, so
+      the stored DFYC session survived too. `expiresIn` counting down across the restart also
+      settles the `expires_in` unit question: seconds, 70 days.
+- [x] **pressing Back does not log out** — the `dropMemory()` path, which is what the first
+      implementation got wrong by calling `clear()`.
+- [x] **退出 wipes both copies.** `stage=logout result=cleared`, `no_backup/` is empty
+      afterwards, and the next start is anonymous with a fresh captcha.
+- [x] **the UI choices survive independently of the session.** After 退出 and a reinstall the
+      form still shows DXC · 大学城校区 and 学工号登录 while 未登录 — those come from
+      `localStorage`, and the HTML default is GZIC, so the restore is visible.
+- [ ] an expired record is dropped on arrival (`result=discarded reason=expired`) — unit-tested
+      only; 70 days is not a window anyone is going to wait out.
+- [ ] a Keystore key that no longer exists yields `result=discarded reason=undecryptable` rather
+      than a crash — unit-tested with a different key; not reproducible on this device without
+      wiping app data.
+
+Two findings from this run, both fixed the same evening: the startup probe caught
+`Provider AndroidKeyStore does not provide AES/GCM/NoPadding` and a one-byte-short nonce
+packing (`ArrayIndexOutOfBoundsException`), and a restored session used to render 已登录 over
+an empty card set because nothing queried — `boot()` now runs one `restore` query and the
+campus picker follows the session instead of the HTML default.
 
 The 2026-10-05 and 2026-10-07 runs below are kept because they are what justified the original
 claim; they describe the memory-only build, not this one.

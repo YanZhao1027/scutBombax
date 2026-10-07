@@ -137,6 +137,9 @@ const renderSession = (session: SessionInfo | null): void => {
   els.pill.dataset.state = authed ? 'ok' : 'off';
   els.pill.innerHTML = `<i></i> ${authed ? '已登录' : '未登录'}`;
   els.panelResults.hidden = !authed;
+  // The picker must not disagree with the session it belongs to: a restored DXC session with
+  // GZIC showing would make the next login query the wrong campus.
+  if (authed && session?.campus) els.campus.value = session.campus;
   els.sessionState.textContent = authed
     ? `会话：${session?.campus ?? '?'} · ${session?.name || '未命名'} · token 剩余 ${
         session && session.expiresIn >= 0 ? `${session.expiresIn}s` : '未知'
@@ -203,7 +206,7 @@ const setBusy = (busy: boolean): void => {
 };
 
 /** Single entry point for querying so the UI can never overlap requests. */
-const query = async (source: 'manual' | 'auto' | 'login'): Promise<TickOutcome> => {
+const query = async (source: 'manual' | 'auto' | 'login' | 'restore'): Promise<TickOutcome> => {
   if (state.querying) return 'error';
   setBusy(true);
   try {
@@ -433,7 +436,17 @@ const boot = async (): Promise<void> => {
     const result = await api.health();
     renderSession(result.session);
     appendLog(`health → ok platform=${result.platform} app=${result.appVersion}`);
-    if (!result.session.authenticated) void loadCaptcha();
+    // Prefs are needed most when the user is about to log in, so apply them on both paths —
+    // gating them on an existing session left the pickers on their HTML defaults after 退出.
+    applyPrefs(result.session.authenticated);
+    if (result.session.authenticated) {
+      // A restored session is only useful if it shows something. Without this the pill says
+      // 已登录 while the cards stay empty until the user thinks to press 立即刷新.
+      els.captchaImage.innerHTML = '<span class="captcha-placeholder">已登录，暂不需要</span>';
+      if (refresher.getIntervalMs() === 0) void query('restore');
+    } else {
+      void loadCaptcha();
+    }
   } catch (error) {
     appendLog(describeError(error));
     setStatus(els.loginStatus, '原生桥不可用，请在 Android 设备上运行。', 'error');
