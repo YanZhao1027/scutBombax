@@ -26,20 +26,15 @@
       <section id="results-panel" hidden>
         <p class="room"><strong id="room-name">宿舍</strong><span id="user-name"></span></p>
 
-        <dl class="figures" aria-live="polite">
-          <div>
-            <dt>电<span id="electric-unit">平台返回余额 · 元</span></dt>
-            <dd id="electric-value">—</dd>
-          </div>
-          <div>
-            <dt>水<span id="water-unit">平台返回余额 · 元</span></dt>
-            <dd id="water-value">—</dd>
-          </div>
-          <div>
-            <dt>空调<span id="ac-unit">平台返回余额 · 元</span></dt>
-            <dd id="ac-value">—</dd>
-          </div>
-        </dl>
+        <figure class="electric" aria-live="polite">
+          <figcaption>电费余额<span id="electric-unit">平台返回余额 · 元</span></figcaption>
+          <p id="electric-value">—</p>
+        </figure>
+
+        <p class="secondary" aria-live="polite">
+          <span>水费 <strong id="water-value">—</strong><span id="water-unit"></span></span>
+          <span id="ac-row">空调 <strong id="ac-value">—</strong><span id="ac-unit"></span></span>
+        </p>
 
         <p class="meta">
           <button id="query-button" type="button">刷新</button>

@@ -29,6 +29,7 @@ const els = {
   electric: $<HTMLElement>('electric-value'),
   water: $<HTMLElement>('water-value'),
   ac: $<HTMLElement>('ac-value'),
+  acRow: $<HTMLElement>('ac-row'),
   electricUnit: $<HTMLElement>('electric-unit'),
   waterUnit: $<HTMLElement>('water-unit'),
   acUnit: $<HTMLElement>('ac-unit'),
@@ -163,17 +164,20 @@ const renderBills = (bills: Bills | null): void => {
   if (!bills) {
     els.room.textContent = '宿舍';
     for (const el of [els.electric, els.water, els.ac]) el.textContent = '—';
+    els.acRow.hidden = true;
     els.updatedAt.textContent = '等待查询';
     return;
   }
   els.room.textContent = bills.room || '未知房间';
   els.electric.textContent = formatValue(bills.electric);
   els.water.textContent = formatValue(bills.water);
-  els.ac.textContent = formatValue(bills.ac);
   els.electricUnit.textContent = bills.electricUnit || '平台返回余额';
   els.waterUnit.textContent = bills.waterUnit || '平台返回余额';
-  els.acUnit.textContent =
-    bills.ac === null ? '该校区无空调费数据' : bills.acUnit || '平台返回余额';
+  // The school has no air-conditioning fee item for this dormitory, so the row is removed
+  // rather than shown as zero — but a campus that does return one still displays it.
+  els.acRow.hidden = bills.ac === null;
+  els.ac.textContent = formatValue(bills.ac);
+  els.acUnit.textContent = bills.acUnit || '元';
   els.updatedAt.textContent = new Date(bills.updatedAt).toLocaleTimeString('zh-CN', {
     hour12: false
   });
