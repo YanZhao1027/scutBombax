@@ -110,6 +110,15 @@ adb logcat -s ScutBombax:V
 
 Use a physical Android phone for protocol testing. An emulator is not required.
 
+## Interface
+
+One column, one screen at a time, no cards and no shadows: the login form while signed out,
+the room and three figures while signed in, with 会话与诊断 collapsed underneath. Light and
+dark follow the system, `prefers-reduced-motion` is honoured, and the front-end is ~11 KB of
+source (5.9 KB HTML + 5.1 KB CSS). The previous, heavier layout is preserved as the tag
+`v0.1-classic-ui`; the native protocol layer is identical between them.
+
+
 ## Current status
 
 Implemented and green on the host:

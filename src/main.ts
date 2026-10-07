@@ -137,6 +137,8 @@ const renderSession = (session: SessionInfo | null): void => {
   els.pill.dataset.state = authed ? 'ok' : 'off';
   els.pill.innerHTML = `<i></i> ${authed ? '已登录' : '未登录'}`;
   els.panelResults.hidden = !authed;
+  // One screen at a time: the login form has nothing to do above a live session.
+  els.panelLogin.hidden = authed;
   // The picker must not disagree with the session it belongs to: a restored DXC session with
   // GZIC showing would make the next login query the wrong campus.
   if (authed && session?.campus) els.campus.value = session.campus;

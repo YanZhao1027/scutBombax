@@ -659,3 +659,25 @@ any 11+ digit run (student number)  any 32-hex string  any IPv4  device serial  
 
 So "session state is memory-only, and the password is never persisted" is now verified against a
 live session rather than argued from the code. §9 and §10 are closed.
+
+## 11. UI rewrite smoke list (2026-10-07)
+
+The front-end was rewritten the same day into a single-column, one-screen-at-a-time layout
+(`v0.1-classic-ui` keeps the old one). The Kotlin/OkHttp layer is byte-for-byte unchanged, so
+every protocol grade above still applies; what changed is which DOM the verified paths drive.
+
+Already seen on the device: signed-in screen in both light and dark, the three figures, the
+collapsed diagnostics, and the stored 30-minute interval restored as selected.
+
+Not yet seen on the device, because the login form is hidden while a session is live and
+checking it means logging out:
+
+- [ ] the login form renders correctly when signed out (two selects, account, password,
+      captcha row, submit) and a real login still works through it
+- [ ] 换一张 and tapping the captcha image still swap the image
+- [ ] the error line under the form still carries the redacted `CODE [stage/status]` text
+- [ ] 退出 from the new layout returns to the signed-out screen and wipes the stored session
+- [ ] the diagnostics panel still shows 会话：… and the log lines
+
+None of these is a protocol question; they are layout and wiring. Run them at the next natural
+re-login rather than spending a credential attempt on them deliberately.

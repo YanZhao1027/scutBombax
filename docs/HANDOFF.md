@@ -31,6 +31,7 @@ rules with a live session.
 | DFYC session lifetime | the缴费 session behind the DXC reads lasts **tens of minutes**, and when it dies the JSON endpoints answer **302 → `/berserker-auth/oauth/authorize`**, not 401. Observed 2026-10-07: stale 49 minutes after login. The app now recognises that as "session stale", rebuilds the chain once and retries (verified on device); reporting it as an upstream outage was the original bug | RUNTIME_VERIFIED 2026-10-07 |
 | foreground refresh result | `@capacitor/app` `isActive` events were observed on the device (`{"isActive":true}` in the bridge log), but the timer semantics are verified only by 15 vitest state-machine cases; no logged-in refresh has run | NOT_TESTED (with a session) |
 | remaining protocol uncertainty | see below | — |
+| UI | rewritten 2026-10-07 into a single-column, one-screen layout (5.9 KB HTML + 5.1 KB CSS, light/dark from the system, reduced-motion honoured). The old layout is tagged `v0.1-classic-ui` and the native layer is untouched, so the protocol grades above are unaffected. The signed-in screen is verified in both themes; the signed-out form has not been rendered on a device yet because checking it means logging out | RUNTIME_VERIFIED (signed-in), NOT_TESTED (signed-out form) |
 
 Service codes `8002` / `8003` are no longer folklore: the login chunk compares the token
 response's service code against exactly those two values to decide "captcha required /
