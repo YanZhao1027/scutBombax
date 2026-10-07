@@ -11,6 +11,20 @@ import org.json.JSONObject
  * DFYC (大学城水电费) response parsing, kept pure so the shapes in
  * `src/utils/billing.ts` can be unit-tested without a network.
  */
+/**
+ * How to read a DFYC answer that is not a JSON body.
+ *
+ * The缴费 endpoints are same-origin JSON calls behind a session cookie. When that cookie's
+ * session has lapsed the endpoint does not answer 401 — it answers a **302 to its own login
+ * page**, which is what a browser expects and an API client does not. Treating that as
+ * "upstream unavailable" tells the user the school is down when in fact one session simply
+ * expired, so the redirect and the two unauthorised statuses are recognised here as "this
+ * session is stale" and the caller rebuilds it.
+ */
+object DxcSession {
+    fun isStale(status: Int): Boolean = status in 300..399 || status == 401 || status == 403
+}
+
 object DxcParser {
 
     const val OK_STATUS = "200"

@@ -150,24 +150,29 @@ class BillingRepository(
     private fun queryDxc(state: TokenState, now: Long): BalanceReading {
         val held = state.dxcJsession
         if (held.isNotBlank()) {
-            val direct = runCatching { readDxcBalances(held, now) }
-            val failure = direct.exceptionOrNull()
-            if (failure == null) return direct.getOrThrow()
-            if (failure !is ScutException || !isDxcSessionRefused(failure)) throw failure
-            Diag.warn("stage=dxc result=rebuild reason=session-refused")
+            try {
+                return readDxcBalances(held, now)
+            } catch (stale: DxcSessionStale) {
+                // The card token is still fine; only the缴费 session died. Rebuild it once and
+                // do not surface this as an outage.
+                Diag.warn("stage=dxc result=session-stale detail=${stale.detail}")
+            }
         }
         val established = establishDxcSession(state)
         session.save(state.copy(dxcJsession = established))
-        return readDxcBalances(established, now)
+        return try {
+            readDxcBalances(established, now)
+        } catch (stale: DxcSessionStale) {
+            throw ScutException(
+                AppError.PROTOCOL_CHANGED,
+                "缴费系统持续拒绝新会话，请稍后重试或重新登录",
+                "dxc/rebuild-failed/${stale.detail}"
+            )
+        }
     }
 
-    /**
-     * Only these two justify a rebuild: the DFYC session is gone (redirected to a login page or
-     * answered with a page instead of JSON). Every other failure is reported as it is, because
-     * rebuilding would just hide a protocol change behind a second identical error.
-     */
-    private fun isDxcSessionRefused(failure: ScutException): Boolean =
-        failure.error == AppError.REAUTH_REQUIRED || failure.error == AppError.PROTOCOL_CHANGED
+    /** A DFYC read that says "this session is gone"; never escapes the class. */
+    private class DxcSessionStale(val detail: String) : Exception(detail)
 
     /** Walks the SSO chain and returns the DFYC `JSESSIONID` it leaves behind. */
     private fun establishDxcSession(state: TokenState): String {
@@ -254,6 +259,7 @@ class BillingRepository(
                 .get()
                 .build()
         )
+        refuseStaleSession(userInfo, Stages.DXC_USER_INFO)
         val userInfoJson = DxcParser.requireOk(requireJson(userInfo, Stages.DXC_USER_INFO), Stages.DXC_USER_INFO)
         val room = DxcParser.roomName(userInfoJson)
             ?: throw ScutException(
@@ -275,6 +281,7 @@ class BillingRepository(
                 .get()
                 .build()
         )
+        refuseStaleSession(ammeter, Stages.DXC_AMMETER)
         val ammeterJson = DxcParser.requireOk(requireJson(ammeter, Stages.DXC_AMMETER), Stages.DXC_AMMETER)
 
         val water = http.send(
@@ -291,6 +298,7 @@ class BillingRepository(
                 .get()
                 .build()
         )
+        refuseStaleSession(water, Stages.DXC_WATER)
         val waterJson = DxcParser.requireOk(requireJson(water, Stages.DXC_WATER), Stages.DXC_WATER)
 
         val electric = DxcParser.money(ammeterJson)
@@ -317,6 +325,19 @@ class BillingRepository(
     }
 
     // ------------------------------------------------------------- shared
+
+    /**
+     * Turns a DFYC answer that means "session gone" into [DxcSessionStale] before the generic
+     * JSON check can report it as an upstream outage. Only the destination host and path of the
+     * redirect are recorded, never its query — the school puts tokens in those.
+     */
+    private fun refuseStaleSession(response: ScutResponse, stage: String) {
+        if (!DxcSession.isStale(response.status)) return
+        val target = response.location?.substringBefore('?')?.takeIf { it.isNotBlank() } ?: "-"
+        // scrub() as a second line of defence: a redirect target is allowed in a log line,
+        // an embedded credential is not.
+        throw DxcSessionStale(Diag.scrub("$stage/${response.status} target=$target"))
+    }
 
     private fun requireJson(response: ScutResponse, stage: String): JSONObject {
         if (response.status == 401 || response.status == 403) {

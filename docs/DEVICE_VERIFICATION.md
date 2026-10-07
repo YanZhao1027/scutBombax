@@ -342,6 +342,24 @@ nine and ten seconds later each produced only `dxc.userInfo` + `dxc.ammeterBalan
 `getCode` lines — the DFYC session is reused, 3 requests instead of 7, and the second query no
 longer fails. §7 is closed for good.
 
+### 2026-10-07, 20:02 and 20:19: the DFYC session expires, and it says so with a 302
+
+A query 49 minutes after login answered `dxc.userInfo 302` and the user was told
+**上游暂不可用** — a wrong diagnosis produced by our own classification: a redirect is not an
+outage. Fixed the same evening (`DxcSession.isStale` + one rebuild, then the reads), and
+verified on the device:
+
+```text
+20:19:58  dxc.userInfo 302 → result=session-stale detail=dxc.userInfo/302 target=…/oauth/authorize
+20:20:09  redirect → thirdLogin → authorize → getCode → session-established
+20:20:09  userInfo 200 · ammeterBalance 200 · waterBalance 200 → result=ok
+```
+
+A second defect surfaced while testing it: a restored session armed the timer from stored
+preferences and then relied on that timer for its first query — but the page can still report
+itself hidden at that moment, so nothing queried and the pill said 已登录 over empty cards
+again. `boot()` now always runs one `restore` query.
+
 **Still to confirm with the user:** whether the app was in the foreground or the background at
 `00:22:23`. The timer is supposed to stop when the WebView is not visible, and an interval tick
 landing exactly on +5:00.0 is what a still-running timer looks like. If it fired while

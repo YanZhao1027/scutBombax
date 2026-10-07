@@ -1,6 +1,7 @@
 package cn.scut.bombax.scut
 
 import cn.scut.bombax.scut.billing.DxcParser
+import cn.scut.bombax.scut.billing.DxcSession
 import cn.scut.bombax.scut.billing.GzicParser
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONObject
@@ -227,6 +228,21 @@ class DxcParserTest {
             caught = failure
         }
         assertEquals(AppError.PROTOCOL_CHANGED, caught?.error)
+    }
+
+    @Test
+    fun `a DFYC redirect or 401 or 403 means the session died, not that the school is down`() {
+        // Observed 2026-10-07 20:02, 49 minutes after login: dxc.userInfo answered 302 and the
+        // user was told 上游暂不可用, which is the wrong conclusion.
+        assertTrue(DxcSession.isStale(302))
+        assertTrue(DxcSession.isStale(301))
+        assertTrue(DxcSession.isStale(307))
+        assertTrue(DxcSession.isStale(401))
+        assertTrue(DxcSession.isStale(403))
+        assertFalse(DxcSession.isStale(200))
+        assertFalse(DxcSession.isStale(500))   // an outage is not a stale session
+        assertFalse(DxcSession.isStale(404))
+        assertFalse(DxcSession.isStale(400))
     }
 
     @Test

@@ -443,7 +443,15 @@ const boot = async (): Promise<void> => {
       // A restored session is only useful if it shows something. Without this the pill says
       // 已登录 while the cards stay empty until the user thinks to press 立即刷新.
       els.captchaImage.innerHTML = '<span class="captcha-placeholder">已登录，暂不需要</span>';
-      if (refresher.getIntervalMs() === 0) void query('restore');
+      // Always query on a restored session. Gating this on the timer looked reasonable but was
+      // wrong twice over: a stored interval arms the timer while the page may still report
+      // itself hidden (so the timer refuses to fire), and nothing else produced the first query
+      // — the pill said 已登录 over empty cards again. The single-flight guard in query() keeps
+      // this from overlapping any scheduled tick, and noting the finish pushes the next tick a
+      // full interval away.
+      void query('restore').then(() => {
+        if (refresher.getIntervalMs() > 0) refresher.noteQueryFinished();
+      });
     } else {
       void loadCaptcha();
     }

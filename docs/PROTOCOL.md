@@ -547,6 +547,29 @@ all 200, `stage=dxc result=ok`) with no chain hops at all:
 - a hop that lands on the index page is recognised by `DxcParser.landsOnIndex` rather than fed
   to `authorize` as if it were a handshake step.
 
+**The DFYC session is short-lived, and its expiry does not look like an error.** Observed on
+2026-10-07: login at `19:13:19` established the session, and by `20:02:17` (≤49 minutes, most
+likely an idle timeout) `dxc.userInfo` answered **HTTP 302 → `…/berserker-auth/oauth/authorize`**
+instead of JSON. A JSON API that redirects is the school's way of saying "this session is gone,
+go through the handshake again" — it is not an outage, and it is not a card-login failure (the
+access token was still valid, with ~69.9 days left).
+
+The app therefore treats a 3xx/401/403 from a DFYC read as *session stale*, rebuilds the chain
+once, and only reports a problem if the fresh session is also refused:
+
+```text
+20:19:58.986  dxc.userInfo   302
+20:19:58.987  stage=dxc result=session-stale detail=dxc.userInfo/302
+              target=http://ecardwxnew.scut.edu.cn/berserker-auth/oauth/authorize
+20:20:09.1xx  dxc.redirect 302 → thirdLogin 302 → authorize 302 → getCode 302 session-established
+20:20:09.4xx  dxc.userInfo 200 · ammeterBalance 200 · waterBalance 200 → result=ok
+```
+
+Practical consequence for persistence: the stored `dxcJsession` is a small optimisation with a
+lifetime of tens of minutes, not an asset worth trusting. The rebuild path is what makes a
+restored or long-idle session work, and it is now the code path that has been exercised on the
+device.
+
 Important: preserve manual redirect handling. Automatic redirect following hides the cookies
 and Location headers this flow depends on, and it would also silently swallow the
 already-established answer above.
