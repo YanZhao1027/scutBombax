@@ -373,39 +373,41 @@ Procedure with the log open:
 
 ## 9. Session storage and restart
 
-The session lives **in memory only** (`SessionStore` holds a `TokenState` reference;
-nothing is written to disk, and AGENTS.md Phase 6 accepts this as the first state). So the
-expected behaviour after a force-stop is a clean logout:
+**Changed on 2026-10-07.** Through the first successful login the session was memory-only, so a
+restart meant a clean logout. That behaviour is now deliberately replaced: the school's access
+token is valid for 70 days, and losing it to a process death meant retyping account, password
+and captcha for no reason. `SessionStore` can now hold a Keystore-encrypted copy of the token
+state.
 
-```bash
-adb shell am force-stop cn.scut.bombax   # relaunch from the launcher
-```
+What is on disk, and where:
 
-- [ ] the app restarts **anonymous** (a restart that still shows `已登录` means something
-      unexpected is persisting state — investigate before continuing)
-- [ ] the password field is empty on restart, and no keyboard autofill suggests a stored
-      credential
-- [ ] **清除登录状态** returns to the same anonymous state while the app is running (and **退出** does the same)
-- [ ] after restart, the captcha loads again and a fresh login works
+| Location | Contents | Sensitive? |
+| --- | --- | --- |
+| `noBackupFilesDir/scut-session.bin` | AES/GCM blob of `TokenState`: access token, refresh token, expiry, token type, `TGC`, `locSession`, display name, `sno`, campus, login type, DFYC `JSESSIONID`. Key is a non-exportable Android Keystore key | Yes — treat as a credential file, hence `noBackupFilesDir` (outside auto backup and `adb backup`) |
+| WebView `localStorage`, key `bombax.prefs.v1` | campus, login type, refresh interval | No — three UI choices, no account, no token |
 
-If persistent login is later wanted, the requirement from AGENTS.md is Keystore-backed
-encryption of the token state only — never the card password, and not `security-crypto`
-unless it is current and maintained on this minSdk (24). That work is deliberately not
-implemented here because it cannot be validated without a device.
+Never written anywhere: the card password, the captcha answer, the keyboard uuid. There is no
+field in `TokenState` for any of them, and `SessionPersistenceTest` pins the exact key set of
+the serialised record so a future field cannot add one quietly.
 
-**Checked on 2026-10-05** (device, after a real captcha exchange that ended in 403):
-the app's own data directory contains only `files/profileInstalled` and three WebView
-preference files, and the WebView cookie store holds **zero** rows — so nothing
-session-shaped, and no school cookie, survives anywhere on disk:
+Expected behaviour now:
 
-```bash
-adb shell "run-as cn.scut.bombax ls -laR /data/data/cn.scut.bombax/files /data/data/cn.scut.bombax/shared_prefs"
-adb shell "run-as cn.scut.bombax cat /data/data/cn.scut.bombax/app_webview/Default/Cookies" > /tmp/phone-cookies.sqlite
-python3 -c "import sqlite3;print(sqlite3.connect('/tmp/phone-cookies.sqlite').execute('select host_key,name from cookies').fetchall())"
-```
+- [ ] log in, then `adb shell am force-stop cn.scut.bombax`, relaunch → the app shows **已登录**
+      and the balances without asking for a password. (`stage=session result=restored
+      campus=… expiresIn=…s` in logcat.) A restart that still logs out means the Keystore or
+      the file write failed — look for `result=disk-disabled` / `result=not-persisted`.
+- [ ] pressing **Back** to leave the app must NOT log out: the plugin's destroy path calls
+      `dropMemory()`, not `clear()`. This is the trap the first implementation fell into.
+- [ ] **退出** / **清除登录状态** wipes both copies: the file is gone and the next start is
+      anonymous.
+- [ ] an expired record is dropped on arrival (`result=discarded reason=expired`), never shown
+      as logged in.
+- [ ] deleting the Keystore key (or copying the file to another device) yields
+      `result=discarded reason=undecryptable` and an anonymous start — not a crash.
+- [ ] the password field stays empty on restart and no autofill offers a stored credential.
 
-The restart-behaviour and 清除登录状态 items above still need a logged-in session, so they
-stay open.
+The 2026-10-05 and 2026-10-07 runs below are kept because they are what justified the original
+claim; they describe the memory-only build, not this one.
 
 ## 10. Leakage audit (run after the whole session)
 

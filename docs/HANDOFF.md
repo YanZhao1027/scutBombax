@@ -20,7 +20,7 @@ rules with a live session.
 | APK path | **current build: 4,799,939 bytes, sha256 `35c80c04f15f22d73d2c9d00ae08a1d4054f10261fc8cc8b3ec173be2151fbbf`** — full keyboard substitution (all four rows) plus the selectable `logintype` (default 学工号登录), 77 tests green, installed 2026-10-06 23:30 and **not yet exercised**; its assets and dex were checked by unpacking the APK. Superseded the same evening: `c6255c80d06207ce0f04a7844e8364cad09da7cba776677dbc93835f94f424a5` (4,781,497 B, substitution only), then `18095f723185b11b9cabbe44d729b852fbb63ff262f2d6ccbfd341076a53dfb3` (incremental build of the same sources), `f9a43d2139b5528ab06ab0c976fc07bd26649b15d1c79c8b46e3b07b0e8ca6d3` (2026-10-05, the "submit the characters verbatim" reading, used for the three 2026-10-06 attempts) and `70f3d2fea48d4278ac80d121bb31ad5d99bb630c10b21adcc98089c658088358` (2026-10-05, digits-only encoder, used for the nine `code=8000` attempts). APK bytes are not reproducible here, so a sha is a session marker, not a content hash | RUNTIME_VERIFIED (build/install), DEVICE_PENDING (login) |
 | tested Android version / device | Android 14 (API 34), Redmi K50, arm64-v8a, 1440×3200 @ 560dpi. `minSdk 24` / `targetSdk 36` remain the build's declaration; only API 34 has executed it | RUNTIME_VERIFIED (one device) |
 | bridge + UI on device | `plugin=ScutApi ready api=34 release=14`, `health()` returned over the bridge, full Chinese UI rendered without layout breakage, and a native failure reached the screen as `CAMPUS_NETWORK_REQUIRED [captcha/403]: …` | RUNTIME_VERIFIED |
-| nothing session-shaped persisted | re-audited 2026-10-07 **while a real DXC session was live**: `shared_prefs` holds only three WebView/Capacitor files, the WebView cookie DB has **0 rows** and has not been written since install, and a recursive grep for `TGC`/`locSession`/`JSESSIONID`/`access_token`/`berserker`/`scut` across prefs, Local Storage, Session Storage and `files` returns nothing. The 94-line session log also carries no token, cookie value, student number, 32-hex string, IP or device serial | RUNTIME_VERIFIED 2026-10-07 |
+| nothing password-shaped persisted | re-audited 2026-10-07 while a real DXC session was live: the WebView cookie DB had **0 rows** and had not been written since install, and no session-shaped string existed anywhere. **Superseded the same evening** by the persistence change: one Keystore-encrypted record now exists in `noBackupFilesDir` (never the password) and three UI choices in `localStorage`; `shared_prefs` is still untouched by us. §9 lists the new expectations and the audit has to be re-run against them | RUNTIME_VERIFIED (the memory-only build); re-audit due (this build) |
 | captcha behavior | endpoint + `{key, image}` shape confirmed on the device (HTTP 200, 32-hex key, `data:image/png;base64,` prefix, a new `key` on every reload). `frontInfo` sets `openCaptcha:"1"` for the `card` login, so a captcha belongs on every attempt, which the app does. **Enforcement is now observed:** a stale captcha answered `code=8002`, a freshly fetched one was accepted and the answer moved to `code=8000` — so the captcha is evaluated before the credential pair whenever the captcha fields are present | RUNTIME_VERIFIED 2026-10-06 |
 | network location | `ecardwxnew.scut.edu.cn` answers `403` + "校外可通过学校SSLVPN访问本网站" for an off-campus source address, over IPv4 and IPv6, for `curl` and for OkHttp alike, while `dfyc.utc.scut.edu.cn` answers `200` on the same connection. The phone was then moved onto the campus wireless network and every card-host request in the second session returned 200/400, never 403 | RUNTIME_VERIFIED |
 | exact verified captcha request field names | `captcha_header_code` / `captcha_header_key` — **accepted by the school.** They are copied from SCUT's own login chunk, and on 2026-10-06 a freshly loaded captcha paired with those names moved the answer from `8002` to `8000`, i.e. past the captcha stage | RUNTIME_VERIFIED 2026-10-06 |
@@ -39,8 +39,8 @@ captcha wrong" (and `8001` = "pick a student number"). `8002` was observed live 
 ## What is actually proven
 
 - `pnpm build` (`tsc --noEmit && vite build`), `pnpm test` (15 vitest),
-  `pnpm check:dom`, and `./gradlew clean testDebugUnitTest assembleDebug` (77 tests across
-  ten classes, BUILD SUCCESSFUL) all pass on this host, with no Android Studio and no IDE.
+  `pnpm check:dom`, and `./gradlew clean testDebugUnitTest assembleDebug` (89 tests across
+  eleven classes, BUILD SUCCESSFUL) all pass on this host, with no Android Studio and no IDE.
   `pnpm native:test` / `pnpm apk` now route through `scripts/with-jdk.sh`, which finds a
   JDK with `javac` instead of relying on an exported `JAVA_HOME`.
 - The APK installs (`adb install -r` → Success) and starts on Android 14, and the bridge
@@ -67,12 +67,17 @@ captcha wrong" (and `8001` = "pick a student number"). `8002` was observed live 
 
 ## Decisions the next reader should know
 
-1. **Session state is memory-only.** AGENTS.md Phase 6 asks for in-memory first and
-   persistence "if desired". Keystore-backed persistence was deliberately not added: the
-   usual `androidx.security:security-crypto` is not a comfortably maintained choice, and
-   with no device available it could not be validated. Consequence: a process restart logs
-   the user out. Rationale in `docs/ARCHITECTURE.md`.
-2. **One public credential is in source**: `ScutEndpoints.BASIC_AUTH`, the base64 public
+1. **Session state is memory plus a Keystore-encrypted file; the password is in neither.**
+   AGENTS.md Phase 6 asks for in-memory first and persistence "if desired". The first device
+   verification settled the question: the school's access token is valid for 70 days, so
+   memory-only meant retyping account, password and captcha after every process death for no
+   security gain. Since 2026-10-07 the token state is written as AES/GCM through a
+   non-exportable Android Keystore key into `noBackupFilesDir` (outside auto backup and
+   `adb backup`), and `logout` / "clear login state" wipe both copies. The card password, the
+   captcha answer and the keyboard uuid are never persisted — `TokenState` has no field for
+   them and `SessionPersistenceTest` pins the serialised key set. `androidx.security:security-crypto`
+   was deliberately not added; the platform Keystore API is used directly. Rationale and the
+   `dropMemory` vs `clear` trap in `docs/ARCHITECTURE.md`.2. **One public credential is in source**: `ScutEndpoints.BASIC_AUTH`, the base64 public
    client id/secret embedded in the school's own H5 page. It is not a user credential and
    the OAuth grant does not work without it, but it is the only secret-shaped literal in
    the repository — flagged here rather than buried, since AGENTS.md says never commit

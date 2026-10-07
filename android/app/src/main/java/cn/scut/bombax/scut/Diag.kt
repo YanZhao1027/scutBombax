@@ -15,6 +15,16 @@ import okhttp3.HttpUrl
 object Diag {
     const val TAG = "ScutBombax"
 
+    /**
+     * Where a line goes. Production is logcat; a JVM unit test has no `android.util.Log`, so it
+     * swaps this out instead of the project weakening `unitTests.returnDefaultValues` globally.
+     */
+    internal var writer: (warn: Boolean, String) -> Unit = ::logcat
+
+    internal fun logcat(warn: Boolean, message: String) {
+        if (warn) Log.w(TAG, message) else Log.i(TAG, message)
+    }
+
     fun request(
         stage: String,
         method: String,
@@ -35,12 +45,12 @@ object Diag {
         // The school's off-campus block page carries the caller's public IP, so
         // the only thing recorded about it is that it happened.
         if (blocked) builder.append(" blocked=campus-network-only")
-        Log.i(TAG, builder.toString())
+        writer(false, builder.toString())
     }
 
     fun ioFailure(stage: String, method: String, url: HttpUrl, elapsedMs: Long, kind: String) {
-        Log.w(
-            TAG,
+        writer(
+            true,
             "stage=$stage method=$method host=${url.host} path=${url.encodedPath} " +
                 "status=-1 ms=$elapsedMs io=$kind"
         )
@@ -48,11 +58,11 @@ object Diag {
 
     /** Coarse, credential-free progress events (e.g. "login=ok campus=GZIC"). */
     fun event(message: String) {
-        Log.i(TAG, message)
+        writer(false, message)
     }
 
     fun warn(message: String) {
-        Log.w(TAG, message)
+        writer(true, message)
     }
 
     /**

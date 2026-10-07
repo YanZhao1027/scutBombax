@@ -150,26 +150,37 @@ no alarm and no push.
 
 ## Persistence
 
-Implemented state: **memory only**. `SessionStore` holds one `@Volatile TokenState?`, and
-`clear()` drops the reference so the token strings become collectable. Nothing sensitive is
-written to disk, `SharedPreferences` is not used for session data, and the card password is
-never stored anywhere. A process restart therefore means a logout.
+Two layers, and they are deliberately different:
 
-This follows the order AGENTS.md Phase 6 sets out ("first make the app work with in-memory
-session state. Then, if desired, persist only what is necessary"). Persistence is deferred
-deliberately rather than by omission:
+- **Session token state — encrypted, native.** `SessionStore` keeps the live `TokenState` in
+  memory and, when a store is attached, writes a `SessionCodec` JSON record through
+  `SessionEnvelope` → `KeystoreSessionCipher` (AES/GCM, 256-bit, non-exportable key in the
+  `AndroidKeyStore` provider, fresh 12-byte nonce per write) into
+  `noBackupFilesDir/scut-session.bin`. `noBackupFilesDir` is the point: neither Android auto
+  backup nor `adb backup` carries it. `logout` and "清除登录状态" wipe the file and the memory
+  reference together; an unreadable, wrong-version or expired record is deleted and the app
+  starts anonymous rather than half-authenticated.
+- **UI choices — plain, web layer.** Campus, login type and the refresh interval live in
+  `localStorage` under `bombax.prefs.v1`. Three strings, no account and no token. The key name
+  deliberately contains no school identifier so the §10 storage grep stays a real test.
 
-- the refresh-token path is still unverified on a device, so there is no evidence yet that a
-  stored token is worth the risk surface
-- `androidx.security:security-crypto` is the usual `EncryptedSharedPreferences` route and is
-  not a comfortably maintained choice for a new minSdk-24 app — AGENTS.md explicitly warns
-  against blindly adding deprecated security libraries
-- a Keystore-backed writer cannot be exercised by JVM unit tests and cannot be tested here
-  without a device, so it would ship unvalidated
+Never stored, in either layer: the card password, the captcha answer, the keyboard uuid.
+`TokenState` has no field for them and `SessionPersistenceTest` asserts the exact serialised
+key set, so a future field cannot quietly add one.
 
-If it is added later, the requirements are: Keystore-backed encryption of token state only,
-never the password, and the existing `logout` / "clear login state" path must wipe the
-persisted entry as well as the in-memory one.
+Why this landed now rather than at the start: AGENTS.md Phase 6 asks for memory first and
+persistence "if desired", and the three deferral reasons that were written here were each
+removed by the device work — the token turned out to be valid for 70 days (`expires_in`
+`6048000`), so a restart cost a full re-login for no security gain; the Keystore path is
+testable on the host because the *format* is separated from the *key's home* (unit tests run
+the same envelope code against a JCE AES/GCM key); and `androidx.security:security-crypto` was
+avoided entirely by using the platform Keystore API directly.
+
+One trap worth naming, because the first implementation fell into it: the plugin's
+`handleOnDestroy` used to call `session.clear()`, which would delete the file we had just
+written — pressing Back would log the user out and persistence would appear broken. Destroy now
+calls `dropMemory()`, which forgets the in-memory reference while leaving the record for the
+next start; only `logout` deletes it.
 
 ## Testing strategy
 

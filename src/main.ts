@@ -81,6 +81,56 @@ const campus = (): Campus => (els.campus.value === 'DXC' ? 'DXC' : 'GZIC');
  *  is sent as-is and the native layer refuses it rather than guessing. */
 const loginType = (): LoginType => els.loginType.value as LoginType;
 
+/**
+ * Non-sensitive UI choices, kept so a restart does not silently change what you picked.
+ *
+ * This is deliberately limited to campus, login type and the refresh interval: no account, no
+ * password, no token, no cookie. The key name carries no school identifier either, so the
+ * `docs/DEVICE_VERIFICATION.md` §10 storage audit stays a real test rather than a tautology.
+ */
+const PREFS_KEY = '***';
+
+interface Prefs {
+  campus?: Campus;
+  loginType?: LoginType;
+  refreshMinutes?: number;
+}
+
+const readPrefs = (): Prefs => {
+  try {
+    return JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Prefs;
+  } catch {
+    return {};
+  }
+};
+
+const writePrefs = (patch: Prefs): void => {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ ...readPrefs(), ...patch }));
+  } catch {
+    // A blocked or full storage only costs the convenience, never the session.
+  }
+};
+
+/** Re-apply the stored picks. The timer is only armed when there is a session to poll with. */
+const applyPrefs = (authenticated: boolean): void => {
+  const prefs = readPrefs();
+  if (prefs.campus === 'GZIC' || prefs.campus === 'DXC') els.campus.value = prefs.campus;
+  if (prefs.loginType === 'card' || prefs.loginType === 'sno') els.loginType.value = prefs.loginType;
+  const minutes = Number(prefs.refreshMinutes);
+  if (!Number.isFinite(minutes) || minutes < 0) return;
+  const choice = els.choices.querySelector<HTMLInputElement>(
+    `input[name="refresh"][value="${minutes}"]`
+  );
+  if (!choice) return;
+  choice.checked = true;
+  syncIntervalUi();
+  if (authenticated && minutes > 0 && refresher.getIntervalMs() === 0) {
+    refresher.setIntervalMinutes(minutes);
+    refresher.noteQueryFinished(state.bills ? state.bills.updatedAt : 0);
+  }
+};
+
 const renderSession = (session: SessionInfo | null): void => {
   state.session = session;
   const authed = Boolean(session?.authenticated);
@@ -246,6 +296,9 @@ const submitLogin = async (): Promise<void> => {
     });
     els.password.value = '';
     renderSession(session);
+    writePrefs({ campus: campus(), loginType: loginType() });
+    // A stored interval only becomes meaningful once there is a session to poll with.
+    applyPrefs(true);
     setStatus(els.loginStatus, '登录成功。', 'ok');
     appendLog(`login → OK (${session.campus})`);
     // A re-login clears the condition that halted the timer, so re-arm it here;
@@ -303,6 +356,7 @@ const wire = (): void => {
       .health()
       .then((result) => {
         renderSession(result.session);
+        applyPrefs(result.session.authenticated);
         appendLog(
           `health → ok platform=${result.platform} app=${result.appVersion} bridge=${result.bridgeVersion}`
         );
@@ -339,6 +393,7 @@ const wire = (): void => {
     const input = event.target as HTMLInputElement;
     if (input.name !== 'refresh') return;
     const minutes = Number(input.value);
+    writePrefs({ refreshMinutes: minutes });
     refresher.setIntervalMinutes(minutes);
     els.queryState.textContent = minutes === 0 ? '' : `自动刷新：${selectedIntervalLabel()}`;
     setStatus(

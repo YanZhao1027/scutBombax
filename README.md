@@ -118,9 +118,11 @@ Implemented and green on the host:
   native IO so only one SCUT query can ever be in flight
 - Kotlin/OkHttp ports of captcha, secure keyboard, OAuth password login, refresh attempt,
   GZIC fee items and the DXC manual-redirect chain
-- Session held in memory only, all secrets staying in Kotlin; "clear login state" is an
-  explicit action and the card password is never persisted (AGENTS.md Phase 6 asks for
-  in-memory first — see `docs/ARCHITECTURE.md` for the persistence decision)
+- Session token state lives in Kotlin and, since 2026-10-07, in a **Keystore-encrypted** file
+  under `noBackupFilesDir`, so a restart no longer throws away a token the school issued for 70
+  days. The card password, the captcha answer and the keyboard uuid are never persisted in any
+  form; "清除登录状态" wipes the memory reference and the file together (see
+  `docs/ARCHITECTURE.md` "Persistence")
 - Foreground-only auto refresh (off / 5 / 10 / 30 min), no Service, no WorkManager, no alarms
 - Redacted logging through `Diag` (`adb logcat -s ScutBombax`)
 - 77 JVM unit tests + 15 vitest refresh tests passing; `assembleDebug` produces

@@ -17,6 +17,7 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.ExecutorService
 
@@ -37,6 +38,9 @@ class ScutApiPlugin : Plugin() {
     companion object {
         /** Version of the JS-facing surface, bumped when a method is added. */
         const val BRIDGE_VERSION = "1"
+
+        /** Name of the encrypted session record, under `noBackupFilesDir`. */
+        const val SESSION_FILE = "scut-session.bin"
     }
 
     private val cookieJar = ScutCookieJar()
@@ -74,9 +78,28 @@ class ScutApiPlugin : Plugin() {
     /** App-local plugin registration happens in MainActivity before the bridge loads. */
     override fun load() {
         super.load()
+        attachSessionDisk()
         Diag.event(
             "plugin=ScutApi ready api=${Build.VERSION.SDK_INT} release=${Build.VERSION.RELEASE}"
         )
+    }
+
+    /**
+     * Enables the Keystore-backed session copy.
+     *
+     * `noBackupFilesDir` keeps the file out of Android's auto backup and `adb backup`; the
+     * Keystore key never leaves the device's secure element anyway, so a stolen file is
+     * ciphertext with no usable key. Any failure here (no Keystore, no writable dir) degrades
+     * to the previous memory-only behaviour rather than breaking login.
+     */
+    private fun attachSessionDisk() {
+        runCatching {
+            val app = context?.applicationContext ?: return@runCatching
+            val file = File(app.noBackupFilesDir, SESSION_FILE)
+            session.attachDisk(FileSessionStore(file, KeystoreSessionCipher()))
+        }.onFailure {
+            Diag.warn("stage=session result=disk-disabled reason=${it.javaClass.simpleName}")
+        }
     }
 
     @PluginMethod
@@ -181,7 +204,8 @@ class ScutApiPlugin : Plugin() {
 
     override fun handleOnDestroy() {
         io.shutdownNow()
-        session.clear()
+        // Memory only: the stored copy is what makes the next start stay signed in.
+        session.dropMemory()
         cookieJar.clear()
         super.handleOnDestroy()
     }
