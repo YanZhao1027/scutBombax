@@ -79,13 +79,21 @@ export interface LoginInput {
   captchaCode?: string;
 }
 
-/** State of the opt-in persistent balance notification. */
+/**
+ * State of the opt-in persistent balance notification, and of the daily refresh that can sit on
+ * top of it. Both are off by default; the daily switch only has meaning while the notice is on,
+ * because the notice's service is the only thing the alarm is allowed to wake.
+ */
 export interface NoticeState {
   /** POST_NOTIFICATIONS granted (always true below Android 13). */
   granted: boolean;
   /** Notifications are not switched off for the app at the system level. */
   enabled: boolean;
   running: boolean;
+  /** Whether the once-a-day background refresh is armed. */
+  dailyEnabled: boolean;
+  /** Seconds until the next planned wake; -1 when the daily switch is off. */
+  nextDueIn: number;
 }
 
 export interface NoticePayload {

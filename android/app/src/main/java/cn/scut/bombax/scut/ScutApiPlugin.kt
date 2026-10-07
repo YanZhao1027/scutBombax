@@ -8,121 +8,60 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import cn.scut.bombax.scut.notice.BalanceNoticeService
-import cn.scut.bombax.scut.auth.AuthRepository
+import cn.scut.bombax.scut.notice.DailyRefresh
+import cn.scut.bombax.scut.notice.DailySchedule
 import cn.scut.bombax.scut.auth.CaptchaService
 import cn.scut.bombax.scut.auth.Campus
 import cn.scut.bombax.scut.auth.LoginInput
 import cn.scut.bombax.scut.auth.LoginType
-import cn.scut.bombax.scut.auth.SecureKeyboardService
 import cn.scut.bombax.scut.auth.TokenState
 import cn.scut.bombax.scut.billing.BalanceReading
-import cn.scut.bombax.scut.billing.BillingRepository
-import cn.scut.bombax.scut.network.ScutCookieJar
-import cn.scut.bombax.scut.network.ScutHttp
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
-import java.io.File
-import java.util.concurrent.Executors
-import java.util.concurrent.ExecutorService
 
 /**
  * The only bridge between the WebView and SCUT.
  *
- * Surface is intentionally narrow — health, captcha, login, bills, refresh,
- * logout. Access token, refresh token, TGC, locSession and JSESSIONID never
- * cross into JavaScript; the page only gets display strings and stable error
- * codes.
+ * Surface is intentionally narrow — health, captcha, login, bills, refresh, logout, and the two
+ * opt-in notification switches. Access token, refresh token, TGC, locSession and JSESSIONID never
+ * cross into JavaScript; the page only gets display strings and stable error codes.
  *
- * All work runs on one single-thread executor, which is what guarantees at most
- * one in-flight SCUT request at a time.
+ * The stack itself is [ScutRuntime], which is process-wide and shared with the notification
+ * service. That sharing is the whole reason at-most-one-in-flight survives the daily alarm.
  */
 @CapacitorPlugin(name = "ScutApi")
 class ScutApiPlugin : Plugin() {
 
     companion object {
         /** Version of the JS-facing surface, bumped when a method is added. */
-        const val BRIDGE_VERSION = "1"
-
-        /** Name of the encrypted session record, under `noBackupFilesDir`. */
-        const val SESSION_FILE = "scut-session.bin"
+        const val BRIDGE_VERSION = "2"
 
         private const val NOTICE_PERMISSION_REQUEST = 0xB1
     }
-
-    private val cookieJar = ScutCookieJar()
-    private val session = SessionStore()
-    private val io: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "scut-io").apply { isDaemon = true }
-    }
-
-    private var http: ScutHttp? = null
-    private var authRepository: AuthRepository? = null
-    private var billingRepository: BillingRepository? = null
-
-    /** Mirrors whether the service was asked to run; the OS can still stop it. */
-    private var noticeRunning = false
 
     /** Capacitor exposes a nullable context; the activity is always there once the bridge is up. */
     private val appCtx: Context
         get() = context ?: bridge.activity
 
-    private fun http(): ScutHttp {
-        http?.let { return it }
-        val userAgent = runCatching { bridge.webView?.settings?.userAgentString }.getOrNull()
-        val built = ScutHttp(ScutHttp.build(cookieJar, userAgent))
-        http = built
-        return built
-    }
-
-    private fun auth(): AuthRepository {
-        authRepository?.let { return it }
-        val built = AuthRepository(http(), cookieJar, SecureKeyboardService(http()))
-        authRepository = built
-        return built
-    }
-
-    private fun billing(): BillingRepository {
-        billingRepository?.let { return it }
-        val built = BillingRepository(http(), cookieJar, session, auth())
-        billingRepository = built
-        return built
-    }
+    /** The process-wide stack: one client, one cookie jar, one session, one queue. */
+    private val runtime: ScutRuntime
+        get() = ScutRuntime.get(appCtx)
 
     /** App-local plugin registration happens in MainActivity before the bridge loads. */
     override fun load() {
         super.load()
-        attachSessionDisk()
+        // The WebView's own UA is the identity every protocol fact in docs/PROTOCOL.md was
+        // verified with; the daily alarm can start this process with no WebView, so the runtime
+        // keeps a copy.
+        runtime.useWebViewUserAgent(runCatching { bridge.webView?.settings?.userAgentString }.getOrNull())
+        // An alarm is a one-shot that does not survive a reboot, so every app start re-arms it.
+        DailyRefresh.armIfEnabled(appCtx, System.currentTimeMillis())
         Diag.event(
-            "plugin=ScutApi ready api=${Build.VERSION.SDK_INT} release=${Build.VERSION.RELEASE}"
+            "plugin=ScutApi ready api=${Build.VERSION.SDK_INT} release=${Build.VERSION.RELEASE} bridge=$BRIDGE_VERSION"
         )
-    }
-
-    /**
-     * Enables the Keystore-backed session copy.
-     *
-     * `noBackupFilesDir` keeps the file out of Android's auto backup and `adb backup`; the
-     * Keystore key never leaves the device's secure element anyway, so a stolen file is
-     * ciphertext with no usable key. Any failure here (no Keystore, no writable dir) degrades
-     * to the previous memory-only behaviour rather than breaking login.
-     */
-    private fun attachSessionDisk() {
-        runCatching {
-            val app = context?.applicationContext ?: return@runCatching
-            val file = File(app.noBackupFilesDir, SESSION_FILE)
-            val store = FileSessionStore(file, KeystoreSessionCipher())
-            store.probe()?.let {
-                // Report and stay memory-only: a broken Keystore must not break login.
-                Diag.warn("stage=session result=disk-disabled reason=$it")
-                return@runCatching
-            }
-            session.attachDisk(store)
-            Diag.event("stage=session result=disk-ready path=noBackupFilesDir")
-        }.onFailure {
-            Diag.warn("stage=session result=disk-disabled reason=${it.javaClass.simpleName}")
-        }
     }
 
     @PluginMethod
@@ -141,7 +80,7 @@ class ScutApiPlugin : Plugin() {
                 put("androidRelease", Build.VERSION.RELEASE)
                 put("deviceModel", Build.MODEL)
                 put("tlsValidation", "default")
-                put("session", sessionJson(session.public(System.currentTimeMillis())))
+                put("session", sessionJson(runtime.session.public(System.currentTimeMillis())))
             }
         }
     }
@@ -149,7 +88,7 @@ class ScutApiPlugin : Plugin() {
     @PluginMethod
     fun getCaptcha(call: PluginCall) {
         submit(call) {
-            val challenge = CaptchaService(http()).fetch()
+            val challenge = CaptchaService(runtime.http()).fetch()
             JSObject().apply {
                 put("key", challenge.key)
                 put("image", challenge.image)
@@ -175,61 +114,57 @@ class ScutApiPlugin : Plugin() {
                     "login/loginType"
                 )
             }
-            val state = auth().login(
+            val state = runtime.auth().login(
                 LoginInput(username, password, campus, loginType, captchaKey, captchaCode)
             )
-            session.save(state)
-            sessionJson(session.public(System.currentTimeMillis()))
+            runtime.session.save(state)
+            sessionJson(runtime.session.public(System.currentTimeMillis()))
         }
     }
 
     @PluginMethod
     fun getBills(call: PluginCall) {
         submit(call) {
-            if (session.peek() == null) {
+            if (runtime.session.peek() == null) {
                 throw ScutException(AppError.NO_SESSION, "尚未登录", "bills/noSession")
             }
-            billsJson(billing().fetchBills())
+            billsJson(runtime.billing().fetchBills())
         }
     }
 
     @PluginMethod
     fun refreshSession(call: PluginCall) {
         submit(call) {
-            val current = session.peek()
+            val current = runtime.session.peek()
                 ?: throw ScutException(AppError.NO_SESSION, "尚未登录", "refresh/noSession")
             val result = JSObject()
             try {
-                val refreshed: TokenState = auth().refresh(current)
-                session.save(refreshed)
+                val refreshed: TokenState = runtime.auth().refresh(current)
+                runtime.session.save(refreshed)
                 result.put("refreshed", true)
             } catch (failure: ScutException) {
                 // A failed refresh means interactive relogin, never a stored
                 // password replay.
-                session.clear()
-                cookieJar.clear()
+                runtime.session.clear()
+                runtime.cookieJar.clear()
                 result.put("refreshed", false)
                 result.put("error", failure.error.wire)
             }
-            result.put("session", sessionJson(session.public(System.currentTimeMillis())))
+            result.put("session", sessionJson(runtime.session.public(System.currentTimeMillis())))
             result
         }
     }
 
     // ------------------------------------------------------- persistent notice
     //
-    // Opt-in, off by default. The service never talks to SCUT; it only displays what the page
-    // hands it, so turning it on cannot add load to the school.
+    // Opt-in, off by default. Two levels: the notification itself, which only ever shows what the
+    // page hands it, and — on top of that — one daily refresh driven by an inexact alarm. Turning
+    // the notification off turns the daily path off with it, because the service is the only thing
+    // the alarm is allowed to wake.
 
     @PluginMethod
     fun noticeStatus(call: PluginCall) {
-        submit(call) {
-            JSObject().apply {
-                put("granted", noticePermissionGranted())
-                put("enabled", NotificationManagerCompat.from(appCtx).areNotificationsEnabled())
-                put("running", noticeRunning)
-            }
-        }
+        submit(call) { noticeJson() }
     }
 
     @PluginMethod
@@ -242,26 +177,14 @@ class ScutApiPlugin : Plugin() {
                 NOTICE_PERMISSION_REQUEST
             )
         }
-        submit(call) {
-            JSObject().apply {
-                put("granted", noticePermissionGranted())
-                put("enabled", NotificationManagerCompat.from(appCtx).areNotificationsEnabled())
-                put("running", noticeRunning)
-            }
-        }
+        submit(call) { noticeJson() }
     }
 
     @PluginMethod
     fun startNotice(call: PluginCall) {
         submit(call) {
             val context = appCtx
-            if (!noticePermissionGranted() || !NotificationManagerCompat.from(context).areNotificationsEnabled()) {
-                throw ScutException(
-                    AppError.INVALID_INPUT,
-                    "通知权限未开启，请在系统设置里允许本应用通知",
-                    "notice/permission"
-                )
-            }
+            requireNoticeAllowed()
             BalanceNoticeService.createChannel(context)
             val intent = BalanceNoticeService.intent(
                 context,
@@ -272,7 +195,7 @@ class ScutApiPlugin : Plugin() {
                 call.getString("updated").orEmpty()
             )
             ContextCompat.startForegroundService(context, intent)
-            noticeRunning = true
+            runtime.noticeRunning = true
             JSObject().apply { put("running", true) }
         }
     }
@@ -282,8 +205,72 @@ class ScutApiPlugin : Plugin() {
         submit(call) {
             val context = appCtx
             context.stopService(BalanceNoticeService.intent(context, "", "", "", "", ""))
-            noticeRunning = false
-            JSObject().apply { put("running", false) }
+            runtime.noticeRunning = false
+            // The user asked for no notification; a daily alarm that restarts the service would
+            // put one straight back up. Both switches go together on the way off.
+            DailyRefresh.disable(context)
+            noticeJson()
+        }
+    }
+
+    // ---------------------------------------------------------- daily refresh
+    //
+    // One query a day, inexact alarm, no login attempt, no retry loop. Off by default.
+
+    @PluginMethod
+    fun enableDaily(call: PluginCall) {
+        submit(call) {
+            val context = appCtx
+            requireNoticeAllowed()
+            if (runtime.session.peek() == null) {
+                throw ScutException(
+                    AppError.NO_SESSION,
+                    "请先登录，再开启每日后台刷新",
+                    "daily/noSession"
+                )
+            }
+            val enabled = DailyRefresh.enable(context, System.currentTimeMillis())
+            if (enabled == 0L) {
+                throw ScutException(
+                    AppError.UPSTREAM_UNAVAILABLE,
+                    "系统不接受定时唤醒，无法开启每日刷新",
+                    "daily/arm-failed"
+                )
+            }
+            noticeJson()
+        }
+    }
+
+    @PluginMethod
+    fun disableDaily(call: PluginCall) {
+        submit(call) {
+            DailyRefresh.disable(appCtx)
+            noticeJson()
+        }
+    }
+
+    private fun noticeJson(): JSObject {
+        val context = appCtx
+        val now = System.currentTimeMillis()
+        val nextDue = DailyRefresh.nextDue(context, now)
+        return JSObject().apply {
+            put("granted", noticePermissionGranted())
+            put("enabled", NotificationManagerCompat.from(context).areNotificationsEnabled())
+            put("running", runtime.noticeRunning)
+            put("dailyEnabled", DailyRefresh.isEnabled(context))
+            // -1 while the switch is off; seconds until the next planned wake otherwise.
+            put("nextDueIn", if (nextDue == 0L) -1L else DailySchedule.secondsUntil(now, nextDue))
+        }
+    }
+
+    private fun requireNoticeAllowed() {
+        val context = appCtx
+        if (!noticePermissionGranted() || !NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            throw ScutException(
+                AppError.INVALID_INPUT,
+                "通知权限未开启，请在系统设置里允许本应用通知",
+                "notice/permission"
+            )
         }
     }
 
@@ -298,17 +285,16 @@ class ScutApiPlugin : Plugin() {
     @PluginMethod
     fun logout(call: PluginCall) {
         submit(call) {
-            session.clear()
-            auth().logout()
+            runtime.session.clear()
+            runtime.auth().logout()
             sessionJson(SessionPublic.anonymous())
         }
     }
 
     override fun handleOnDestroy() {
-        io.shutdownNow()
-        // Memory only: the stored copy is what makes the next start stay signed in.
-        session.dropMemory()
-        cookieJar.clear()
+        // Memory only: the stored copy is what makes the next start stay signed in. The shared
+        // queue deliberately outlives the Activity — the notification service owns it too.
+        runtime.onActivityDestroyed()
         super.handleOnDestroy()
     }
 
@@ -343,7 +329,7 @@ class ScutApiPlugin : Plugin() {
 
     private fun submit(call: PluginCall, work: () -> JSObject) {
         try {
-            io.execute {
+            runtime.io.execute {
                 try {
                     call.resolve(work())
                 } catch (failure: ScutException) {

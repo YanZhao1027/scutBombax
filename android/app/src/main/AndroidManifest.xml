@@ -25,9 +25,10 @@
         </activity>
 
         <!--
-          Opt-in persistent balance notification. `specialUse` is the honest type: it is
-          neither dataSync (the service never fetches) nor location/media. Google Play would
-          require a declared justification for this type; this app is sideloaded.
+          Opt-in persistent balance notification, and the process priority that comes with it.
+          `specialUse` is now the honest type: since 2026-10-08 the daily refresh does fetch, once
+          a day, through the same single-threaded queue the page uses. Google Play would require a
+          declared justification for this type; this app is sideloaded.
         -->
         <service
             android:name=".scut.notice.BalanceNoticeService"
@@ -35,8 +36,17 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Shows the dormitory balance the user asked to keep visible." />
+                android:value="Keeps the dormitory balance the user asked to keep visible up to date once a day." />
         </service>
+
+        <!--
+          The daily wake-up. No RECEIVE_BOOT_COMPLETED: a reboot clears the alarm and the next app
+          start re-arms it, which is documented rather than worked around with a permission.
+          Explicit component broadcast from our own PendingIntent, so nothing here is exported.
+        -->
+        <receiver
+            android:name=".scut.notice.DailyAlarmReceiver"
+            android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

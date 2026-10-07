@@ -33,7 +33,7 @@
 
         <p class="secondary" aria-live="polite">
           <span>水费 <strong id="water-value">—</strong><span id="water-unit"></span></span>
-          <span id="ac-row">空调 <strong id="ac-value">—</strong><span id="ac-unit"></span></span>
+          <span id="ac-row" hidden>空调 <strong id="ac-value">—</strong><span id="ac-unit"></span></span>
         </p>
 
         <p class="meta">
@@ -44,7 +44,12 @@
 
         <p class="notice-line">
           <label><input id="notice-toggle" type="checkbox" />常驻通知</label>
-          <span class="hint">只把最近一次结果贴在通知栏，不会在后台请求学校接口</span>
+          <span class="hint">把最近一次结果贴在通知栏；查询仍只发生在前台</span>
+        </p>
+
+        <p class="notice-line">
+          <label><input id="daily-toggle" type="checkbox" disabled />每日后台刷新</label>
+          <span class="hint">一天一次，只查余额不登录。<span id="daily-due">未开启</span></span>
         </p>
 
         <p class="segmented" id="refresh-choices" role="radiogroup" aria-label="自动刷新">

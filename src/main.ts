@@ -1,7 +1,14 @@
 import { App } from '@capacitor/app';
 import * as api from './bridge';
 import { AutoRefresher, type TickOutcome } from './refresh';
-import { isBridgeError, type Bills, type Campus, type LoginType, type SessionInfo } from './types';
+import {
+  isBridgeError,
+  type Bills,
+  type Campus,
+  type LoginType,
+  type NoticeState,
+  type SessionInfo
+} from './types';
 import './styles.css';
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -37,6 +44,8 @@ const els = {
   queryState: $<HTMLElement>('query-state'),
   queryButton: $<HTMLButtonElement>('query-button'),
   noticeToggle: $<HTMLInputElement>('notice-toggle'),
+  dailyToggle: $<HTMLInputElement>('daily-toggle'),
+  dailyDue: $<HTMLElement>('daily-due'),
   logoutButton: $<HTMLButtonElement>('logout-button'),
   resultsStatus: $<HTMLElement>('results-status'),
   choices: $<HTMLElement>('refresh-choices'),
@@ -163,21 +172,50 @@ const formatValue = (value: number | null): string =>
 /**
  * Pushes the latest result into the persistent notification, when the user switched it on.
  *
- * The service is a display only: this is the sole thing that updates it, so every notification
- * refresh corresponds to a query the page already made for its own sake.
+ * Called after every query the page makes, so a notification update normally corresponds to a
+ * request the page wanted anyway. With no result yet it still starts the service, showing 更新 —:
+ * a switch the user just turned on has to do something visible, otherwise the only feedback is a
+ * checkbox that silently does nothing while the network is down.
  */
 const syncNotice = (): void => {
+  if (!els.noticeToggle.checked) return;
   const bills = state.bills;
-  if (!els.noticeToggle.checked || !bills) return;
   void api
     .startNotice({
-      room: bills.room || '宿舍',
-      electric: String(bills.electric ?? '—'),
-      water: String(bills.water ?? '—'),
-      unit: bills.electricUnit || '',
-      updated: new Date(bills.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })
+      room: bills?.room || '宿舍',
+      electric: String(bills?.electric ?? '—'),
+      water: String(bills?.water ?? '—'),
+      unit: bills?.electricUnit || '',
+      updated: bills
+        ? new Date(bills.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })
+        : '—'
     })
     .catch((error) => appendLog(describeError(error)));
+};
+
+/**
+ * Reflects the native daily switch.
+ *
+ * The checkbox is durable state in the app's own prefs, so the page reads it back rather than
+ * keeping a second copy in localStorage — a second copy is how a switch ends up looking on while
+ * the alarm behind it is gone.
+ */
+const renderDaily = (status: NoticeState): void => {
+  els.dailyToggle.checked = status.dailyEnabled;
+  // Daily refresh implies the notice service, so it can only be offered while that is live.
+  els.dailyToggle.disabled = !(status.running || status.dailyEnabled);
+  els.dailyDue.textContent = status.dailyEnabled
+    ? `下次约 ${formatSpan(status.nextDueIn)}后`
+    : '未开启';
+};
+
+/** Coarse on purpose: an inexact alarm is a promise about a day, not about a minute. */
+const formatSpan = (seconds: number): string => {
+  if (!Number.isFinite(seconds) || seconds < 0) return '—';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.round((seconds % 3600) / 60);
+  if (hours > 0) return `${hours} 小时 ${minutes} 分`;
+  return `${Math.max(minutes, 1)} 分`;
 };
 
 const renderBills = (bills: Bills | null): void => {
@@ -355,8 +393,12 @@ const submitLogin = async (): Promise<void> => {
 
 const clearSession = async (notify: boolean): Promise<void> => {
   refresher.stop();
-  // A balance that is no longer being refreshed must not stay on the shade.
+  // A balance that is no longer being refreshed must not stay on the shade, and a session that is
+  // gone must not keep a daily alarm that would only wake something with nothing to query.
   els.noticeToggle.checked = false;
+  els.dailyToggle.checked = false;
+  els.dailyToggle.disabled = true;
+  els.dailyDue.textContent = '未开启';
   void api.stopNotice().catch(() => undefined);
   try {
     const session = await api.logout();
@@ -378,8 +420,16 @@ const wire = (): void => {
   els.noticeToggle.addEventListener('change', () => {
     void (async () => {
       if (!els.noticeToggle.checked) {
-        await api.stopNotice().catch(() => undefined);
-        setStatus(els.resultsStatus, '常驻通知已关闭。', 'idle');
+        // Native stopNotice takes the daily alarm with it; reflect that instead of leaving a
+        // switch on that no longer does anything.
+        const status = await api.stopNotice().catch(() => null);
+        if (status) renderDaily(status);
+        else {
+          els.dailyToggle.checked = false;
+          els.dailyToggle.disabled = true;
+          els.dailyDue.textContent = '未开启';
+        }
+        setStatus(els.resultsStatus, '常驻通知已关闭，每日后台刷新同时关闭。', 'idle');
         return;
       }
       let status = await api.noticeStatus().catch(() => null);
@@ -393,7 +443,35 @@ const wire = (): void => {
         return;
       }
       syncNotice();
+      els.dailyToggle.disabled = false;
       setStatus(els.resultsStatus, '常驻通知已开启（仅前台查询）。', 'ok');
+    })();
+  });
+
+  els.dailyToggle.addEventListener('change', () => {
+    void (async () => {
+      if (!els.noticeToggle.checked) {
+        els.dailyToggle.checked = false;
+        setStatus(els.resultsStatus, '每日后台刷新需要先开启常驻通知。', 'error');
+        return;
+      }
+      try {
+        const status = els.dailyToggle.checked ? await api.enableDaily() : await api.disableDaily();
+        renderDaily(status);
+        setStatus(
+          els.resultsStatus,
+          status.dailyEnabled
+            ? `每日后台刷新已开启，${els.dailyDue.textContent}。`
+            : '每日后台刷新已关闭。',
+          status.dailyEnabled ? 'ok' : 'idle'
+        );
+      } catch (error) {
+        // The native side refused (no session, no permission, no alarm) — say so rather than
+        // leaving the switch looking armed.
+        els.dailyToggle.checked = false;
+        els.dailyDue.textContent = '未开启';
+        setStatus(els.resultsStatus, describeError(error), 'error');
+      }
     })();
   });
 
@@ -467,6 +545,10 @@ const wire = (): void => {
   // second query on top of the scheduled one.
   const applyVisibility = (visible: boolean): void => {
     refresher.setVisible(visible);
+    // The next-wake hint is a fact about the alarm, not about this page, and the alarm can fire
+    // while nobody is looking. Re-read it on the way back in so the row cannot keep claiming
+    // "下次约 1 分后" a day later.
+    if (visible) void api.noticeStatus().then(renderDaily).catch(() => undefined);
   };
 
   document.addEventListener('visibilitychange', () => {
@@ -489,11 +571,19 @@ const boot = async (): Promise<void> => {
     const result = await api.health();
     renderSession(result.session);
     // Reflect a service the OS may still be holding on to, rather than showing an off switch
-    // next to a live notification.
+    // next to a live notification. A still-armed daily alarm implies one too: waking that service
+    // is the only thing the alarm does.
     void api
       .noticeStatus()
       .then((status) => {
-        els.noticeToggle.checked = status.running;
+        els.noticeToggle.checked = status.running || status.dailyEnabled;
+        renderDaily(status);
+        // A daily alarm can only wake a service that is already running — measured on the device
+        // on 2026-10-08: with the notice stopped, the inexact alarm fired and Android answered
+        // `BackgroundServiceStartNotAllowedException`. So a switch that implies a notification has
+        // to leave one standing, and this is the one moment we know for sure we are in the
+        // foreground and allowed to start it.
+        if (els.noticeToggle.checked && !status.running) syncNotice();
       })
       .catch(() => undefined);
     appendLog(`health → ok platform=${result.platform} app=${result.appVersion}`);

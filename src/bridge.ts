@@ -28,7 +28,9 @@ interface ScutApiNativePlugin {
   noticeStatus(): Promise<NoticeState>;
   requestNoticePermission(): Promise<NoticeState>;
   startNotice(payload: NoticePayload): Promise<{ running: boolean }>;
-  stopNotice(): Promise<{ running: boolean }>;
+  stopNotice(): Promise<NoticeState>;
+  enableDaily(): Promise<NoticeState>;
+  disableDaily(): Promise<NoticeState>;
 }
 
 const ScutApi = registerPlugin<ScutApiNativePlugin>('ScutApi');
@@ -93,13 +95,19 @@ export const getCaptcha = (): Promise<CaptchaChallenge> => call(() => ScutApi.ge
 
 export const login = (input: LoginInput): Promise<SessionInfo> => call(() => ScutApi.login(input));
 
-/* The persistent notice never reaches SCUT; these four calls only touch local UI. */
+/*
+ * The persistent notice and the daily refresh never reach SCUT on their own: these calls only
+ * touch local notification and alarm state. `stopNotice` also clears the daily switch natively —
+ * a user who asked for no notification must not be woken by something that makes one.
+ */
 export const noticeStatus = (): Promise<NoticeState> => call(() => ScutApi.noticeStatus());
 export const requestNoticePermission = (): Promise<NoticeState> =>
   call(() => ScutApi.requestNoticePermission());
 export const startNotice = (payload: NoticePayload): Promise<{ running: boolean }> =>
   call(() => ScutApi.startNotice(payload));
-export const stopNotice = (): Promise<{ running: boolean }> => call(() => ScutApi.stopNotice());
+export const stopNotice = (): Promise<NoticeState> => call(() => ScutApi.stopNotice());
+export const enableDaily = (): Promise<NoticeState> => call(() => ScutApi.enableDaily());
+export const disableDaily = (): Promise<NoticeState> => call(() => ScutApi.disableDaily());
 
 export const getBills = (): Promise<Bills> => call(() => ScutApi.getBills());
 
