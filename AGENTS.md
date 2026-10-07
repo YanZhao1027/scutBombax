@@ -88,6 +88,14 @@ The web UI should be mobile-first and initially contain:
 
 Do not add an Android background Service or WorkManager.
 
+Authorized deviation, recorded 2026-10-08: the user asked for an opt-in persistent balance
+notification (2026-10-07) and then for it to stay current once a day (2026-10-08). A
+`specialUse` foreground service and one inexact `AlarmManager` alarm therefore exist. The rule
+still holds in every other direction: no WorkManager, no exact alarm, no boot receiver, no
+stored password, no captcha OCR, and the service never logs in. Bounds and measurements are in
+`docs/ARCHITECTURE.md` ("Persistent notification and daily refresh") and
+`docs/DEVICE_VERIFICATION.md` §12/§13.
+
 ## Phase 2 - native network bridge
 
 Implement a small custom Capacitor plugin instead of relying on WebView fetch.
@@ -229,6 +237,12 @@ Rules:
 - at most one in-flight query
 - one bounded retry for transient network errors is acceptable
 - captcha/reauth condition stops auto-refresh
+
+The first three lines above are superseded for the opt-in daily path only, by the user's
+decision of 2026-10-08: one inexact alarm per day, through the same single-threaded native queue
+as everything else, and only while the notification service is already running. "At most one
+in-flight query" is the reason the native stack is one process-scoped `ScutRuntime` rather than
+plugin state. This section's foreground-timer rules are otherwise unchanged and still enforced.
 
 ## Security
 

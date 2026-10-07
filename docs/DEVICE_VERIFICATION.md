@@ -742,3 +742,170 @@ AGENTS.md than the notification itself, it is the difference between "shows a nu
 "keeps asking the school when nobody is looking", and it has **not** been done. It needs an
 explicit decision, and if taken, a rate that is defensible to the school (tens of minutes, not
 minutes).
+
+That decision was taken on 2026-10-08, at the more conservative end: **once a day**, and it is
+measured in §13.
+
+## 13. Daily background refresh (2026-10-08)
+
+What had to exist before a background query was possible at all: the OkHttp client, the cookie
+jar, the session and the single-threaded `scut-io` queue used to live inside `ScutApiPlugin`, so
+a service that queried on its own would have had a second set of each — and two queues means two
+requests in flight, which is the one invariant AGENTS.md states outright. They now live in
+`ScutRuntime`, one object per process, shared by the plugin, the service and the alarm receiver.
+
+Authorisation: the user asked for a persistent notification on 2026-10-07 and, when offered a
+background cadence, chose one day ("每天可以吧", 2026-10-08). This is the second deliberate
+departure from AGENTS.md's "no background Service / no WorkManager", and it is *not* WorkManager:
+an inexact `setAndAllowWhileIdle` alarm, no new permission, no boot receiver. Off by default.
+
+Rules the code is built around, all of them verified below:
+
+- one query per day per device, and only ever on the shared queue;
+- the service never logs in — no password, no captcha, so a missing session means a message, not
+  an attempt;
+- a failure keeps the last numbers on the shade instead of showing "unknown";
+- the daily switch implies the notification, and turning the notification off turns the daily
+  path off with it.
+
+### 13.1 Arming and cadence
+
+Turning the switch on at `00:57:59` produced:
+
+```text
+stage=daily result=armed dueInSec=86400 api=34
+```
+
+and one `AlarmManager` entry, visible to the system as an inexact `RTC_WAKEUP`:
+
+```bash
+adb shell dumpsys alarm | grep -A2 bombax
+#   RTC_WAKEUP #46: Alarm{... type 0 origWhen <now+24h> ... cn.scut.bombax}
+#     tag=*walarm*:cn.scut.bombax.action.DAILY_REFRESH
+```
+
+### 13.2 The real fire, backgrounded
+
+To get a genuine `AlarmManager` delivery without waiting a day, the stored anchor was rewritten
+to 25 hours in the past through `run-as` and the app was reopened, which is exactly the code path
+a reboot or a lost alarm takes:
+
+```text
+01:08:34  stage=daily result=armed dueInSec=60      ← catch-up from an overdue anchor, not "now"
+01:08:44  ActivityManager: Background started FGS: Allowed [uidState: TOP; code:PROC_STATE_TOP]
+01:08:44  stage=notice result=shown updated=—
+01:08:49  (home button — app backgrounded)
+01:10:19  stage=daily result=armed dueInSec=86354
+01:10:19  stage=daily result=fired start=foreground-service nextInSec=86354
+01:10:19  stage=notice result=shown updated=—
+01:10:29  stage=dxc.userInfo ... status=-1 ms=10013 io=SocketTimeoutException
+01:10:29  stage=daily result=failed reason=NETWORK
+```
+
+Four things in that window are worth stating precisely:
+
+1. **The inexact alarm fired while the app was on the launcher**, 45 s later than its nominal
+   time (01:09:34 → 01:10:19). That gap is the scheduler's flex, not a bug, and it is why the
+   UI says "下次约 …" instead of a minute.
+2. **The cadence self-corrects**: the next wake was armed for `86354` s, i.e. 24 h after the
+   *scheduled* time, not after the late delivery. Anchoring on the delivery time would push the
+   refresh later every day.
+3. **The query ran on the shared queue** — thread `1431`, the same `scut-io` worker the WebView
+   uses. The boot `startNotice` call is independent evidence of the serialization: it was issued
+   at once and executed at `01:08:44.904`, the millisecond the 10-second restore query freed the
+   queue.
+4. **The failure path is honest**: after the timeout the notification kept its numbers and grew
+   a reason, `flags=0x6a` (ongoing, no-clear, foreground, alert-once):
+
+```text
+android.title   宿舍
+android.text    电 — · 水 —
+android.subText 更新 — · 刷新失败
+```
+
+### 13.3 The one thing that does not work, and what it forced
+
+The same fire, measured earlier with the notification service *not* running:
+
+```text
+01:02:34  ActivityManager: Background started FGS: Disallowed
+          [uidState: RCVR; uidBFSL: n/a; act=cn.scut.bombax.action.REFRESH; code:DENIED]
+01:02:34  stage=daily result=start-refused reason=BackgroundServiceStartNotAllowedException
+01:02:34  stage=daily result=fired start=refused nextInSec=86354
+```
+
+Android 12+ does not treat an *inexact* alarm as an exemption for starting a foreground service,
+and the plain `startService` fallback is refused too (`code:DENIED`, the caller is only a
+broadcast receiver). So the daily path is only reachable while the notification's service is
+already alive — which is what "每日后台刷新 implies 常驻通知" means in practice, and it is now
+enforced on both sides: the page refuses the switch without the notification, and the page
+re-starts the notification on every open if the daily switch is armed. Before that fix a
+force-stop left the alarm armed with nothing to wake, which is the state that produced the log
+above. Making it survive a real kill anyway would need an exact alarm (`SCHEDULE_EXACT_ALARM` is
+not a permission this app should ask for) or `WorkManager`, and neither was taken.
+
+Related, and the reason the alarm is re-armed on every app open: **installing and force-stopping
+both clear the app's alarms** —
+
+```text
+01:04:19  ActivityManager: Force stopping cn.scut.bombax appid=… user=-1: installPackageLI
+01:04:19  AlarmManager: Package cn.scut.bombax, uid … lost permission to set exact alarms!
+```
+
+### 13.4 Session and identity across a process death
+
+```text
+01:08:34  stage=session result=disk-ready path=noBackupFilesDir
+01:08:34  stage=runtime result=ready api=34 release=14 userAgent=cached
+01:08:34  stage=session result=restored campus=DXC refreshToken=present expiresIn=6026683s
+```
+
+`userAgent=cached` is the second half of the runtime hoist: the daily alarm can start the process
+with no WebView, and the one header the whole protocol was verified with is the WebView's. Only
+its presence is ever logged — the string names this device.
+
+### 13.5 Not verified
+
+- **A successful background update.** Every background attempt in this session failed with
+  `NETWORK`: the dormitory wifi was sitting on a captive portal, where `plat.hf.scut.edu.cn` does
+  not resolve and TCP/443 to the DFYC host times out. The mechanics (wake → service → queue →
+  request → classify → display) are measured; the number changing on its own is not.
+- The daily fire arriving after the Activity was destroyed with Back but the service still alive
+  (the `dropMemory` + queue-outlives-the-Activity combination). Logic is covered by §9's
+  persistence results and by the spacing tests; the combination is not.
+- The "a placeholder payload must not wipe the cached numbers" rule in `NoticeData.of`: in this
+  run both the payload and the cache were placeholders, so the branch never had anything to
+  protect.
+
+Evidence: `evidence/logcat-2026-10-08-daily.txt` (sha256 `8923d792…`) was captured on the build
+immediately before the two front-end fixes in §13.6 — the Kotlin daily path is identical in both,
+and the installed build is `evidence/app-debug-2026-10-08-daily.apk` (sha256 `af2113fb…`), with
+§13.6's screen in `evidence/phone-2026-10-08-daily-ui.png`. Host-side tests: 99 JVM (8 of them
+the cadence maths) + 17 vitest.
+
+### 13.6 What the screen showed, and two bugs it exposed
+
+With both switches on and no successful query in the session, the signed-in screen renders:
+
+```text
+已登录 · 宿舍 · 电费余额 平台返回余额 · 元 · 水费 —
+常驻通知 ☑   每日后台刷新 ☑  一天一次，只查余额不登录。下次约 23 小时 50 分后
+```
+
+Two defects came out of looking at it rather than at logcat, and both are fixed here:
+
+- **The air-conditioning row was visible with no data.** It is meant to appear only when upstream
+  actually returns an AC figure (`renderBills` hides it), but on a *restored session with a failed
+  first query* nothing had called `renderBills` yet, so the row sat there showing its HTML
+  placeholder — the opposite of what the user asked for on 2026-10-07 ("把空调费去掉"). The row is
+  now `hidden` in the markup and the data layer unhides it, so absence is the default.
+- **The next-wake hint went stale.** It was computed once at boot, so a page left open across a
+  fire kept saying 下次约 1 分后. `noticeStatus()` is now re-read whenever the page becomes
+  visible, which is also the moment the alarm may have moved.
+
+Tooling note for the next reader, because it wasted ten minutes: `uiautomator dump` reports
+`checked=false` for both boxes while the screenshot plainly shows them ticked. The accessibility
+node reflects the HTML attribute, not the DOM property that `input.checked = true` sets. Judge
+checkbox state from a screenshot or from the page's own `noticeStatus()` console line — the
+`enabled=true` on the daily row was the reliable signal here, since the code only enables that
+switch while the notification is implied.

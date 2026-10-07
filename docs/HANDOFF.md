@@ -79,7 +79,9 @@ captcha wrong" (and `8001` = "pick a student number"). `8002` was observed live 
    captcha answer and the keyboard uuid are never persisted — `TokenState` has no field for
    them and `SessionPersistenceTest` pins the serialised key set. `androidx.security:security-crypto`
    was deliberately not added; the platform Keystore API is used directly. Rationale and the
-   `dropMemory` vs `clear` trap in `docs/ARCHITECTURE.md`.2. **One public credential is in source**: `ScutEndpoints.BASIC_AUTH`, the base64 public
+   `dropMemory` vs `clear` trap in `docs/ARCHITECTURE.md`.
+
+2. **One public credential is in source**: `ScutEndpoints.BASIC_AUTH`, the base64 public
    client id/secret embedded in the school's own H5 page. It is not a user credential and
    the OAuth grant does not work without it, but it is the only secret-shaped literal in
    the repository — flagged here rather than buried, since AGENTS.md says never commit
@@ -122,14 +124,17 @@ captcha wrong" (and `8001` = "pick a student number"). `8002` was observed live 
    the second independent reason login has failed; the first is the keyboard encoding
    (decision 7).
 
-10. **No background refresh, no stored password, no captcha OCR — and the 70-day token is why
-    none of them are needed.** Three tempting "convenience" additions were considered and
-    rejected on 2026-10-07, after login was verified:
-    - *a resident background refresh.* AGENTS.md forbids a Service, WorkManager and alarms, and
-      the requirement it protects is gone: the access token lasts `6048000` seconds (70 days),
-      so there is nothing to keep alive, and balances only matter while the screen is up. The
-      school also counts failed attempts (`error_times`), so background retries would poll a
-      rate-limited endpoint for no benefit.
+10. **No stored password, no captcha OCR — and the 70-day token is why neither is needed.**
+    Three tempting "convenience" additions were considered on 2026-10-07, after login was
+    verified. Two are still rejected; the third was later re-decided by the user:
+    - *a resident background refresh.* This one **changed**. On 2026-10-07 it was rejected
+      because the requirement it seemed to serve was gone — the access token lasts `6048000`
+      seconds (70 days), so there is nothing to keep alive — and because background retries
+      would poll a rate-limited endpoint. On 2026-10-08 the user asked for it anyway, at the
+      most conservative cadence offered ("每天可以吧"), so a once-a-day inexact alarm now
+      exists: still no WorkManager, no exact alarm, no boot receiver, no stored password. What
+      the measurements added (§13) is the constraint that decides whether it works at all —
+      see decision 11.
     - *storing the card password.* AGENTS.md says never persist it by default, and refresh
       cannot be built on top of it anyway ("do not automatically replay a stored password").
       Re-login is at most once per ten weeks. If typing the password is the pain, the answer is
@@ -141,6 +146,31 @@ captcha wrong" (and `8001` = "pick a student number"). `8002` was observed live 
       deliberately put on its own login, next to a lockout counter. This belongs to the same
       category as the proxy/bypass that was already refused: the app asks a human, and a human
       answers, once every ten weeks.
+
+11. **The native SCUT stack is one process-scoped object, and the daily path only works while the
+    notification service is alive.** `ScutRuntime` (2026-10-08) owns the OkHttp client, the cookie
+    jar, the `SessionStore`, the repositories, the WebView user agent and the single `scut-io`
+    executor; `ScutApiPlugin`, `BalanceNoticeService` and `DailyAlarmReceiver` all use that one
+    object. Hoisting it was not refactoring for tidiness: a service with its own client would have
+    had its own queue, and "at most one request in flight" — the one AGENTS.md invariant that is
+    about the *school's* load rather than about UI polish — would have become "at most two". Two
+    consequences a future reader should not rediscover the hard way:
+    - the plugin's `handleOnDestroy` must **not** shut the executor down (the service owns it too),
+      and the Keystore-backed session must be attached in the runtime rather than in the plugin's
+      `load()`, or an alarm-started process has no way to read its own session;
+    - the WebView user agent is persisted (`bombax.native.v1`, presence logged only) because the
+      alarm can start the process with no WebView, and every protocol fact in
+      `docs/PROTOCOL.md` was verified with that header. Cold-starting as `okhttp/4.12.0` is an
+      untested identity.
+
+    The measured limit (§13.3): an inexact alarm is delivered to a backgrounded app, but on
+    Android 12+ it is **not** an exemption that allows starting a foreground service, and a plain
+    `startService` from a receiver is refused too (`BackgroundServiceStartNotAllowedException`,
+    `ActivityManager: Background started FGS: Disallowed … uidState: RCVR; code:DENIED`). So the
+    daily refresh can only wake a service that is already running, which is why 每日后台刷新
+    requires 常驻通知, why turning the notification off cancels the alarm, and why the page
+    re-starts the service on every open when the daily switch is armed. Exact alarms
+    (`SCHEDULE_EXACT_ALARM`) would close that gap and are deliberately not requested.
 
 ## To close the remaining phases
 

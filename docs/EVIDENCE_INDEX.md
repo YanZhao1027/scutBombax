@@ -16,6 +16,7 @@ Re-check the archive:
 
 ```bash
 cd /home/zyubuntu/scutbombax/evidence && sha256sum -c sha256-2026-10-05T0208.txt
+cd /home/zyubuntu/scutbombax/evidence && sha256sum -c sha256-2026-10-08.txt   # 10-07 + 10-08
 ```
 
 ## Pushing from this workstation, and the offline backup
@@ -76,6 +77,37 @@ Refresh it with:
 ```bash
 cd /home/zyubuntu/scutbombax/scutBombax && git bundle create ../evidence/scutBombax-main-full.bundle --branches --tags
 ```
+
+## 2026-10-08
+
+| SHA256 | Artifact | What it establishes |
+| --- | --- | --- |
+| `af2113fba98ffdb5a15c4d018f697d669039b106799adb8802b4282c9ad3bb03` | `app-debug-2026-10-08-daily.apk` (4,813,670 B) | the installed build: `ScutRuntime`, the daily alarm, and the two front-end fixes from §13.6 |
+| `8923d7923dcd69e9afbe0106924b817581484679259c545f792be21e06125c7d` | `logcat-2026-10-08-daily.txt` | §13's measurement: `result=armed dueInSec=60` → real alarm fire in the background → `start=foreground-service` → `result=failed reason=NETWORK`, plus `userAgent=cached` and the re-armed `86354` |
+| `21b378efa82979878e699cf1fe39e1bdd569419fc5887cd923240df05297708b` | `phone-2026-10-08-daily-ui.png` | both switches ticked, the AC row gone with no data, and 下次约 23 小时 50 分后 after the resume re-read |
+
+The log file is `Diag` output only (14 lines, grepped for SSID, IPv4/IPv6, bearer tokens and
+cookie values before archiving — the single `token` hit is the word `refreshToken=present`, a
+presence flag by design). The screenshot shows the placeholder room 宿舍 and no account name,
+because no query succeeded in that session.
+
+## 2026-10-07
+
+| SHA256 | Artifact | What it establishes |
+| --- | --- | --- |
+| `582ebe9c18b99406700060023a01dcdce1acfbf56e4f916130093c06f1605c32` | `app-debug-2026-10-07T0033-dxc-reuse.apk` (4,784,117 B) | the build that reuses the DFYC `JSESSIONID` instead of re-walking the single-use chain |
+| `1fad90ea783104f0fe4fc57763de6db8c497842224c9fc595a657c3460461c07` | `logcat-2026-10-07T0101-dxc-reuse-verified.txt` | two refreshes after one login, each three reads and no chain rebuild — §7's confirmation |
+| `6938cc1b6a17fef7e468a1f789fafbf0c8c20a47afd86c31abd97001d9d2dcb2` | `app-debug-2026-10-07T1633-persistence.apk` (4,791,373 B) | Keystore-backed session persistence, first device build with it |
+| `ffb82e19fc3058888b034a741dae8d17f6d0d8d5b3359088bddb69b232367bc1` | `logcat-2026-10-07T1615-session2.txt` | §9: write → force-stop → `result=restored` → re-query, and `退出` wiping both copies |
+| `f17ec59528638e7f65552056abdb7613387c91e37626c908cc74d3f9aacf25ca` | `phone-2026-10-07T0040-relaunch.png` | the app after a relaunch |
+| `ed58dc2b2601df3284ad0de1c8dd83e86650ffa33a93e8a7d632b86ce7eac0bc` | `phone-2026-10-07T1842-restored.png` | restored session, before the query that proves it is usable |
+| `ee3e99faaf21a8e6f32f97f468f7b88c92e349ac78e56a572d3f50ef80d86ab2` | `phone-2026-10-07T1843-restored-queried.png` | the same session after a successful query — the bug that made `boot()` always query |
+| `d9206a4804737108ab5bb4bb002346cbcba112efc99bad5ada62ecdb43ff5344` | `app-debug-2026-10-07T2020-stale-fix.apk` (4,830,882 B) | the DFYC-302-as-stale-session fix (§7's `上游暂不可用` misclassification) |
+| `cd8a4344009160aea220ca62438a9d77cbc9c1ab942e731fd62895b193a813df` | `app-debug-2026-10-07T2330-notice.apk` (5,084,827 B) | the persistent notification, and the 60-second spacing floor measured in §12 |
+| `9d42252858dcc29cd47c5ae1072ceab4822d910a8c9df1a75fae88f23c3ae4ee` | `phone-2026-10-07T2050-lite-dark.png` | the rewritten UI in dark mode |
+
+These were missing from this index until 2026-10-08; the artifacts themselves are the originals
+from that day.
 
 ## 2026-10-06
 

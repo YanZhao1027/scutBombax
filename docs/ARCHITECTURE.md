@@ -50,8 +50,11 @@ src/
 android/app/src/main/java/cn/scut/bombax/
   MainActivity.kt                        registers the plugin before super.onCreate
   scut/
+    ScutRuntime.kt                       process-wide owner: OkHttp client, cookie jar,
+                                         SessionStore, repositories, the one `scut-io` queue
     ScutApiPlugin.kt                     @CapacitorPlugin("ScutApi"): health getCaptcha
-                                         login getBills refreshSession logout
+                                         login getBills refreshSession logout noticeStatus
+                                         startNotice stopNotice enableDaily disableDaily
     ScutEndpoints.kt                     hosts, paths, Basic client, Stages.* log names
     ScutError.kt                         AppError enum + wire codes + human() text
     Diag.kt                              the only logger; redaction happens here
@@ -67,16 +70,22 @@ android/app/src/main/java/cn/scut/bombax/
     billing/GzicBilling.kt               fee items 1/2/3 + parser
     billing/DxcBilling.kt                redirect-chain step resolution + DFYC parsers
     billing/BillingRepository.kt         campus dispatch, hop-by-hop DXC driver
+    notice/BalanceNoticeService.kt       the shade line, and the only network caller besides
+                                         the plugin
+    notice/DailyRefresh.kt               cadence maths + the inexact alarm
+    notice/DailyAlarmReceiver.kt         wake → re-arm → hand the refresh to the service
 ```
 
 Two rules hold the design together:
 
 - **At most one request on the wire.** `src/main.ts` keeps a `querying` flag and
   `AutoRefresher` keeps an `inFlight` flag, so a second UI-triggered query is refused
-  instead of starting. Behind that, every plugin method runs on a single-thread daemon
-  executor named `scut-io`, which serializes native work so two SCUT requests can never
-  overlap even if a caller slips past the UI guards. `BUSY` is only returned once that
-  executor has shut down during app teardown.
+  instead of starting. Behind that, every SCUT call — from the WebView *or* from the daily
+  alarm — runs on the one single-thread daemon executor named `scut-io` inside `ScutRuntime`,
+  so two requests can never overlap even if a caller slips past the UI guards. This is the
+  reason the runtime is a process-scoped object rather than plugin state: a service with its
+  own client and queue would have quietly doubled every invariant above. `BUSY` is only
+  returned once that executor has shut down during app teardown.
 - **Secrets stop at the Kotlin boundary.** `SessionPublic` and `Bills` are the only
   shapes that cross into JavaScript, and the `public projection never carries a secret`
   test in `TokenStateTest` asserts that a rendered public projection contains no token,
@@ -198,33 +207,46 @@ because a backgrounded WebView on this OEM build reports itself visible repeated
 flip looked like an elapsed interval (four queries in eleven seconds, measured 2026-10-07).
 The single bounded network retry is exempt, since AGENTS.md wants that one within seconds.
 
-## Persistent notification (opt-in, added 2026-10-07)
+## Persistent notification and daily refresh (opt-in, added 2026-10-07/08)
 
 AGENTS.md says "Do not add an Android background Service or WorkManager" and "when app/page is
-not visible: no polling". The user explicitly authorised a persistent balance notification on
-2026-10-07, so this is a **recorded, deliberate deviation**, constrained to keep the spirit of
-the rule:
+not visible: no polling". The user authorised a persistent balance notification on 2026-10-07 and
+a **once-a-day** background refresh on 2026-10-08, so these are **recorded, deliberate
+deviations**, constrained to keep the spirit of the rules:
 
 - `BalanceNoticeService` is a foreground service (`foregroundServiceType="specialUse"`, with the
   subtype property) started **only** from the 常驻通知 checkbox, which defaults to off and is
   restored from the service's actual running state at startup;
-- the service contains no network code at all — it never touches OkHttp, the session, the
-  cookies or the token. It displays the five strings the page hands it (`room`, `electric`,
-  `water`, unit, update time) and nothing else, so enabling it cannot add load to the school;
-- updates are pushed by the page after a query it was going to make anyway (`syncNotice()`), so
-  the notification frequency is bounded by the same interval selector as the UI;
-- 退出 / 清除登录状态 switches it off and stops the service — a stale balance must not sit on
-  the shade after the session is gone;
+- the daily path is **one** query per day per device — an inexact `setAndAllowWhileIdle` alarm,
+  re-armed after every fire and on every app open. Not WorkManager, not an exact alarm, not a
+  boot receiver: `SCHEDULE_EXACT_ALARM` and `RECEIVE_BOOT_COMPLETED` are permissions this app
+  should not need for a nicety, and the reboot gap is documented instead of papered over;
+- the service queries through `ScutRuntime`, never its own client, so its request shares the
+  WebView's cookies, session and — the load-bearing part — the single `scut-io` queue. Two
+  callers, still at most one request on the wire;
+- **it never logs in.** No password is stored, and only a human can read the captcha, so a
+  missing or expired session produces 需重新登录 on the shade rather than an attempt;
+- a failed refresh keeps the last numbers and grows a reason (刷新失败 / 需在校内网络 /
+  需重新登录) instead of showing an unknown balance, and no retry follows — the next attempt is
+  tomorrow;
+- the two switches are one-way coupled: 每日后台刷新 requires 常驻通知 (enforced in the page and
+  in `enableDaily`), and turning the notification off disables the alarm, because a user who
+  asked for no notification must not be woken by something that makes one;
+- updates from the page are still pushed by `syncNotice()` after a query it was going to make
+  anyway, so the foreground cadence stays bounded by the same interval selector as the UI;
+- 退出 / 清除登录状态 switches both off — a stale balance must not sit on the shade after the
+  session is gone;
 - channel `bombax.balance` is `IMPORTANCE_LOW`: silent, no heads-up, badge-free, `VISIBILITY_PRIVATE`;
 - `android:allowBackup` was flipped to `false` in the same change, so neither the encrypted
   session record nor the WebView storage leaves the device through backup or device transfer.
 
-What is still being measured (see `docs/DEVICE_VERIFICATION.md` §12): whether the WebView's
-interval timer keeps firing while the app is backgrounded on this OEM build, now that the
-process has foreground importance. Android throttles timers in hidden WebViews regardless of
-process priority, so the honest expectation is "the notification survives; the polling may
-not". If polling does not survive, the fix is a service-driven tick — a bigger deviation that
-would need a separate decision.
+Measured on the device (`docs/DEVICE_VERIFICATION.md` §12, §13): the hidden WebView's interval
+timers do **not** fire on this OEM build, which is why the clock had to move into native code,
+and the inexact alarm does get delivered while backgrounded (45 s late in the sample) — but
+Android 12+ will not let that alarm *start* the foreground service, so the daily path only runs
+while the notification is already alive. That constraint is why the page re-starts the service on
+every open when the daily switch is armed, and why the honest statement of behaviour is "one
+query a day, from a process you already asked to keep running".
 
 ## Testing strategy
 

@@ -123,8 +123,9 @@ source (5.9 KB HTML + 5.1 KB CSS). The previous, heavier layout is preserved as 
 
 Implemented and green on the host:
 
-- Capacitor 8 shell in `cn.scut.bombax`, app-local `ScutApi` plugin, single-threaded
-  native IO so only one SCUT query can ever be in flight
+- Capacitor 8 shell in `cn.scut.bombax`, app-local `ScutApi` plugin, and a process-scoped
+  `ScutRuntime` that owns the OkHttp client, the cookie jar, the session and the single-threaded
+  native IO — so only one SCUT query can ever be in flight, whoever asked for it
 - Kotlin/OkHttp ports of captcha, secure keyboard, OAuth password login, refresh attempt,
   GZIC fee items and the DXC manual-redirect chain
 - Session token state lives in Kotlin and in a **Keystore-encrypted** file under
@@ -133,9 +134,10 @@ Implemented and green on the host:
   and reuses the stored DFYC session, while 退出 wipes both copies. The card password, the captcha
   answer and the keyboard uuid are never persisted in any form (see `docs/ARCHITECTURE.md`
   "Persistence")
-- Foreground-only auto refresh (off / 5 / 10 / 30 min), no Service, no WorkManager, no alarms
+- Foreground auto refresh (off / 5 / 10 / 30 min) behind a 60-second spacing floor, plus the
+  opt-in daily alarm above; no WorkManager, no exact alarms, no boot receiver
 - Redacted logging through `Diag` (`adb logcat -s ScutBombax`)
-- 77 JVM unit tests + 15 vitest refresh tests passing; `assembleDebug` produces
+- 99 JVM unit tests + 17 vitest refresh tests passing; `assembleDebug` produces
   `android/app/build/outputs/apk/debug/app-debug.apk`
 
 Verified on a physical phone (Android 14, arm64-v8a) on 2026-10-05 and 2026-10-06:
@@ -182,14 +184,25 @@ straight to the three balance reads (3 requests instead of 7), rebuilding the ch
 a read refuses it — confirmed on the device: two refreshes after a login produced only the
 three reads, all 200.
 
-**Opt-in persistent notification:** a 常驻通知 checkbox posts a silent, ongoing balance
-notification from a `specialUse` foreground service. The service holds no network code at all —
-it renders whatever the page last queried — and 退出 stops it. AGENTS.md forbids background
-services, so this is a recorded, user-authorised deviation, bounded in `docs/ARCHITECTURE.md`
-("Persistent notification") and measured in `docs/DEVICE_VERIFICATION.md` §12.
+**Opt-in persistent notification and daily refresh:** a 常驻通知 checkbox posts a silent,
+ongoing balance line to the shade, and a second checkbox — 每日后台刷新 — puts **one** inexact
+`AlarmManager` alarm on the clock that asks for a single query through the same native queue the
+page uses. Both default to off, the second requires the first, and 退出 stops both. AGENTS.md
+forbids background services and background polling, so these are recorded, user-authorised
+deviations, bounded in `docs/ARCHITECTURE.md` ("Persistent notification and daily refresh") and
+measured in `docs/DEVICE_VERIFICATION.md` §12/§13. What the measurement found is the limit worth
+knowing: the alarm does fire while the app is on the launcher (45 s late, inexact by design), but
+Android 12+ refuses to let an *inexact* alarm start the foreground service — so the daily path
+only runs while the notification is already alive, which is why the page re-starts the service on
+every open when the daily switch is armed. And the service **never logs in**: no password is
+stored and only a human can read the captcha, so an expired session becomes 需重新登录 on the
+shade rather than an attempt.
 
-**Not verified:** GZIC balances (this account's dormitory is DXC), and whether the interval
-timer keeps polling while the app is backgrounded.
+**Not verified:** GZIC balances (this account's dormitory is DXC), whether the interval
+timer keeps polling while the app is backgrounded (§12: on this build it does not), and a
+*successful* background refresh — every daily attempt in §13 hit the campus-network timeout
+because the dormitory wifi was sitting on a captive portal, so the mechanics are measured and
+the number actually changing on its own is not.
 
 Keep the phone on campus Wi-Fi or the school SSL VPN, use the **card query password**
 (校园卡查询密码, letters and digits, not the 6-digit payment PIN), stop after two `8000`
