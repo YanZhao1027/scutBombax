@@ -721,5 +721,24 @@ out the remainder of the floor rather than rescheduling from `lastFinishedAt`, w
 stale timestamp would land at delay 0 and busy-loop — the first version of the guard did
 exactly that and the fake-clock test caught it.
 
-Re-measured with the floor in place (same setup, backgrounded at 23:45:11): see the run log;
-the expectation is one completed query per interval, never a cluster.
+Re-measured with the floor in place — same setup, backgrounded at `23:45:11`, checked at
+`23:52:53`, a 7 m 42 s window in which one 5-minute tick was owed:
+
+```text
+process / service / notification   all alive throughout
+ScutBombax log lines in the window 0        ← not one query, not one retry
+```
+
+So the two measurements together say: **the persistent notification works, and background
+polling does not.** The four queries seen earlier were not the interval timer running in the
+background — they were freeze/thaw visibility flips taking the catch-up path, and with those
+capped the hidden WebView's timers simply do not fire on this device. Practical meaning of
+what is shipped: the notification keeps showing the numbers from the last query the app made
+while it was visible, and goes quiet (not stale-but-updating) once you leave it.
+
+Making it update on schedule in the background would need the service to own the clock
+(a `Handler` in the service, or `AlarmManager`/`WorkManager`). That is a larger departure from
+AGENTS.md than the notification itself, it is the difference between "shows a number" and
+"keeps asking the school when nobody is looking", and it has **not** been done. It needs an
+explicit decision, and if taken, a rate that is defensible to the school (tens of minutes, not
+minutes).
