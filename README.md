@@ -181,6 +181,16 @@ school still holds the DFYC session makes `thirdLogin` redirect to the landing p
 straight to the three balance reads (3 requests instead of 7), rebuilding the chain only if
 a read refuses it — confirmed on the device: two refreshes after a login produced only the
 three reads, all 200.
+
+**Opt-in persistent notification:** a 常驻通知 checkbox posts a silent, ongoing balance
+notification from a `specialUse` foreground service. The service holds no network code at all —
+it renders whatever the page last queried — and 退出 stops it. AGENTS.md forbids background
+services, so this is a recorded, user-authorised deviation, bounded in `docs/ARCHITECTURE.md`
+("Persistent notification") and measured in `docs/DEVICE_VERIFICATION.md` §12.
+
+**Not verified:** GZIC balances (this account's dormitory is DXC), and whether the interval
+timer keeps polling while the app is backgrounded.
+
 Keep the phone on campus Wi-Fi or the school SSL VPN, use the **card query password**
 (校园卡查询密码, letters and digits, not the 6-digit payment PIN), stop after two `8000`
 attempts, and work through `docs/DEVICE_VERIFICATION.md` §2.1 before trying a third.

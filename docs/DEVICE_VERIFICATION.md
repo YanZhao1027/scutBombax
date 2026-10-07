@@ -681,3 +681,25 @@ checking it means logging out:
 
 None of these is a protocol question; they are layout and wiring. Run them at the next natural
 re-login rather than spending a credential attempt on them deliberately.
+
+## 12. Persistent notification capability (2026-10-07)
+
+Setup on the device: 常驻通知 switched on, 自动刷新 = 5 分钟, app sent to the launcher at
+`23:30:48`. Three separate questions, and they have separate answers:
+
+```bash
+adb shell pidof cn.scut.bombax                                   # process alive?
+adb shell dumpsys activity services cn.scut.bombax | grep -c BalanceNoticeService
+adb shell dumpsys notification | grep -c 'cn.scut.bombax|176'    # notification posted?
+adb logcat -d -s ScutBombax:V | awk '$2>"23:30:50"'              # did anything query?
+```
+
+Observed at the moment of enabling: `stage=notice result=shown updated=23:28:49`, one
+notification record on channel `bombax.balance` (importance 2, ongoing, no sound,
+`VISIBILITY_PRIVATE`), and `BalanceNoticeService` listed as a running service.
+
+Whether the hidden WebView's interval timer keeps firing is measured over two intervals with
+the app on the launcher. Record the outcome here **including the negative case**: a
+notification that persists while polling stops is a legitimate result. Making the poll itself
+survive would mean a service-driven scheduler, which is a larger departure from AGENTS.md and
+needs its own decision rather than a quiet implementation.
