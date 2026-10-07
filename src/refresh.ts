@@ -25,6 +25,18 @@ export const browserHost: TimerHost = {
 /** Short, bounded backoff for the single allowed retry after a transient failure. */
 export const RETRY_BACKOFF_MS = 5_000;
 
+/**
+ * Hard floor between two queries, however they were triggered.
+ *
+ * Measured on a device on 2026-10-07: with the app backgrounded and a 5-minute interval, four
+ * complete queries ran inside eleven seconds. One interval tick was owed; the rest came from
+ * visibility being reported true repeatedly while the OEM freezer thawed the process, and each
+ * flip legitimately looked like "the interval elapsed, catch up now". The scheduler cannot
+ * distinguish a real resume from a spurious one, so it enforces spacing instead: at most one
+ * query per minute no matter how many timers, flips or resumes arrive.
+ */
+export const MIN_TICK_SPACING_MS = 60_000;
+
 export const MINUTES_TO_MS = (minutes: number): number => minutes * 60_000;
 
 /**
@@ -50,6 +62,7 @@ export class AutoRefresher {
   private lastFinishedAt = 0;
   private timerId: number | null = null;
   private retryPending = false;
+  private lastStartedAt = 0;
   private state: AutoRefreshState = 'off';
 
   constructor(
@@ -76,7 +89,7 @@ export class AutoRefresher {
       return;
     }
     this.setState('waiting');
-    this.schedule({ immediate: this.shouldRunNow() });
+    this.schedule({ immediate: this.shouldRunNow() && this.spacedOut() });
   }
 
   /** Page/app visibility. Hidden stops all polling immediately. */
@@ -89,9 +102,11 @@ export class AutoRefresher {
       return;
     }
     if (this.intervalMs === 0 || this.state === 'halted') return;
-    // Coming back to the foreground: query once only if the interval elapsed.
+    // Coming back to the foreground: query once only if the interval elapsed — and not again
+    // if a query just ran, which is what stops a burst of resume events from becoming a burst
+    // of requests to the school.
     this.setState('waiting');
-    this.schedule({ immediate: this.shouldRunNow() });
+    this.schedule({ immediate: this.shouldRunNow() && this.spacedOut() });
   }
 
   /** A manual refresh just happened, so the next automatic one is a full interval away. */
@@ -107,7 +122,7 @@ export class AutoRefresher {
   resume(): void {
     if (this.intervalMs === 0) return;
     this.setState('waiting');
-    this.schedule({ immediate: this.shouldRunNow() });
+    this.schedule({ immediate: this.shouldRunNow() && this.spacedOut() });
   }
 
   stop(): void {
@@ -119,6 +134,11 @@ export class AutoRefresher {
   private shouldRunNow(): boolean {
     if (this.lastFinishedAt === 0) return true;
     return this.host.now() - this.lastFinishedAt >= this.intervalMs;
+  }
+
+  /** False when a query started less than MIN_TICK_SPACING_MS ago. */
+  private spacedOut(now = this.host.now()): boolean {
+    return this.lastStartedAt === 0 || now - this.lastStartedAt >= MIN_TICK_SPACING_MS;
   }
 
   private clearTimer(): void {
@@ -153,7 +173,23 @@ export class AutoRefresher {
   private async tick(): Promise<void> {
     // At most one in-flight query, always.
     if (this.inFlight || !this.visible) return;
+    const now = this.host.now();
+    // The bounded network retry is deliberately exempt: AGENTS.md allows one retry after a
+    // transient failure, and it is supposed to land in seconds, not after the floor.
+    if (!this.retryPending && !this.spacedOut(now)) {
+      // A spurious resume/flip: wait out the spacing floor and try again rather than
+      // rescheduling from `lastFinishedAt`, which for a stale timestamp would land at delay 0
+      // and turn this into a busy loop of refused ticks.
+      const wait = Math.max(MIN_TICK_SPACING_MS - (now - this.lastStartedAt), 1);
+      this.clearTimer();
+      this.timerId = this.host.setTimeout(() => {
+        this.timerId = null;
+        void this.tick();
+      }, wait);
+      return;
+    }
     this.inFlight = true;
+    this.lastStartedAt = now;
     const previous = this.state;
     if (previous !== 'halted') this.setState('running');
 

@@ -698,8 +698,28 @@ Observed at the moment of enabling: `stage=notice result=shown updated=23:28:49`
 notification record on channel `bombax.balance` (importance 2, ongoing, no sound,
 `VISIBILITY_PRIVATE`), and `BalanceNoticeService` listed as a running service.
 
-Whether the hidden WebView's interval timer keeps firing is measured over two intervals with
-the app on the launcher. Record the outcome here **including the negative case**: a
-notification that persists while polling stops is a legitimate result. Making the poll itself
-survive would mean a service-driven scheduler, which is a larger departure from AGENTS.md and
-needs its own decision rather than a quiet implementation.
+Whether the hidden WebView's interval timer keeps firing was measured over two intervals with
+the app on the launcher. Result, 23:30:48 → 23:40:06 with a 5-minute interval:
+
+```text
+process                pid 23566 unchanged — survived
+foreground service     BalanceNoticeService still registered
+notification           record present on channel bombax.balance
+queries while hidden   4 complete cycles between 23:34:02 and 23:34:13  ← 11 seconds
+```
+
+So the answer to "does polling continue when backgrounded" is **yes, and that is a problem**:
+one tick was owed and four requests went to the school. The OEM freezer makes the page report
+itself visible repeatedly, and every flip legitimately looked like "the interval elapsed,
+catch up now". This also retro-explains the six queries in seven seconds seen earlier the same
+day, which had been put down to taps.
+
+Fixed by a spacing floor in `AutoRefresher`: at most one query per `MIN_TICK_SPACING_MS`
+(60 s) regardless of how many timers, flips or resumes arrive, with the single bounded network
+retry deliberately exempt because AGENTS.md wants that one in seconds. A refused tick waits
+out the remainder of the floor rather than rescheduling from `lastFinishedAt`, which for a
+stale timestamp would land at delay 0 and busy-loop — the first version of the guard did
+exactly that and the fake-clock test caught it.
+
+Re-measured with the floor in place (same setup, backgrounded at 23:45:11): see the run log;
+the expectation is one completed query per interval, never a cluster.

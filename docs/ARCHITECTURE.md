@@ -192,6 +192,12 @@ written — pressing Back would log the user out and persistence would appear br
 calls `dropMemory()`, which forgets the in-memory reference while leaving the record for the
 next start; only `logout` deletes it.
 
+**A query spacing floor sits under the whole scheduler.** `MIN_TICK_SPACING_MS` (60 s) caps
+how often any path — interval tick, resume catch-up, re-armed timer — may start a query,
+because a backgrounded WebView on this OEM build reports itself visible repeatedly and each
+flip looked like an elapsed interval (four queries in eleven seconds, measured 2026-10-07).
+The single bounded network retry is exempt, since AGENTS.md wants that one within seconds.
+
 ## Persistent notification (opt-in, added 2026-10-07)
 
 AGENTS.md says "Do not add an Android background Service or WorkManager" and "when app/page is

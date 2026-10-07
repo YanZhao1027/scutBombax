@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AutoRefresher,
   MINUTES_TO_MS,
+  MIN_TICK_SPACING_MS,
   RETRY_BACKOFF_MS,
   nextDelayMs,
   type AutoRefreshState,
@@ -322,5 +323,61 @@ describe('AutoRefresher', () => {
     expect(h.host.pending).toEqual([MINUTES_TO_MS(5)]);
     h.host.advance(MINUTES_TO_MS(4));
     expect(h.calls).toBe(0);
+  });
+});
+
+
+describe('the spacing floor', () => {
+  /**
+   * Measured on a device on 2026-10-07: backgrounded with a 5-minute interval, four complete
+   * queries ran in eleven seconds because the OEM freezer made the page report itself visible
+   * over and over, and each flip looked like an elapsed interval. Whatever the trigger, at most
+   * one request may leave per MIN_TICK_SPACING_MS.
+   */
+  it('swallows a catch-up that a stale finish timestamp would justify', async () => {
+    const h = new Harness();
+    const refresher = h.start();
+    refresher.setIntervalMinutes(5);
+    h.host.advance(0);
+    await flush();
+    expect(h.calls).toBe(1);
+
+    // A caller reports a finish from five minutes ago (e.g. the timestamp on old bills),
+    // which on its own would schedule an immediate query.
+    refresher.noteQueryFinished(h.host.now() - MINUTES_TO_MS(5));
+    expect(h.host.pending).toEqual([0]);
+    h.host.advance(0);
+    await flush();
+    expect(h.calls).toBe(1);
+
+    // The refused tick waits out the floor instead of looping at delay 0…
+    expect(h.host.pending).toEqual([MIN_TICK_SPACING_MS]);
+    h.host.advance(MIN_TICK_SPACING_MS);
+    await flush();
+    expect(h.calls).toBe(2);
+
+    // …and the normal cadence is untouched afterwards.
+    h.host.advance(MINUTES_TO_MS(5));
+    await flush();
+    expect(h.calls).toBe(3);
+  });
+
+  it('collapses a storm of visibility flips into one request', async () => {
+    const h = new Harness();
+    const refresher = h.start();
+    refresher.setIntervalMinutes(5);
+    refresher.setVisible(false);
+    expect(h.calls).toBe(0);
+
+    for (let flip = 0; flip < 6; flip++) {
+      h.host.advance(1_000);
+      refresher.setVisible(true);
+      h.host.advance(0);
+      await flush();
+      refresher.setVisible(false);
+    }
+
+    // The first flip is a genuine resume; the five that follow arrive inside the floor.
+    expect(h.calls).toBe(1);
   });
 });
