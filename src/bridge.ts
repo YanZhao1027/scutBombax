@@ -1,10 +1,12 @@
 import { registerPlugin } from '@capacitor/core';
 import type {
   Bills,
+  NoticePayload,
   BridgeError,
   CaptchaChallenge,
   HealthResult,
   LoginInput,
+  NoticeState,
   RefreshResult,
   ScutErrorCode,
   SessionInfo
@@ -23,6 +25,10 @@ interface ScutApiNativePlugin {
   getBills(): Promise<Bills>;
   refreshSession(): Promise<RefreshResult>;
   logout(): Promise<SessionInfo>;
+  noticeStatus(): Promise<NoticeState>;
+  requestNoticePermission(): Promise<NoticeState>;
+  startNotice(payload: NoticePayload): Promise<{ running: boolean }>;
+  stopNotice(): Promise<{ running: boolean }>;
 }
 
 const ScutApi = registerPlugin<ScutApiNativePlugin>('ScutApi');
@@ -86,6 +92,14 @@ export const health = (): Promise<HealthResult> => call(() => ScutApi.health());
 export const getCaptcha = (): Promise<CaptchaChallenge> => call(() => ScutApi.getCaptcha());
 
 export const login = (input: LoginInput): Promise<SessionInfo> => call(() => ScutApi.login(input));
+
+/* The persistent notice never reaches SCUT; these four calls only touch local UI. */
+export const noticeStatus = (): Promise<NoticeState> => call(() => ScutApi.noticeStatus());
+export const requestNoticePermission = (): Promise<NoticeState> =>
+  call(() => ScutApi.requestNoticePermission());
+export const startNotice = (payload: NoticePayload): Promise<{ running: boolean }> =>
+  call(() => ScutApi.startNotice(payload));
+export const stopNotice = (): Promise<{ running: boolean }> => call(() => ScutApi.stopNotice());
 
 export const getBills = (): Promise<Bills> => call(() => ScutApi.getBills());
 

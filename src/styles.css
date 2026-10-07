@@ -267,6 +267,22 @@ input {
   flex: none;
 }
 
+.notice-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+
+.notice-line input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  margin-right: 6px;
+  vertical-align: -3px;
+  accent-color: var(--accent);
+}
+
 /* auto refresh */
 .segmented {
   display: flex;

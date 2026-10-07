@@ -79,6 +79,23 @@ export interface LoginInput {
   captchaCode?: string;
 }
 
+/** State of the opt-in persistent balance notification. */
+export interface NoticeState {
+  /** POST_NOTIFICATIONS granted (always true below Android 13). */
+  granted: boolean;
+  /** Notifications are not switched off for the app at the system level. */
+  enabled: boolean;
+  running: boolean;
+}
+
+export interface NoticePayload {
+  room: string;
+  electric: string;
+  water: string;
+  unit: string;
+  updated: string;
+}
+
 export interface HealthResult {
   ok: boolean;
   platform: string;

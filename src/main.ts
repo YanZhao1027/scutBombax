@@ -36,6 +36,7 @@ const els = {
   updatedAt: $<HTMLElement>('updated-at'),
   queryState: $<HTMLElement>('query-state'),
   queryButton: $<HTMLButtonElement>('query-button'),
+  noticeToggle: $<HTMLInputElement>('notice-toggle'),
   logoutButton: $<HTMLButtonElement>('logout-button'),
   resultsStatus: $<HTMLElement>('results-status'),
   choices: $<HTMLElement>('refresh-choices'),
@@ -159,6 +160,26 @@ const renderSession = (session: SessionInfo | null): void => {
 const formatValue = (value: number | null): string =>
   value === null || Number.isNaN(value) ? '—' : String(value);
 
+/**
+ * Pushes the latest result into the persistent notification, when the user switched it on.
+ *
+ * The service is a display only: this is the sole thing that updates it, so every notification
+ * refresh corresponds to a query the page already made for its own sake.
+ */
+const syncNotice = (): void => {
+  const bills = state.bills;
+  if (!els.noticeToggle.checked || !bills) return;
+  void api
+    .startNotice({
+      room: bills.room || '宿舍',
+      electric: String(bills.electric ?? '—'),
+      water: String(bills.water ?? '—'),
+      unit: bills.electricUnit || '',
+      updated: new Date(bills.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })
+    })
+    .catch((error) => appendLog(describeError(error)));
+};
+
 const renderBills = (bills: Bills | null): void => {
   state.bills = bills;
   if (!bills) {
@@ -221,6 +242,7 @@ const query = async (source: 'manual' | 'auto' | 'login' | 'restore'): Promise<T
     const health = await api.health();
     renderSession(health.session);
     setStatus(els.resultsStatus, '', 'idle');
+    syncNotice();
     appendLog(`getBills → OK (${source})`);
     return 'ok';
   } catch (error) {
@@ -333,6 +355,9 @@ const submitLogin = async (): Promise<void> => {
 
 const clearSession = async (notify: boolean): Promise<void> => {
   refresher.stop();
+  // A balance that is no longer being refreshed must not stay on the shade.
+  els.noticeToggle.checked = false;
+  void api.stopNotice().catch(() => undefined);
   try {
     const session = await api.logout();
     renderSession(session);
@@ -350,6 +375,28 @@ const wire = (): void => {
     event.preventDefault();
     void submitLogin();
   });
+  els.noticeToggle.addEventListener('change', () => {
+    void (async () => {
+      if (!els.noticeToggle.checked) {
+        await api.stopNotice().catch(() => undefined);
+        setStatus(els.resultsStatus, '常驻通知已关闭。', 'idle');
+        return;
+      }
+      let status = await api.noticeStatus().catch(() => null);
+      if (!status?.granted || !status?.enabled) {
+        // Android 13+ needs a runtime grant; the first toggle asks instead of failing quietly.
+        status = await api.requestNoticePermission().catch(() => null);
+      }
+      if (!status?.granted || !status?.enabled) {
+        els.noticeToggle.checked = false;
+        setStatus(els.resultsStatus, '通知权限未授予，无法开启常驻通知。', 'error');
+        return;
+      }
+      syncNotice();
+      setStatus(els.resultsStatus, '常驻通知已开启（仅前台查询）。', 'ok');
+    })();
+  });
+
   els.captchaImage.addEventListener('click', () => void loadCaptcha());
   els.captchaRefresh.addEventListener('click', () => void loadCaptcha());
   els.queryButton.addEventListener('click', () => {
@@ -441,6 +488,14 @@ const boot = async (): Promise<void> => {
   try {
     const result = await api.health();
     renderSession(result.session);
+    // Reflect a service the OS may still be holding on to, rather than showing an off switch
+    // next to a live notification.
+    void api
+      .noticeStatus()
+      .then((status) => {
+        els.noticeToggle.checked = status.running;
+      })
+      .catch(() => undefined);
     appendLog(`health → ok platform=${result.platform} app=${result.appVersion}`);
     // Prefs are needed most when the user is about to log in, so apply them on both paths —
     // gating them on an existing session left the pickers on their HTML defaults after 退出.

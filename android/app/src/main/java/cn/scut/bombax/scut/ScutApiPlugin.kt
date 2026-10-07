@@ -1,6 +1,13 @@
 package cn.scut.bombax.scut
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import cn.scut.bombax.scut.notice.BalanceNoticeService
 import cn.scut.bombax.scut.auth.AuthRepository
 import cn.scut.bombax.scut.auth.CaptchaService
 import cn.scut.bombax.scut.auth.Campus
@@ -41,6 +48,8 @@ class ScutApiPlugin : Plugin() {
 
         /** Name of the encrypted session record, under `noBackupFilesDir`. */
         const val SESSION_FILE = "scut-session.bin"
+
+        private const val NOTICE_PERMISSION_REQUEST = 0xB1
     }
 
     private val cookieJar = ScutCookieJar()
@@ -52,6 +61,13 @@ class ScutApiPlugin : Plugin() {
     private var http: ScutHttp? = null
     private var authRepository: AuthRepository? = null
     private var billingRepository: BillingRepository? = null
+
+    /** Mirrors whether the service was asked to run; the OS can still stop it. */
+    private var noticeRunning = false
+
+    /** Capacitor exposes a nullable context; the activity is always there once the bridge is up. */
+    private val appCtx: Context
+        get() = context ?: bridge.activity
 
     private fun http(): ScutHttp {
         http?.let { return it }
@@ -198,6 +214,85 @@ class ScutApiPlugin : Plugin() {
             result.put("session", sessionJson(session.public(System.currentTimeMillis())))
             result
         }
+    }
+
+    // ------------------------------------------------------- persistent notice
+    //
+    // Opt-in, off by default. The service never talks to SCUT; it only displays what the page
+    // hands it, so turning it on cannot add load to the school.
+
+    @PluginMethod
+    fun noticeStatus(call: PluginCall) {
+        submit(call) {
+            JSObject().apply {
+                put("granted", noticePermissionGranted())
+                put("enabled", NotificationManagerCompat.from(appCtx).areNotificationsEnabled())
+                put("running", noticeRunning)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun requestNoticePermission(call: PluginCall) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val activity = activity ?: return
+            ActivityCompat.requestPermissions(
+                activity,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                NOTICE_PERMISSION_REQUEST
+            )
+        }
+        submit(call) {
+            JSObject().apply {
+                put("granted", noticePermissionGranted())
+                put("enabled", NotificationManagerCompat.from(appCtx).areNotificationsEnabled())
+                put("running", noticeRunning)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun startNotice(call: PluginCall) {
+        submit(call) {
+            val context = appCtx
+            if (!noticePermissionGranted() || !NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                throw ScutException(
+                    AppError.INVALID_INPUT,
+                    "通知权限未开启，请在系统设置里允许本应用通知",
+                    "notice/permission"
+                )
+            }
+            BalanceNoticeService.createChannel(context)
+            val intent = BalanceNoticeService.intent(
+                context,
+                call.getString("room").orEmpty(),
+                call.getString("electric").orEmpty(),
+                call.getString("water").orEmpty(),
+                call.getString("unit").orEmpty(),
+                call.getString("updated").orEmpty()
+            )
+            ContextCompat.startForegroundService(context, intent)
+            noticeRunning = true
+            JSObject().apply { put("running", true) }
+        }
+    }
+
+    @PluginMethod
+    fun stopNotice(call: PluginCall) {
+        submit(call) {
+            val context = appCtx
+            context.stopService(BalanceNoticeService.intent(context, "", "", "", "", ""))
+            noticeRunning = false
+            JSObject().apply { put("running", false) }
+        }
+    }
+
+    private fun noticePermissionGranted(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
+        return ContextCompat.checkSelfPermission(
+            appCtx,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     @PluginMethod

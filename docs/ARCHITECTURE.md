@@ -192,6 +192,34 @@ written — pressing Back would log the user out and persistence would appear br
 calls `dropMemory()`, which forgets the in-memory reference while leaving the record for the
 next start; only `logout` deletes it.
 
+## Persistent notification (opt-in, added 2026-10-07)
+
+AGENTS.md says "Do not add an Android background Service or WorkManager" and "when app/page is
+not visible: no polling". The user explicitly authorised a persistent balance notification on
+2026-10-07, so this is a **recorded, deliberate deviation**, constrained to keep the spirit of
+the rule:
+
+- `BalanceNoticeService` is a foreground service (`foregroundServiceType="specialUse"`, with the
+  subtype property) started **only** from the 常驻通知 checkbox, which defaults to off and is
+  restored from the service's actual running state at startup;
+- the service contains no network code at all — it never touches OkHttp, the session, the
+  cookies or the token. It displays the five strings the page hands it (`room`, `electric`,
+  `water`, unit, update time) and nothing else, so enabling it cannot add load to the school;
+- updates are pushed by the page after a query it was going to make anyway (`syncNotice()`), so
+  the notification frequency is bounded by the same interval selector as the UI;
+- 退出 / 清除登录状态 switches it off and stops the service — a stale balance must not sit on
+  the shade after the session is gone;
+- channel `bombax.balance` is `IMPORTANCE_LOW`: silent, no heads-up, badge-free, `VISIBILITY_PRIVATE`;
+- `android:allowBackup` was flipped to `false` in the same change, so neither the encrypted
+  session record nor the WebView storage leaves the device through backup or device transfer.
+
+What is still being measured (see `docs/DEVICE_VERIFICATION.md` §12): whether the WebView's
+interval timer keeps firing while the app is backgrounded on this OEM build, now that the
+process has foreground importance. Android throttles timers in hidden WebViews regardless of
+process priority, so the honest expectation is "the notification survives; the polling may
+not". If polling does not survive, the fix is a service-driven tick — a bigger deviation that
+would need a separate decision.
+
 ## Testing strategy
 
 JVM unit tests (`android/app/src/test`) cover the parsers and decisions that were written
