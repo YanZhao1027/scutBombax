@@ -100,8 +100,9 @@ class SessionStore {
     fun save(state: TokenState) {
         current = state
         restored = true
-        val wrote = disk?.save(SessionCodec.toJson(state)) ?: true
-        if (!wrote) Diag.warn("stage=session result=not-persisted reason=write-failed")
+        disk?.save(SessionCodec.toJson(state))?.let {
+            Diag.warn("stage=session result=not-persisted reason=$it")
+        }
     }
 
     fun peek(): TokenState? {

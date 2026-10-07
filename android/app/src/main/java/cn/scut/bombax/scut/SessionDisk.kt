@@ -15,6 +15,30 @@ import java.io.File
  * Production supplies a key that lives in the Android Keystore and cannot be exported; unit
  * tests supply an ordinary JCE key so the byte format can be verified on the host.
  */
+/**
+ * `[iv length][iv][ciphertext+tag]`.
+ *
+ * Shared by production and the unit tests on purpose: the first version of this file packed the
+ * nonce inline and allocated one byte too few, which only showed up on a device. Keeping the
+ * layout in one place means the tests exercise the bytes the Keystore path actually writes.
+ */
+object CipherBlob {
+    fun pack(iv: ByteArray, body: ByteArray): ByteArray =
+        ByteArray(1 + iv.size + body.size).also { out ->
+            out[0] = iv.size.toByte()
+            System.arraycopy(iv, 0, out, 1, iv.size)
+            System.arraycopy(body, 0, out, 1 + iv.size, body.size)
+        }
+
+    /** Null when the blob is empty, self-inconsistent, or too short to hold an IV. */
+    fun unpack(blob: ByteArray): Pair<ByteArray, ByteArray>? {
+        if (blob.isEmpty()) return null
+        val ivSize = blob[0].toInt()
+        if (ivSize <= 0 || blob.size <= 1 + ivSize) return null
+        return blob.copyOfRange(1, 1 + ivSize) to blob.copyOfRange(1 + ivSize, blob.size)
+    }
+}
+
 interface SessionCipher {
     /** Returns whatever [decrypt] needs to read back, including any IV the implementation needs. */
     fun encrypt(plain: ByteArray): ByteArray
@@ -49,6 +73,12 @@ object SessionEnvelope {
 /**
  * AES/GCM under a non-exportable Keystore key.
  *
+ * Only the *key* comes from the `AndroidKeyStore` provider; the cipher is the platform's own
+ * `AES/GCM/NoPadding`. Asking that provider for the transformation throws
+ * `NoSuchAlgorithmException: Provider AndroidKeyStore does not provide AES/GCM/NoPadding` —
+ * which is exactly what the startup probe caught on a device on 2026-10-07, without spending a
+ * login to find out.
+ *
  * GCM needs a fresh 12-byte nonce per encryption; it is generated here and prepended to the
  * ciphertext, which is what makes the nonce safe to store in the clear.
  */
@@ -58,25 +88,17 @@ class KeystoreSessionCipher(
 ) : SessionCipher {
 
     override fun encrypt(plain: ByteArray): ByteArray {
-        val cipher = Cipher.getInstance(TRANSFORMATION, provider).apply {
+        val cipher = Cipher.getInstance(TRANSFORMATION).apply {
             init(Cipher.ENCRYPT_MODE, key())
         }
         val iv = cipher.iv
-        val body = cipher.doFinal(plain)
-        return ByteArray(iv.size + body.size).also { out ->
-            out[0] = iv.size.toByte()
-            System.arraycopy(iv, 0, out, 1, iv.size)
-            System.arraycopy(body, 0, out, 1 + iv.size, body.size)
-        }
+        return CipherBlob.pack(iv, cipher.doFinal(plain))
     }
 
     override fun decrypt(blob: ByteArray): ByteArray {
-        require(blob.size > 1) { "empty cipher blob" }
-        val ivSize = blob[0].toInt()
-        require(ivSize > 0 && blob.size > 1 + ivSize) { "malformed cipher blob" }
-        val iv = blob.copyOfRange(1, 1 + ivSize)
-        val body = blob.copyOfRange(1 + ivSize, blob.size)
-        val cipher = Cipher.getInstance(TRANSFORMATION, provider).apply {
+        val (iv, body) = CipherBlob.unpack(blob)
+            ?: throw IllegalArgumentException("malformed cipher blob")
+        val cipher = Cipher.getInstance(TRANSFORMATION).apply {
             init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(TAG_BITS, iv))
         }
         return cipher.doFinal(body)
@@ -123,12 +145,32 @@ class FileSessionStore(
     private val cipher: SessionCipher
 ) {
 
-    fun save(json: String): Boolean = runCatching {
+    /** Null on success, otherwise the exception class and message — enough to diagnose
+     *  a Keystore or filesystem failure from logcat without putting any secret in the log. */
+    fun save(json: String): String? = runCatching {
         val parent = file.parentFile
         if (parent != null && !parent.isDirectory) parent.mkdirs()
         file.writeBytes(SessionEnvelope.pack(json, cipher))
-        true
-    }.getOrDefault(false)
+        null
+    }.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message}" }
+
+    /**
+     * Encrypts, writes, reads back and deletes a constant, so an unusable Keystore or an
+     * unwritable directory is reported at startup instead of at the first login.
+     *
+     * Without this the only way to learn the cause was to log in, fail silently and ask the
+     * user to log in again — which costs a real credential attempt.
+     */
+    fun probe(): String? {
+        val probeFile = File(file.parentFile, "${'$'}{file.name}.probe")
+        return runCatching {
+            val text = "bombax-session-probe"
+            probeFile.writeBytes(SessionEnvelope.pack(text, cipher))
+            val back = SessionEnvelope.unpack(probeFile.readBytes(), cipher)
+            if (back != text) "round-trip mismatch" else null
+        }.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message}" }
+            .also { runCatching { probeFile.delete() } }
+    }
 
     /** Null when there is nothing usable; an unreadable file is removed rather than retried. */
     fun load(): String? {

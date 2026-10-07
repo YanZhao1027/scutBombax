@@ -96,7 +96,14 @@ class ScutApiPlugin : Plugin() {
         runCatching {
             val app = context?.applicationContext ?: return@runCatching
             val file = File(app.noBackupFilesDir, SESSION_FILE)
-            session.attachDisk(FileSessionStore(file, KeystoreSessionCipher()))
+            val store = FileSessionStore(file, KeystoreSessionCipher())
+            store.probe()?.let {
+                // Report and stay memory-only: a broken Keystore must not break login.
+                Diag.warn("stage=session result=disk-disabled reason=$it")
+                return@runCatching
+            }
+            session.attachDisk(store)
+            Diag.event("stage=session result=disk-ready path=noBackupFilesDir")
         }.onFailure {
             Diag.warn("stage=session result=disk-disabled reason=${it.javaClass.simpleName}")
         }

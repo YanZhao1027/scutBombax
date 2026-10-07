@@ -35,18 +35,11 @@ class SessionPersistenceTest {
             val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
             val iv = ByteArray(12).also(random::nextBytes)
             cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
-            val body = cipher.doFinal(plain)
-            return ByteArray(1 + iv.size + body.size).also { out ->
-                out[0] = iv.size.toByte()
-                System.arraycopy(iv, 0, out, 1, iv.size)
-                System.arraycopy(body, 0, out, 1 + iv.size, body.size)
-            }
+            return CipherBlob.pack(iv, cipher.doFinal(plain))
         }
 
         override fun decrypt(blob: ByteArray): ByteArray {
-            val ivSize = blob[0].toInt()
-            val iv = blob.copyOfRange(1, 1 + ivSize)
-            val body = blob.copyOfRange(1 + ivSize, blob.size)
+            val (iv, body) = CipherBlob.unpack(blob) ?: error("malformed test blob")
             val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
             return cipher.doFinal(body)
@@ -101,6 +94,23 @@ class SessionPersistenceTest {
         val second = SessionStore()
         second.attachDisk(FileSessionStore(file, JceCipher(key)))
         assertEquals(saved, second.peek())
+    }
+
+    @Test
+    fun `the cipher blob layout survives its own edge cases`() {
+        // The first implementation allocated one byte too few here; only a device run noticed,
+        // because the packing lived inside the Keystore-only class.
+        val iv = ByteArray(12) { (it + 1).toByte() }
+        val body = ByteArray(36) { (it + 100).toByte() }
+        val blob = CipherBlob.pack(iv, body)
+        assertEquals(1 + iv.size + body.size, blob.size)
+        assertEquals(12, blob[0].toInt())
+        val (backIv, backBody) = CipherBlob.unpack(blob)!!
+        assertTrue(iv.contentEquals(backIv))
+        assertTrue(body.contentEquals(backBody))
+        assertNull(CipherBlob.unpack(ByteArray(0)))
+        assertNull(CipherBlob.unpack(byteArrayOf(0, 1, 2)))
+        assertNull(CipherBlob.unpack(ByteArray(13)))
     }
 
     @Test

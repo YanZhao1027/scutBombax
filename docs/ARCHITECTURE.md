@@ -176,6 +176,16 @@ testable on the host because the *format* is separated from the *key's home* (un
 the same envelope code against a JCE AES/GCM key); and `androidx.security:security-crypto` was
 avoided entirely by using the platform Keystore API directly.
 
+Two more were caught on 2026-10-07 by the startup probe (`FileSessionStore.probe()`), which
+encrypts, writes, reads back and deletes a constant before the plugin reports
+`stage=session result=disk-ready`: asking the `AndroidKeyStore` **provider** for
+`AES/GCM/NoPadding` throws `NoSuchAlgorithmException` (only the *key* lives in that provider;
+the cipher is the platform's), and the first nonce-packing helper allocated one byte short, an
+`ArrayIndexOutOfBoundsException` on every write. Both would have looked like "persistence
+silently does nothing" if the save path had been the only signal — and finding them that way
+would have cost a login each time. The blob layout now lives in `CipherBlob`, shared by
+production and the unit tests, so the tests exercise the exact bytes the Keystore path writes.
+
 One trap worth naming, because the first implementation fell into it: the plugin's
 `handleOnDestroy` used to call `session.clear()`, which would delete the file we had just
 written — pressing Back would log the user out and persistence would appear broken. Destroy now
