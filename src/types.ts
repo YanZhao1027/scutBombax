@@ -138,3 +138,17 @@ export interface NativeLogLine {
   /** Non-sensitive service code from an upstream JSON body. */
   serviceCode?: string;
 }
+
+/** Read-only, local electricity history; never includes room, account or token. */
+export interface ElectricHistoryPoint {
+  updatedAt: number;
+  electric: number | null;
+  source: SnapshotSource;
+}
+
+export interface ElectricHistory {
+  campus: Campus | null;
+  /** Unit may be unknown, especially outside the DXC user-verified field. */
+  unit: string;
+  points: ElectricHistoryPoint[];
+}

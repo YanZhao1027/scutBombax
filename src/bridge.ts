@@ -11,7 +11,8 @@ import type {
   ScutErrorCode,
   SessionInfo,
   Snapshot,
-  SnapshotSource
+  SnapshotSource,
+  ElectricHistory
 } from './types';
 import { BridgeError as BridgeErrorClass } from './types';
 
@@ -28,6 +29,7 @@ interface ScutApiNativePlugin {
   refreshSession(): Promise<RefreshResult>;
   logout(): Promise<SessionInfo>;
   lastSnapshot(): Promise<{ snapshot: Snapshot | null }>;
+  electricHistory(): Promise<ElectricHistory>;
   clearHistory(): Promise<{ deleted: number }>;
   noticeStatus(): Promise<NoticeState>;
   requestNoticePermission(): Promise<NoticeState>;
@@ -131,6 +133,9 @@ export const getBills = (source: SnapshotSource): Promise<Bills> =>
 /** The newest stored reading, or null when nothing has ever been recorded. Never a live value. */
 export const lastSnapshot = (): Promise<Snapshot | null> =>
   call(async () => (await ScutApi.lastSnapshot()).snapshot ?? null);
+
+/** Read the existing on-device SQLite rows. This does not trigger a school request. */
+export const electricHistory = (): Promise<ElectricHistory> => call(() => ScutApi.electricHistory());
 
 export const clearHistory = (): Promise<{ deleted: number }> => call(() => ScutApi.clearHistory());
 

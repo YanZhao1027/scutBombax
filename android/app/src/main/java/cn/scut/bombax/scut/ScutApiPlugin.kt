@@ -18,6 +18,7 @@ import cn.scut.bombax.scut.billing.BalanceReading
 import cn.scut.bombax.scut.history.BalanceSnapshot
 import cn.scut.bombax.scut.history.SnapshotSource
 import com.getcapacitor.JSObject
+import org.json.JSONArray
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
@@ -51,7 +52,7 @@ class ScutApiPlugin : Plugin() {
 
     companion object {
         /** Version of the JS-facing surface, bumped when a method is added. */
-        const val BRIDGE_VERSION = "2"
+        const val BRIDGE_VERSION = "3"
     }
 
     /** Capacitor exposes a nullable context; the activity is always there once the bridge is up. */
@@ -162,6 +163,34 @@ class ScutApiPlugin : Plugin() {
                 JSObject().apply { put("snapshot", JSObject.NULL) }
             } else {
                 JSObject().apply { put("snapshot", snapshotJson(stored)) }
+            }
+        }
+    }
+
+    /**
+     * A local-only chart read. Never fetches SCUT, never writes or synthesises history.
+     * Uses the last displayed meter profile so an offline chart works without a session.
+     * No room number or grouping hash crosses this new bridge method.
+     */
+    @PluginMethod
+    fun electricHistory(call: PluginCall) {
+        submit(call) {
+            val history = runtime.history
+            val latest = history?.latestAny()
+            val points = JSONArray()
+            if (latest != null) {
+                history.listForProfile(latest.profileId).forEach { stored ->
+                    points.put(JSObject().apply {
+                        put("updatedAt", stored.recordedAtMillis)
+                        putNumberOr("electric", stored.electric)
+                        put("source", stored.source.wire)
+                    })
+                }
+            }
+            JSObject().apply {
+                put("campus", latest?.campus ?: JSObject.NULL)
+                put("unit", latest?.electricUnit.orEmpty())
+                put("points", points)
             }
         }
     }

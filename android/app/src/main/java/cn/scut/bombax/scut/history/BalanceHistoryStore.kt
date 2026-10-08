@@ -63,6 +63,29 @@ class BalanceHistoryStore private constructor(
 
     override fun latest(profileId: String): BalanceSnapshot? = readLatest(readableDatabase, profileId)
 
+    /**
+     * Read-only history for a single local meter series, oldest first.
+     * Uses the same indexed profile filter as the offline cache; never scans or returns another
+     * room's records. The bridge serialises only timestamps, electric balances and source flags.
+     */
+    fun listForProfile(profileId: String, limit: Int = MAX_ROWS_PER_PROFILE): List<BalanceSnapshot> {
+        val rows = ArrayList<BalanceSnapshot>()
+        readableDatabase.query(
+            TABLE,
+            null,
+            "$COLUMN_PROFILE = ?",
+            arrayOf(profileId),
+            null,
+            null,
+            "$COLUMN_RECORDED DESC, $COLUMN_ID DESC",
+            limit.coerceIn(1, MAX_ROWS_PER_PROFILE).toString()
+        ).use { cursor ->
+            while (cursor.moveToNext()) rows.add(rowFrom(cursor))
+        }
+        rows.reverse()
+        return rows
+    }
+
     override fun latestAny(): BalanceSnapshot? {
         val db = readableDatabase
         db.query(
