@@ -70,7 +70,7 @@ export interface Bills {
 }
 
 /** Why a balance was queried — recorded with the snapshot so a daily series can be isolated. */
-export type SnapshotSource = 'manual' | 'auto' | 'login' | 'restore' | 'nightly' | 'test' | 'unknown';
+export type SnapshotSource = 'manual' | 'auto' | 'login' | 'restore' | 'nightly' | 'daily' | 'test' | 'unknown';
 
 /** A stored reading: `Bills`, plus the reason it exists. */
 export interface Snapshot extends Bills {

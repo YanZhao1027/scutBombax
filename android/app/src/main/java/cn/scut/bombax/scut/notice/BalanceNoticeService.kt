@@ -57,7 +57,7 @@ class BalanceNoticeService : Service() {
         // A refusal inside show() stops the service, so there is nothing to refresh after it.
         if (!show(data)) return START_NOT_STICKY
         when (intent?.action) {
-            ACTION_REFRESH -> refresh(SnapshotSource.NIGHTLY)
+            ACTION_REFRESH -> refresh(SnapshotSource.DAILY)
             ACTION_REFRESH_TEST -> refresh(SnapshotSource.TEST)
         }
         return START_STICKY

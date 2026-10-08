@@ -59,7 +59,7 @@ Bombax 不应只回答“现在还剩多少钱”，还应该帮助用户回答�
 | `water` | 水费余额 |
 | `ac` | 空调余额，可为空 |
 | `units` | 各项原始单位 |
-| `source` | manual / foreground / nightly / restore |
+| `source` | manual / auto / login / restore / daily / nightly（旧记录）/ test / unknown |
 
 不保存学号明文、密码、token、cookie 或接口原始响应。
 
@@ -104,7 +104,7 @@ Bombax 不应只回答“现在还剩多少钱”，还应该帮助用户回答�
 
 继续使用非精确 Alarm，系统可能延迟或者拒绝后台执行；不能保证分钟级准确，也不能保证跨夜存活。
 
-为方便提前验收，提供一个**用户主动触发的一次性测试**：按下“约 5 分钟后测试一次”后，用**独立 PendingIntent** 安排下一次短期投递；不覆盖每日 Alarm，且可以取消。同一时刻只能待执行一个测试，投递后不重试、不补查。测试通过正常 native Receiver → Service → ScutRuntime → SQLite 读取/写入链路，记录为 `source=test`，不能伪装成常规每日快照。
+为方便提前验收，提供一个**用户主动触发的一次性测试**：按下“约 5 分钟后测试一次”后，用**独立 PendingIntent** 安排下一次短期投递；不覆盖每日 Alarm，且可以取消。同一时刻只能待执行一个测试，投递后不重试、不补查。测试通过正常 native Receiver → Service → ScutRuntime → SQLite 读取/写入链路，记录为 `source=test`，不能伪装成常规每日快照。今后的每日记录统一为 `source=daily`，旧版本的 `source=nightly` 保留兼容读取。
 
 此测试明确由用户发起，因此属于一次额外的查询；正式图表查看和预测仍不得增加学校端请求。
 
