@@ -16,6 +16,7 @@
     "check:env": "./scripts/check-env.sh",
     "android": "pnpm build && cap sync android",
     "apk": "cd android && ../scripts/with-jdk.sh ./gradlew assembleDebug",
+    "apk:release": "pnpm android && cd android && ../scripts/with-jdk.sh ./gradlew assembleRelease",
     "native:test": "cd android && ../scripts/with-jdk.sh ./gradlew testDebugUnitTest",
     "install:device": "${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools/adb install -r android/app/build/outputs/apk/debug/app-debug.apk"
   },

@@ -28,6 +28,8 @@ Thumbs.db
 *.keystore
 *.jks
 *.p12
+# The signing key is ignored above; so is the file that names its passwords.
+android/keystore.properties
 
 # Temporary
 tmp/

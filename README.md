@@ -110,6 +110,44 @@ adb logcat -s ScutBombax:V
 
 Use a physical Android phone for protocol testing. An emulator is not required.
 
+## Release packaging (signed)
+
+`assembleDebug` is signed with the machine's Android debug key, which is fine for adb installs
+and useless for anything you want to keep updating. A release build needs **your** key, and this
+repository deliberately cannot hold it: a signing key is the one secret whose loss is not
+recoverable, because an APK signed with key B can never replace an installed APK signed with
+key A.
+
+```bash
+# once, and then back the .jks up somewhere better than this laptop
+keytool -genkeypair -v -keystore android/bombax.jks -alias bombax \
+  -keyalg RSA -keysize 2048 -validity 10000
+
+# either: copy android/keystore.properties.example to android/keystore.properties and fill it in
+# (both files are gitignored), or pass the key in for a single build without writing a password
+# to disk:
+export BOMBAX_KEYSTORE_FILE=$PWD/android/bombax.jks
+export BOMBAX_KEYSTORE_STORE_PASSWORD=…   BOMBAX_KEYSTORE_KEY_ALIAS=bombax
+export BOMBAX_KEYSTORE_KEY_PASSWORD=…
+pnpm apk:release        # cap sync + assembleRelease
+```
+
+Output: `android/app/build/outputs/apk/release/app-release.apk`. With no key configured the build
+still succeeds and says so, producing `app-release-unsigned.apk` — that file will not install, and
+`apksigner verify` on it reports `DOES NOT VERIFY / Missing META-INF/MANIFEST.MF`.
+
+Two things to know before the first install:
+
+- **A release build cannot be installed over the debug build.** The signatures differ, so Android
+  refuses; you uninstall first, and uninstalling deletes the Keystore-encrypted session with it —
+  the next start needs a real login (account, password, captcha).
+- **R8 stays off** (`minifyEnabled false`). Capacitor calls `@PluginMethod` reflectively, so
+  enabling minification without keep rules is how a release APK loses the bridge while every unit
+  test still passes. Turning it on is a change to verify on a phone, not on a host.
+
+`versionCode` is 1 / `versionName` 0.1.0. Bump `versionCode` before distributing an update, or
+the new APK will refuse to install over the old one.
+
 ## Interface
 
 One column, one screen at a time, no cards and no shadows: the login form while signed out,

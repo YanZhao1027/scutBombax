@@ -1,6 +1,41 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 
+/*
+ * Release signing is deliberately optional, and deliberately outside this repository.
+ *
+ * AGENTS.md says never commit secrets, and a signing key is the one secret whose loss is not
+ * recoverable: an APK signed with key A can never be updated in place by key B. So the key and
+ * its password live wherever the user keeps them, and the build reads them from
+ * `android/keystore.properties` (gitignored) or from BOMBAX_KEYSTORE_* environment variables,
+ * which win so a one-off build can pass them without writing anything to disk.
+ *
+ * Without them `assembleRelease` still produces a correctly built, **unsigned** APK named
+ * `app-release-unsigned.apk` — and says so out loud, because an unsigned release is otherwise
+ * easy to mistake for a finished one until it refuses to install.
+ */
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file('keystore.properties')
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
+def signingValue = { String envName, String propName ->
+    System.getenv(envName) ?: keystoreProps.getProperty(propName)
+}
+
+def releaseKeystorePath = signingValue('BOMBAX_KEYSTORE_FILE', 'storeFile')
+def releaseStorePassword = signingValue('BOMBAX_KEYSTORE_STORE_PASSWORD', 'storePassword')
+def releaseKeyAlias = signingValue('BOMBAX_KEYSTORE_KEY_ALIAS', 'keyAlias')
+def releaseKeyPassword = signingValue('BOMBAX_KEYSTORE_KEY_PASSWORD', 'keyPassword')
+def releaseSigningReady = [
+    releaseKeystorePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword
+].every { it && !it.trim().isEmpty() }
+
+// A relative storeFile is resolved against android/, so the path in keystore.properties can stay
+// machine-neutral ("bombax.jks" next to the properties file).
+def releaseKeystoreFile = releaseKeystorePath ? rootProject.file(releaseKeystorePath) : null
+
 android {
     namespace = "cn.scut.bombax"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -17,6 +52,20 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (releaseSigningReady) {
+            release {
+                storeFile releaseKeystoreFile
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                // minSdk 24 means v2 alone would do, but v1 costs nothing and keeps the APK
+                // installable on an older machine that only checks the JAR signature.
+                enableV1Signing true
+                enableV2Signing true
+            }
+        }
+    }
     buildTypes {
         debug {
             // Debug builds stay installable over adb without Android Studio.
@@ -24,13 +73,33 @@ android {
             minifyEnabled false
         }
         release {
+            // R8 stays off on purpose. Capacitor invokes @PluginMethod reflectively, so enabling
+            // minification without verified keep rules is how a release build loses the bridge
+            // while every unit test still passes. Revisit with a device run, not without one.
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (releaseSigningReady) {
+                signingConfig signingConfigs.release
+            }
         }
     }
     testOptions {
         unitTests.returnDefaultValues = false
     }
+}
+
+// Configuration-time, so it has to be gated on what was actually asked for: printing this on
+// every debug build and every test run would train everyone to ignore it.
+def releaseRequested = gradle.startParameter.taskNames.any {
+    it.contains('assembleRelease') || it.contains('bundleRelease') || it == 'build'
+}
+if (!releaseSigningReady && releaseRequested) {
+    logger.warn(
+        "scutBombax: no release signing key found — assembleRelease will produce an UNSIGNED apk " +
+            "(app-release-unsigned.apk), which will not install. Create android/keystore.properties " +
+            "from android/keystore.properties.example, or export BOMBAX_KEYSTORE_FILE / " +
+            "_STORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD."
+    )
 }
 
 kotlin {
