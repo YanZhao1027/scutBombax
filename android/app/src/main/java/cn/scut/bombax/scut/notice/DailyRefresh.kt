@@ -5,53 +5,30 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import androidx.core.content.ContextCompat
 import cn.scut.bombax.scut.Diag
 import java.util.Calendar
 import java.util.TimeZone
 
 /**
- * The schedule maths, with no Android in it.
- *
- * The nightly snapshot fires at **23:00 Beijing time**, not "24 hours after the last one". The
- * change was made on 2026-10-08 when the feature's purpose became a daily *sample* rather than a
- * keep-alive: a series only means something if the points are comparable, and an interval
- * schedule drifts to whatever time of day the user happened to switch it on. A wall-clock slot
- * also removes the drift problem by construction — a delivery that arrives 45 s late is simply
- * followed by tomorrow's 23:00, no anchor bookkeeping required.
- *
- * `java.time` is API 26 and this app supports 24, so this uses `Calendar` with an explicit
- * [TimeZone] rather than enabling desugaring for one calculation.
+ * Pure calendar arithmetic. A configured Beijing wall-clock time, not 24 h after the last query.
+ * No java.time / desugaring: minSdk 24.
  */
 object DailySchedule {
-
-    /** The planned sampling hour and minute, in [BEIJING]. */
-    const val SNAPSHOT_HOUR = 23
-    const val SNAPSHOT_MINUTE = 0
-
-    /**
-     * The dormitory is in Guangzhou, so the sampling slot is defined against that clock rather
-     * than the device's: a phone that travels, or a ROM with a mis-set default zone, must not
-     * move the sample an hour away from the network's own daily rhythm.
-     */
+    const val DEFAULT_HOUR = 23
+    const val DEFAULT_MINUTE = 0
+    const val TEST_DELAY_MS = 5 * 60 * 1000L
     val BEIJING: TimeZone = TimeZone.getTimeZone("Asia/Shanghai")
-
-    /** One calendar day in a zone with no DST transitions, which is what [BEIJING] is. */
     const val DAY_MS = 24 * 60 * 60 * 1000L
 
-    /**
-     * The next 23:00 in Beijing time, strictly after [now].
-     *
-     * Nothing here catches up. If the phone was off, in a pocket, or Dozing through the slot, the
-     * answer is tomorrow's 23:00 — a missed sample is a gap in the series, and the series is
-     * better off honest than dense. This is also what keeps the school at one request a day:
-     * there is no code path in which several overdue samples turn into several queries.
-     */
+    fun validTime(hour: Int, minute: Int): Boolean = hour in 0..23 && minute in 0..59
+
+    /** Always strictly in the future. Missed calendar slots are never made up. */
     fun nextSnapshotAt(
         now: Long,
-        hour: Int = SNAPSHOT_HOUR,
-        minute: Int = SNAPSHOT_MINUTE
+        hour: Int = DEFAULT_HOUR,
+        minute: Int = DEFAULT_MINUTE
     ): Long {
+        require(validTime(hour, minute)) { "Invalid Beijing snapshot clock time" }
         val calendar = Calendar.getInstance(BEIJING).apply {
             timeInMillis = now
             set(Calendar.HOUR_OF_DAY, hour)
@@ -59,35 +36,32 @@ object DailySchedule {
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
-        // `<=` and not `<`: an alarm armed for "now" fires immediately, which would let an app
-        // open at exactly 23:00:00 spend a query the slot has already spent.
         if (calendar.timeInMillis <= now) calendar.add(Calendar.DAY_OF_YEAR, 1)
         return calendar.timeInMillis
     }
 
-    /** Whole seconds between [now] and [triggerAt], never negative; for display only. */
+    /** Whole seconds for display only; an inexact alarm has no minute-level guarantee. */
     fun secondsUntil(now: Long, triggerAt: Long): Long =
         if (triggerAt <= now) 0L else (triggerAt - now) / 1000L
 }
 
 /**
- * The inexact daily alarm that asks the notification service for one refresh.
- *
- * Deliberately *not* an exact alarm: `SCHEDULE_EXACT_ALARM` is not granted by default to an app
- * like this on Android 14+, and a balance is not an appointment. The cost is measured and
- * documented in docs/DEVICE_VERIFICATION.md §13 — an inexact alarm does not, on its own, exempt a
- * background foreground-service start on Android 12+, which is why [startRefresh] has a fallback
- * and why this whole path only exists while the persistent notice is keeping the process up.
+ * User-configurable daily sample plus an explicitly requested, separate one-shot QA sample.
+ * Both are inexact, go through the same service and ScutRuntime, and never retry.
  */
 object DailyRefresh {
-
     const val ACTION_DAILY = "cn.scut.bombax.action.DAILY_REFRESH"
+    const val ACTION_TEST = "cn.scut.bombax.action.SNAPSHOT_TEST"
     const val EXTRA_TRIGGER_AT = "triggerAt"
 
     const val PREFS = "bombax.notice.v1"
     const val KEY_ENABLED = "dailyEnabled"
+    const val KEY_HOUR = "dailyHour"
+    const val KEY_MINUTE = "dailyMinute"
+    private const val KEY_TEST_DUE = "snapshotTestDueAt"
 
-    private const val REQUEST_CODE = 0xD41
+    private const val DAILY_REQUEST_CODE = 0xD41
+    private const val TEST_REQUEST_CODE = 0xD42
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -98,53 +72,73 @@ object DailyRefresh {
     fun isEnabled(context: Context): Boolean =
         runCatching { prefs(context).getBoolean(KEY_ENABLED, false) }.getOrDefault(false)
 
-    /**
-     * Switches the nightly snapshot on and arms the first alarm.
-     *
-     * The switch is meaningless without the persistent notice — that service is what keeps this
-     * process alive long enough to be allowed to do anything at all — but the caller is the page,
-     * and the page is what enforces the pairing.
-     */
+    /** Old installs default to 23:00 until the user changes it. The setting is native-owned. */
+    fun selectedTime(context: Context): Pair<Int, Int> {
+        val p = prefs(context)
+        val hour = p.getInt(KEY_HOUR, DailySchedule.DEFAULT_HOUR)
+        val minute = p.getInt(KEY_MINUTE, DailySchedule.DEFAULT_MINUTE)
+        return if (DailySchedule.validTime(hour, minute)) hour to minute
+        else DailySchedule.DEFAULT_HOUR to DailySchedule.DEFAULT_MINUTE
+    }
+
+    /** Changing the time replaces only the daily alarm, not the independent test alarm. */
+    fun setTime(context: Context, now: Long, hour: Int, minute: Int): Long {
+        require(DailySchedule.validTime(hour, minute)) { "Invalid snapshot time" }
+        val previous = selectedTime(context)
+        val settings = prefs(context)
+        if (!settings.edit().putInt(KEY_HOUR, hour).putInt(KEY_MINUTE, minute).commit()) return -1L
+        if (!isEnabled(context)) return 0L
+        val armed = arm(context, now)
+        if (armed != 0L) return armed
+        // If Android refused scheduling, do not leave UI claiming the new time is armed.
+        settings.edit().putInt(KEY_HOUR, previous.first)
+            .putInt(KEY_MINUTE, previous.second).commit()
+        arm(context, now)
+        return -1L
+    }
+
     fun enable(context: Context, now: Long): Long {
-        runCatching { prefs(context).edit().putBoolean(KEY_ENABLED, true).apply() }
-        return arm(context, now)
+        if (!prefs(context).edit().putBoolean(KEY_ENABLED, true).commit()) return 0L
+        val armed = arm(context, now)
+        if (armed == 0L) {
+            prefs(context).edit().putBoolean(KEY_ENABLED, false).commit()
+            cancelDaily(context)
+        }
+        return armed
     }
 
     fun disable(context: Context) {
-        runCatching { prefs(context).edit().putBoolean(KEY_ENABLED, false).apply() }
-        cancel(context)
+        prefs(context).edit().putBoolean(KEY_ENABLED, false).commit()
+        cancelDaily(context)
+        // A user who turns off the notice must not leave a one-off test waking it later.
+        cancelTest(context)
         Diag.event("stage=daily result=disabled")
     }
 
-    /**
-     * (Re)arms the next alarm. Safe to call on every app start: an alarm is a one-shot, does not
-     * survive a reboot, and this is how the schedule comes back after either.
-     *
-     * Because the slot is a wall-clock time rather than an interval, recomputing it is idempotent
-     * — an app open that finds tomorrow's alarm already pending arms the identical instant, and no
-     * stored anchor is needed to make that true.
-     */
+    /** App reopening is allowed to rearm the DAILY schedule, never to catch up past slots. */
     fun armIfEnabled(context: Context, now: Long): Long =
         if (isEnabled(context)) arm(context, now) else 0L
 
-    /** When the pending alarm is due, for the UI only. 0 while the switch is off. */
-    fun nextDue(context: Context, now: Long): Long =
-        if (!isEnabled(context)) 0L else DailySchedule.nextSnapshotAt(now)
+    fun nextDue(context: Context, now: Long): Long {
+        if (!isEnabled(context)) return 0L
+        val (hour, minute) = selectedTime(context)
+        return DailySchedule.nextSnapshotAt(now, hour, minute)
+    }
 
     private fun arm(context: Context, now: Long): Long {
-        val next = DailySchedule.nextSnapshotAt(now)
+        val (hour, minute) = selectedTime(context)
+        val next = DailySchedule.nextSnapshotAt(now, hour, minute)
         val manager = alarmManager(context) ?: run {
             Diag.warn("stage=daily result=unavailable reason=no-alarm-manager")
             return 0L
         }
-        val pending = pendingIntent(context, next)
+        val pending = pendingIntent(context, ACTION_DAILY, DAILY_REQUEST_CODE, next)
         return runCatching {
-            // Cancel first: setAndAllowWhileIdle with an identical PendingIntent is documented to
-            // replace the alarm, but "identical" is not something worth trusting with cadence.
             manager.cancel(pending)
             manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pending)
             Diag.event(
-                "stage=daily result=armed dueInSec=${DailySchedule.secondsUntil(now, next)} api=${Build.VERSION.SDK_INT}"
+                "stage=daily result=armed dueInSec=${DailySchedule.secondsUntil(now, next)} " +
+                    "hour=$hour minute=$minute api=${Build.VERSION.SDK_INT}"
             )
             next
         }.getOrElse { failure ->
@@ -153,42 +147,70 @@ object DailyRefresh {
         }
     }
 
-    private fun cancel(context: Context) {
-        runCatching { alarmManager(context)?.cancel(pendingIntent(context, 0L)) }
+    private fun cancelDaily(context: Context) {
+        runCatching { alarmManager(context)?.cancel(pendingIntent(context, ACTION_DAILY, DAILY_REQUEST_CODE, 0L)) }
     }
 
-    private fun pendingIntent(context: Context, triggerAt: Long): PendingIntent {
+    /**
+     * A one-off, opt-in, inexact QA alarm. A second tap cannot create another query while one is
+     * pending. The setting and PendingIntent are separate from the daily schedule.
+     */
+    @Synchronized
+    fun scheduleTest(context: Context, now: Long): Long {
+        val previous = testDue(context)
+        if (previous > 0L) return previous
+        val manager = alarmManager(context) ?: return 0L
+        val at = now + DailySchedule.TEST_DELAY_MS
+        if (!prefs(context).edit().putLong(KEY_TEST_DUE, at).commit()) return 0L
+        val pending = pendingIntent(context, ACTION_TEST, TEST_REQUEST_CODE, at)
+        val armed = runCatching {
+            manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
+            Diag.event("stage=snapshotTest result=armed dueInSec=${DailySchedule.secondsUntil(now, at)}")
+            true
+        }.getOrElse { failure ->
+            Diag.warn("stage=snapshotTest result=arm-failed reason=${failure.javaClass.simpleName}")
+            false
+        }
+        if (armed) return at
+        prefs(context).edit().remove(KEY_TEST_DUE).commit()
+        runCatching { manager.cancel(pending) }
+        return 0L
+    }
+
+    fun testDue(context: Context): Long = prefs(context).getLong(KEY_TEST_DUE, 0L)
+
+    @Synchronized
+    fun consumeTest(context: Context, scheduledAt: Long): Boolean {
+        if (scheduledAt <= 0L || scheduledAt != testDue(context)) return false
+        return prefs(context).edit().remove(KEY_TEST_DUE).commit()
+    }
+
+    fun cancelTest(context: Context) {
+        prefs(context).edit().remove(KEY_TEST_DUE).commit()
+        runCatching { alarmManager(context)?.cancel(pendingIntent(context, ACTION_TEST, TEST_REQUEST_CODE, 0L)) }
+        Diag.event("stage=snapshotTest result=cancelled")
+    }
+
+    private fun pendingIntent(context: Context, actionName: String, code: Int, triggerAt: Long): PendingIntent {
         val intent = Intent(context, DailyAlarmReceiver::class.java).apply {
-            action = ACTION_DAILY
+            action = actionName
             putExtra(EXTRA_TRIGGER_AT, triggerAt)
         }
         return PendingIntent.getBroadcast(
-            context,
-            REQUEST_CODE,
-            intent,
+            context, code, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
 
-    /**
-     * Hands the fired alarm to the service.
-     *
-     * The start rules — and the reason a fallback exists at all — live in
-     * [BalanceNoticeService.start], because the page's own switch needs exactly the same
-     * behaviour. Both paths failing is the OEM-kill case, and it is logged as such instead of
-     * being retried.
-     */
-    fun startRefresh(context: Context): String =
-        BalanceNoticeService.start(context, BalanceNoticeService.refreshIntent(context))
+    /** The service owns authentication checks, execution and no-retry behaviour. */
+    fun startRefresh(context: Context, test: Boolean = false): String =
+        BalanceNoticeService.start(
+            context,
+            if (test) BalanceNoticeService.testRefreshIntent(context)
+            else BalanceNoticeService.refreshIntent(context)
+        )
 
-    /**
-     * Called by the receiver: re-arm first, then start the work.
-     *
-     * Arming before the query means a service that gets killed mid-flight still leaves tomorrow's
-     * alarm behind; the cost of the ordering is one skipped sample at worst, and the alternative is
-     * a schedule that stops forever after a single crash. Recomputing from `now` is what keeps the
-     * slot at 23:00 regardless of how late the delivery was.
-     */
+    /** Receiver re-arms tomorrow's chosen slot before starting a daily query. */
     fun onFired(context: Context, now: Long): Long =
         if (isEnabled(context)) arm(context, now) else 0L
 }
