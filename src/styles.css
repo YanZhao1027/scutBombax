@@ -506,3 +506,15 @@ input {
 .trend-increases li span:last-child {
   font-weight: 600;
 }
+
+/* Native-owned daily wall-clock time, with a one-time inexact QA trigger. */
+#daily-time {
+  width: 8rem;
+  max-width: 100%;
+  flex: none;
+  padding: 6px 8px;
+  font-size: 14px;
+}
+#snapshot-test-button:disabled {
+  opacity: 0.45;
+}

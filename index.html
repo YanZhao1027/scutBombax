@@ -76,8 +76,14 @@
         </p>
 
         <p class="notice-line">
-          <label><input id="daily-toggle" type="checkbox" disabled />晚间余额快照</label>
-          <span class="hint">每天约 23:00 记一次余额，供离线查看与用量统计。<span id="daily-due">未开启</span></span>
+          <label><input id="daily-toggle" type="checkbox" disabled />每日余额快照</label>
+          <label for="daily-time" class="hint">北京时间</label>
+          <input id="daily-time" type="time" value="23:00" step="60" aria-label="每日余额快照时间，北京时间" />
+          <span class="hint">每天尝试查询一次，系统可能延迟。<span id="daily-due">未开启</span></span>
+        </p>
+        <p class="notice-line">
+          <button id="snapshot-test-button" type="button" class="quiet" disabled>约 5 分钟后测试一次</button>
+          <span id="snapshot-test-state" class="hint" role="status">单次测试，不改变每日设置</span>
         </p>
 
         <p class="segmented" id="refresh-choices" role="radiogroup" aria-label="自动刷新">

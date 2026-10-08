@@ -13,6 +13,7 @@ import {
 import './styles.css';
 import { drawElectricTrend } from './trend';
 import { deriveView, historyCaption } from './view';
+import { formatBeijingClock, parseBeijingClock } from './snapshot-time';
 
 /**
  * Look up an element by id, and fail loudly at module load if it is not there.
@@ -60,6 +61,9 @@ const els = {
   noticeToggle: $<HTMLInputElement>('notice-toggle'),
   dailyToggle: $<HTMLInputElement>('daily-toggle'),
   dailyDue: $<HTMLElement>('daily-due'),
+  dailyTime: $<HTMLInputElement>('daily-time'),
+  snapshotTestButton: $<HTMLButtonElement>('snapshot-test-button'),
+  snapshotTestState: $<HTMLElement>('snapshot-test-state'),
   historyNote: $<HTMLElement>('history-note'),
   trendToggle: $<HTMLButtonElement>('trend-toggle'),
   trendPanel: $<HTMLElement>('trend-panel'),
@@ -251,6 +255,7 @@ const syncNotice = (): void => {
         ? new Date(bills.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })
         : '—'
     })
+    .then(() => api.noticeStatus().then(renderDaily))
     .catch((error) => appendLog(describeError(error)));
 };
 
@@ -269,9 +274,19 @@ const renderDaily = (status: NoticeState): void => {
   // query — and that transient `running:false` used to take the control away the moment the user
   // had earned it.
   els.dailyToggle.disabled = !(status.running || status.dailyEnabled || els.noticeToggle.checked);
+  els.dailyTime.value = formatBeijingClock(status.dailyHour, status.dailyMinute);
   els.dailyDue.textContent = status.dailyEnabled
     ? `下次约 ${formatSpan(status.nextDueIn)}后`
     : '未开启';
+  els.snapshotTestButton.disabled = !status.running || !state.session?.authenticated;
+  els.snapshotTestButton.textContent = status.testPending
+    ? '取消本次测试'
+    : '约 5 分钟后测试一次';
+  els.snapshotTestState.textContent = status.testPending
+    ? status.testDueIn > 0
+      ? `预计 ${formatSpan(status.testDueIn)}后（可能延迟）`
+      : '等待系统投递'
+    : '单次测试，不改变每日设置';
 };
 
 /** Coarse on purpose: an inexact alarm is a promise about a day, not about a minute. */
@@ -611,8 +626,47 @@ const wire = (): void => {
       }
       syncNotice();
       els.dailyToggle.disabled = false;
+      void api.noticeStatus().then(renderDaily).catch(() => undefined);
       setStatus(els.resultsStatus, '常驻通知已开启（余额仍只在前台查询时更新）。', 'ok');
     })();
+  });
+
+  els.dailyTime.addEventListener('change', () => {
+    const time = parseBeijingClock(els.dailyTime.value);
+    if (!time) {
+      setStatus(els.resultsStatus, '请选择有效的时间。', 'error');
+      void api.noticeStatus().then(renderDaily).catch(() => undefined);
+      return;
+    }
+    els.dailyTime.disabled = true;
+    void api.setDailyTime(time.hour, time.minute)
+      .then((status) => {
+        renderDaily(status);
+        setStatus(els.resultsStatus, `每日快照时间已设为 ${formatBeijingClock(time.hour, time.minute)}（北京时间）。`, 'ok');
+      })
+      .catch((error) => {
+        setStatus(els.resultsStatus, describeError(error), 'error');
+        void api.noticeStatus().then(renderDaily).catch(() => undefined);
+      })
+      .finally(() => { els.dailyTime.disabled = false; });
+  });
+
+  els.snapshotTestButton.addEventListener('click', () => {
+    const cancel = els.snapshotTestButton.textContent === '取消本次测试';
+    els.snapshotTestButton.disabled = true;
+    const operation = cancel ? api.cancelSnapshotTest() : api.scheduleSnapshotTest();
+    void operation.then((status) => {
+      renderDaily(status);
+      setStatus(
+        els.resultsStatus,
+        cancel ? '本次测试已取消。' : '已安排约 5 分钟后测试一次（可能延迟）。',
+        'ok'
+      );
+    }).catch((error) => {
+      setStatus(els.resultsStatus, describeError(error), 'error');
+    }).finally(() => {
+      void api.noticeStatus().then(renderDaily).catch(() => undefined);
+    });
   });
 
   els.dailyToggle.addEventListener('change', () => {
