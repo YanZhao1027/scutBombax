@@ -179,7 +179,7 @@ class ScutApiPlugin : Plugin() {
             val latest = history?.latestAny()
             val points = JSONArray()
             if (latest != null) {
-                history.listForProfile(latest.profileId).forEach { stored ->
+                history?.listForProfile(latest.profileId).orEmpty().forEach { stored ->
                     points.put(JSObject().apply {
                         put("updatedAt", stored.recordedAtMillis)
                         putNumberOr("electric", stored.electric)

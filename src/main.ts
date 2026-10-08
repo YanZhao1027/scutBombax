@@ -13,7 +13,7 @@ import {
 import './styles.css';
 import { drawElectricTrend } from './trend';
 
-const $ = <T extends HTMLElement>(id: string): T => {
+const $ = <T extends Element>(id: string): T => {
   const el = document.getElementById(id);
   if (!el) throw new Error(`missing element #${id}`);
   return el as T;
