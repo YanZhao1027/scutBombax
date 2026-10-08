@@ -308,6 +308,7 @@ class ScutApiPlugin : Plugin() {
             // The user asked for no notification; a daily alarm that restarts the service would
             // put one straight back up. Both switches go together on the way off.
             DailyRefresh.disable(context)
+            DailyRefresh.cancelTest(context)
             noticeJson()
         }
     }

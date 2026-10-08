@@ -37,6 +37,9 @@ interface ScutApiNativePlugin {
   stopNotice(): Promise<NoticeState>;
   enableDaily(): Promise<NoticeState>;
   disableDaily(): Promise<NoticeState>;
+  setDailyTime(input: { hour: number; minute: number }): Promise<NoticeState>;
+  scheduleSnapshotTest(): Promise<NoticeState>;
+  cancelSnapshotTest(): Promise<NoticeState>;
 }
 
 const ScutApi = registerPlugin<ScutApiNativePlugin>('ScutApi');
@@ -114,6 +117,13 @@ export const startNotice = (payload: NoticePayload): Promise<{ running: boolean 
 export const stopNotice = (): Promise<NoticeState> => call(() => ScutApi.stopNotice());
 export const enableDaily = (): Promise<NoticeState> => call(() => ScutApi.enableDaily());
 export const disableDaily = (): Promise<NoticeState> => call(() => ScutApi.disableDaily());
+export const setDailyTime = (hour: number, minute: number): Promise<NoticeState> =>
+  call(() => ScutApi.setDailyTime({ hour, minute }));
+/** One manually requested, inexact verification via the real native Alarm chain. */
+export const scheduleSnapshotTest = (): Promise<NoticeState> =>
+  call(() => ScutApi.scheduleSnapshotTest());
+export const cancelSnapshotTest = (): Promise<NoticeState> =>
+  call(() => ScutApi.cancelSnapshotTest());
 
 /**
  * Queries both balances and records a history row.

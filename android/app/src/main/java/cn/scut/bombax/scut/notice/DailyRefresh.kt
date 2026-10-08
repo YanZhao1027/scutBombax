@@ -110,8 +110,6 @@ object DailyRefresh {
     fun disable(context: Context) {
         prefs(context).edit().putBoolean(KEY_ENABLED, false).commit()
         cancelDaily(context)
-        // A user who turns off the notice must not leave a one-off test waking it later.
-        cancelTest(context)
         Diag.event("stage=daily result=disabled")
     }
 

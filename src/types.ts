@@ -70,7 +70,7 @@ export interface Bills {
 }
 
 /** Why a balance was queried — recorded with the snapshot so a daily series can be isolated. */
-export type SnapshotSource = 'manual' | 'auto' | 'login' | 'restore' | 'nightly' | 'unknown';
+export type SnapshotSource = 'manual' | 'auto' | 'login' | 'restore' | 'nightly' | 'test' | 'unknown';
 
 /** A stored reading: `Bills`, plus the reason it exists. */
 export interface Snapshot extends Bills {
@@ -102,6 +102,12 @@ export interface NoticeState {
   dailyEnabled: boolean;
   /** Seconds until the next planned wake; -1 when the daily switch is off. */
   nextDueIn: number;
+  /** User-selected Beijing wall-clock time, stored natively. */
+  dailyHour: number;
+  dailyMinute: number;
+  /** One-off inexact verification alarm, independent of the daily setting. */
+  testPending: boolean;
+  testDueIn: number;
 }
 
 export interface NoticePayload {
