@@ -66,11 +66,17 @@ object HistoryLogic {
     /**
      * A local grouping key for one dormitory's series.
      *
-     * Hashed rather than stored as `campus + room` because the room number identifies a person's
-     * residence: the value never has to appear in a log line, an export header or a screenshot for
-     * the grouping to work. It is not a security boundary — anyone holding the database can see
-     * the room in the row itself — it is what keeps the identifier out of the *diagnostics*, which
-     * is the leak that has actually been audited in this project (§10).
+     * Hashed so the room number does not have to appear in a log line or an export header for the
+     * grouping to work — that is the leak this project has actually audited (§10).
+     *
+     * **This is not anonymisation, and must not be described as irreversible.** A dormitory room
+     * number is a small, well-known space, so anyone holding both the digest and the campus layout
+     * can recover the room by enumeration; and two different users in the same room get the same
+     * key, which is correct for a meter series but wrong the moment one install holds several
+     * accounts or the data ever leaves the device. Acceptable for a single user on their own
+     * phone, which is all this app is today. Before any multi-user or data-export release: mix a
+     * device-local secret in (HMAC under a key the Keystore generates once) and decide whether the
+     * series identity is the room or the account — see docs/ARCHITECTURE.md.
      */
     fun profileId(campus: String, room: String): String {
         val digest = MessageDigest.getInstance("SHA-256")

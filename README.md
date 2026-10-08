@@ -148,8 +148,9 @@ Two things to know before the first install:
   enabling minification without keep rules is how a release APK loses the bridge while every unit
   test still passes. Turning it on is a change to verify on a phone, not on a host.
 
-`versionCode` is 1 / `versionName` 0.1.0. Bump `versionCode` before distributing an update, or
-the new APK will refuse to install over the old one.
+`versionCode` is 2 / `versionName` 0.2.0, in `android/app/build.gradle`, `package.json` and the
+plugin's fallback string. Bump `versionCode` before distributing an update, or the new APK will
+refuse to install over the old one.
 
 The release key that first signed this app is identified by its **public certificate SHA-256**
 `ef607f9df8e7872c9008d6aaf35da6d5ee69db217a97bc7b0f6d191629ff89d4` (recorded 2026-10-08; a

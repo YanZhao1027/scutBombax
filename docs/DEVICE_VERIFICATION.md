@@ -990,32 +990,75 @@ The **non-throwing** variant (the one that actually crashed: `startForegroundSer
 therefore reasoned from the 12:20 system logs rather than observed; tonight's 23:00 delivery is the
 first natural chance to see it.
 
-### 14.3 The history store, as far as it can be verified without the school
+### 14.3 The history store, now with rows in it
+
+The dormitory network came back at 13:14, so this section was rewritten from "created and empty"
+to the real thing. A successful query produced the first rows:
 
 ```bash
-adb shell run-as cn.scut.bombax sqlite3 no_backup/bombax-history.db 'select count(*) from balance_snapshot;'
-# 0
+adb shell run-as cn.scut.bombax sqlite3 no_backup/bombax-history.db \
+  "select recorded_at, electric, water, source from balance_snapshot order by recorded_at desc;"
+# 1791436553952  31.13  28.2  restore
+# 1791436474577  31.15  28.2  unknown
 ```
 
-The database exists at `no_backup/bombax-history.db` — created on the first read, before any write —
-and is empty, which is the correct state: **rows are only produced by a successful query**, and
-every query in this session died on the captive portal. The schema, the profile grouping and the
-duplicate rule are host-tested (11 cases), including the two that protect the series: an identical
-balance 24 hours later is a real observation and must be kept, while an identical balance three
-seconds later is the same event twice and must not be.
+The write path works, the values are right, and the two rows 79 seconds apart were **not**
+deduplicated — correctly, because the electricity figure had moved (31.15 → 31.13); the 90-second
+rule only suppresses a repeat of the *same* event.
 
-Also confirmed here: the write happens in exactly one place (`BillingRepository.fetchBills`), so
-the page and the notification cannot each add a row — and a failed query writes nothing, which is
-what keeps a network outage from drawing a cliff into the chart.
+The `unknown` on the first row is a real bug this feature caught in its own first hour. Capacitor
+delivers plugin arguments as a JSON **object**, so `getBills("restore")` never reached
+`call.getString("source")` and every row would have been mislabelled. Fixed in `bridge.ts` by
+passing `{ source }`; the second row is labelled `restore`, and the first is left as `unknown`
+rather than quietly rewritten — that is what the value means. It is also exactly why `UNKNOWN`
+exists as an enum case instead of defaulting to `manual`.
 
-### 14.4 What v0.2a still needs before it can be called verified
+### 14.4 The offline fallback, verified with the radio off
 
-- **The first row.** One successful query on campus Wi-Fi or the school VPN writes a snapshot;
-  until then the offline fallback has nothing to show and the note stays hidden.
-- **The offline display itself**: open the app with history present and the network off, and check
-  that the figures, the timestamp and the 历史记录 caption all appear and that nothing reads as live.
-- **Tonight's 23:00 delivery**, which is the first real test of the calendar slot *and* of the
-  refusal path in §14.2.
-- **The water unit**, still unverified; and the `resultKeys` probe (§14.1's build carries it) has
-  not produced a line yet because no query has succeeded — it is the thing that will tell us whether
-  a kWh field exists at all.
+Wi-Fi and mobile data were switched off and the app cold-started, so the restore query failed on
+DNS (`io=UnknownHostException`, 7 ms) rather than on a timeout:
+
+```text
+13:17:03.585  stage=session result=restored campus=DXC refreshToken=present expiresIn=5982974s
+13:17:03.677  stage=dxc.userInfo … status=-1 ms=7 io=UnknownHostException
+13:17:03.704  stage=notice result=shown updated=13:15:53
+```
+
+The screen showed the last stored reading — 电费余额 31.13 元, 水费 28.2, 更新 13:15:53 — under
+the caption **"显示的是 今天 13:15 的历史记录（当前无法连接校园一卡通），不是实时余额"**, with
+网络暂时不可用 below it and the snapshot row still reading 下次约 9 小时 43 分后 (= 23:00). The
+notification re-posted the same cached figures. Nothing on the screen claimed to be live.
+
+The screenshot itself is **not archived**: it shows the room number, which is an identifier in the
+same category as a student number for this project, and the rule in §10 is that identifiers stay
+out of the evidence. The log lines above are what was kept.
+
+### 14.5 v0.2a acceptance status
+
+| Item | Grade |
+| --- | --- |
+| A successful query writes exactly one row, from one place | RUNTIME_VERIFIED 2026-10-08 13:14 |
+| A failed query writes nothing | RUNTIME_VERIFIED — the offline cold start added no row |
+| Duplicate suppression keeps a real flat reading | UNIT_TESTED; the live case (changed value, 79 s apart, both kept) is RUNTIME_VERIFIED |
+| Offline display names its own age and says it is not live | RUNTIME_VERIFIED 2026-10-08 13:17 |
+| The nightly slot is 23:00 Beijing, not "24 h after the switch" | RUNTIME_VERIFIED — `dueInSec=34976` from 13:17:03 = 23:00:00 |
+| A refused foreground start no longer kills the process | RUNTIME_VERIFIED for the throwing variant (12:30:18, process survived); the non-throwing variant of §14.2 is still unobserved |
+| **Tonight's 23:00 delivery, end to end** | **PENDING** — the first real sample, and the first natural test of the refusal path in the other direction |
+| Water's unit | Still an inference from the field names; one look at the official page closes it |
+
+### 14.6 Version 0.2.0 and the release key
+
+`versionCode 2` / `versionName 0.2.0` in `android/app/build.gradle`, `package.json`, and the
+plugin's fallback string. Both variants rebuilt; the release APK was re-signed and its certificate
+digest compared against the one recorded in the README:
+
+```bash
+apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
+# Signer #1 certificate SHA-256 digest: ef607f9df8e7872c9008d6aaf35da6d5ee69db217a97bc7b0f6d191629ff89d4
+```
+
+Identical — the same key that signed the first release build. **Not installed**: switching to the
+release signature means uninstalling the debug build, which deletes the Keystore session *and* the
+history database, and the user's instruction is to hold until they confirm the swap. The ordering
+note worth keeping is that the history is only two rows deep today, so the cost of switching now is
+two rows; after a month of nightly samples it would be a month.

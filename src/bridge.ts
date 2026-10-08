@@ -24,7 +24,7 @@ interface ScutApiNativePlugin {
   health(): Promise<HealthResult>;
   getCaptcha(): Promise<CaptchaChallenge>;
   login(input: LoginInput): Promise<SessionInfo>;
-  getBills(source: SnapshotSource): Promise<Bills>;
+  getBills(input: { source: SnapshotSource }): Promise<Bills>;
   refreshSession(): Promise<RefreshResult>;
   logout(): Promise<SessionInfo>;
   lastSnapshot(): Promise<{ snapshot: Snapshot | null }>;
@@ -118,10 +118,15 @@ export const disableDaily = (): Promise<NoticeState> => call(() => ScutApi.disab
  *
  * `source` is passed down rather than stamped here: the page knows whether this was a tap, the
  * foreground timer or a restore, and the nightly rows come from native code that never goes
- * through this function at all.
+ * through this function at all. An unrecognised value is recorded as `unknown`, which is how a
+ * dropped argument becomes visible in the data instead of quietly mislabelled — the first build
+ * shipped exactly that bug, because Capacitor reads plugin arguments out of a JSON **object** and
+ * a bare string argument never reaches `call.getString("source")`.
+ *
+ * The argument is therefore an object, like every other method on this surface.
  */
 export const getBills = (source: SnapshotSource): Promise<Bills> =>
-  call(() => ScutApi.getBills(source));
+  call(() => ScutApi.getBills({ source }));
 
 /** The newest stored reading, or null when nothing has ever been recorded. Never a live value. */
 export const lastSnapshot = (): Promise<Snapshot | null> =>

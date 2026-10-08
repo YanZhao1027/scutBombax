@@ -607,6 +607,34 @@ It is the balance after whatever the meter consumed, and it can move for reasons
 usage — a top-up, a platform adjustment, a debt correction. Intervals where the number rises must
 be excluded from consumption maths rather than recorded as negative usage.
 
+### The balance answer's fields (RUNTIME_VERIFIED 2026-10-08)
+
+The school's answer carries no unit text, so the *names* of the sibling fields are the evidence
+available without credentials. `DxcParser.resultKeys` logs them (names only, never values) and a
+successful DXC query on the phone produced:
+
+```text
+ammeterBalance → elePrice, leftEle, leftFreeEle, leftFreeMoney, leftMoney, monTime, roomId, roomName
+waterBalance   → coldWaterPrice, leftMoney, leftWater, monTime
+```
+
+What that settles, and what it does not:
+
+- **Both measures exist, and this app reads only one of them.** `leftMoney` is the money balance;
+  `leftEle` is a separate electricity quantity — the 度 figure the official page shows next to it.
+  A kWh feature therefore does not need a new endpoint or a conversion, it needs to read a field
+  that is already in the response. Water is the same shape: `leftMoney` plus `leftWater`.
+- **Water's `leftMoney` is very likely 元 as well** — same field name, same DTO shape, and a
+  sibling volume field, exactly the pattern that was confirmed for electricity. That is an
+  inference from structure, so it is recorded as such; one glance at the official page upgrades it
+  to `USER_VERIFIED` and it should not be printed as ¥ before that.
+- **There is a free quota, and it is not a consumption signal.** `leftFreeEle` / `leftFreeMoney`
+  mean part of the balance is granted rather than bought, so a fall in `leftMoney` can be a quota
+  adjustment rather than usage, and `elePrice` / `coldWaterPrice` mean a *money* balance can move
+  when the price changes without a single watt being used. Anything computing consumption from
+  these numbers must treat price and quota as unknowns, not constants.
+- `monTime` is a timestamp field on the same answer, unexamined.
+
 ## Diagnostics
 
 During development, log only:

@@ -264,8 +264,15 @@ described rather than sampled. Constraints, in the order they bite:
 - **Grouping is by dormitory, and the key is hashed.** `profile_id = SHA-256("campus|room")`
   truncated to 16 hex characters, so the room number — an identifier of where a person lives, in
   the same category as a student number for this project — never has to appear in a log line or an
-  export header for the series to stay separate. It is not a security boundary (the row itself
-  carries the room); it is what keeps the identifier out of diagnostics.
+  export header for the series to stay separate.
+  **That is a leak-resistance measure, not anonymisation, and it is deliberate that it is
+  described that way here.** Room numbers live in a small, enumerable space, so the digest is
+  reversible by guessing for anyone who knows the campus layout; and two users in one room share a
+  key. Both are fine for the only configuration this app ships into — one person, their own
+  phone, their own series. Before anything multi-user or exportable is released, the key has to
+  become `HMAC(deviceKey, campus|room)` with `deviceKey` generated once inside the Android
+  Keystore, and the product has to decide whether a series belongs to a room or to an account.
+  Recorded as a release gate, not a nice-to-have.
 - **The database lives under `noBackupFilesDir`** (`bombax-history.db`), separate from the session
   file and from WebView storage. `allowBackup=false` already covers Android's backup, but a balance
   history is the kind of file that should stay put through *every* transport an OS offers — auto
