@@ -1,5 +1,12 @@
 # Handoff report — 2026-10-05
 
+> Read [`TECHNICAL_CHALLENGES.md`](TECHNICAL_CHALLENGES.md) first if you want the whole story in
+> one place: every hard problem, why it misled us, how it was pinned down, and what proves it.
+> Note that this report is dated 2026-10-05 — several things listed below as "remaining" have
+> since closed (refresh-token acceptance: the school does not accept the grant; the foreground
+> refresh rules; session persistence; the notification and daily path). The status list at the
+> end of this file and `DEVICE_VERIFICATION.md` §12–§13 are current.
+
 Scope of this report: what `AGENTS.md` asked for, what exists now, and what has **not**
 been verified. The app is implemented, builds cleanly, installs and runs on a physical
 phone, and **login now works**: on 2026-10-06 23:50 a DXC session was established and the

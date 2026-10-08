@@ -87,6 +87,9 @@ Read:
    and is not verified
 7. [docs/EVIDENCE_INDEX.md](docs/EVIDENCE_INDEX.md) — checksums for the device captures and
    the school's own client bundles that the `SOURCE_VERIFIED` claims were read from
+8. [docs/TECHNICAL_CHALLENGES.md](docs/TECHNICAL_CHALLENGES.md) — every hard problem in this
+   project in one place: symptom, why it misled, how it was pinned down, the fix, and the
+   evidence — including the honest list of what is still unverified
 
 Environment sanity check:
 
