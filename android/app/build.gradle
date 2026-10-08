@@ -94,11 +94,19 @@ def releaseRequested = gradle.startParameter.taskNames.any {
     it.contains('assembleRelease') || it.contains('bundleRelease') || it == 'build'
 }
 if (!releaseSigningReady && releaseRequested) {
+    // Name what is missing. "No key found" while the key *is* configured but a password line was
+    // left blank sends people to the wrong file — that exact mistake happened on 2026-10-08.
+    def missing = [
+        storeFile    : releaseKeystorePath,
+        storePassword: releaseStorePassword,
+        keyAlias     : releaseKeyAlias,
+        keyPassword  : releaseKeyPassword
+    ].findAll { _, value -> !value || value.trim().isEmpty() }.keySet()
     logger.warn(
-        "scutBombax: no release signing key found — assembleRelease will produce an UNSIGNED apk " +
-            "(app-release-unsigned.apk), which will not install. Create android/keystore.properties " +
-            "from android/keystore.properties.example, or export BOMBAX_KEYSTORE_FILE / " +
-            "_STORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD."
+        "scutBombax: release signing is incomplete, missing [${missing.join(', ')}] — assembleRelease " +
+            "will produce an UNSIGNED apk (app-release-unsigned.apk), which will not install. Fill " +
+            "them in android/keystore.properties (gitignored; see android/keystore.properties.example) " +
+            "or export BOMBAX_KEYSTORE_FILE / _STORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD."
     )
 }
 
