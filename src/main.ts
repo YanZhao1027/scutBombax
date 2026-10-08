@@ -611,7 +611,7 @@ const wire = (): void => {
           els.dailyToggle.disabled = true;
           els.dailyDue.textContent = '未开启';
         }
-        setStatus(els.resultsStatus, '常驻通知已关闭，晚间余额快照同时关闭。', 'idle');
+        setStatus(els.resultsStatus, '常驻通知已关闭，每日余额快照同时关闭。', 'idle');
         return;
       }
       let status = await api.noticeStatus().catch(() => null);
@@ -673,7 +673,7 @@ const wire = (): void => {
     void (async () => {
       if (!els.noticeToggle.checked) {
         els.dailyToggle.checked = false;
-        setStatus(els.resultsStatus, '晚间余额快照需要先开启常驻通知。', 'error');
+        setStatus(els.resultsStatus, '每日余额快照需要先开启常驻通知。', 'error');
         return;
       }
       try {
@@ -682,8 +682,8 @@ const wire = (): void => {
         setStatus(
           els.resultsStatus,
           status.dailyEnabled
-            ? `晚间快照已开启，${els.dailyDue.textContent}。`
-            : '晚间余额快照已关闭。',
+            ? `每日快照已开启，${els.dailyDue.textContent}。`
+            : '每日余额快照已关闭。',
           status.dailyEnabled ? 'ok' : 'idle'
         );
       } catch (error) {

@@ -325,7 +325,7 @@ class ScutApiPlugin : Plugin() {
             if (runtime.session.peek() == null) {
                 throw ScutException(
                     AppError.NO_SESSION,
-                    "请先登录，再开启晚间余额快照",
+                    "请先登录，再开启每日余额快照",
                     "daily/noSession"
                 )
             }
@@ -333,7 +333,7 @@ class ScutApiPlugin : Plugin() {
             if (enabled == 0L) {
                 throw ScutException(
                     AppError.UPSTREAM_UNAVAILABLE,
-                    "系统不接受定时唤醒，无法开启晚间余额快照",
+                    "系统不接受定时唤醒，无法开启每日余额快照",
                     "daily/arm-failed"
                 )
             }
