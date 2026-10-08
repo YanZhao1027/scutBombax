@@ -148,6 +148,17 @@ Two things to know before the first install:
 `versionCode` is 1 / `versionName` 0.1.0. Bump `versionCode` before distributing an update, or
 the new APK will refuse to install over the old one.
 
+The release key that first signed this app is identified by its **public certificate SHA-256**
+`ef607f9df8e7872c9008d6aaf35da6d5ee69db217a97bc7b0f6d191629ff89d4` (recorded 2026-10-08; a
+fingerprint is public information, the private key and its password are not and are not in this
+repository). Any APK whose `apksigner verify --print-certs` reports a different digest cannot
+update an existing install. Check it after a machine move:
+
+```bash
+$ANDROID_HOME/build-tools/36.1.0/apksigner verify --print-certs \
+  android/app/build/outputs/apk/release/app-release.apk | grep "certificate SHA-256"
+```
+
 ## Interface
 
 One column, one screen at a time, no cards and no shadows: the login form while signed out,

@@ -83,6 +83,7 @@ cd /home/zyubuntu/scutbombax/scutBombax && git bundle create ../evidence/scutBom
 | SHA256 | Artifact | What it establishes |
 | --- | --- | --- |
 | `af2113fba98ffdb5a15c4d018f697d669039b106799adb8802b4282c9ad3bb03` | `app-debug-2026-10-08-daily.apk` (4,813,670 B) | the installed build: `ScutRuntime`, the daily alarm, and the two front-end fixes from §13.6 |
+| `d08f8e062a4d02882cf754eaaaa79e0c1e14bfbd2a4e0b709b9a066c07b7f91a` | `app-release-2026-10-08-v0.1.0.apk` (3,712,670 B) | the first release-signed APK, signed with the user's own key (certificate SHA-256 `ef607f9d…`, recorded in the README). **Built and signature-verified only — never installed on a device**, because installing it means uninstalling the debug build and that wipes the session |
 | `8923d7923dcd69e9afbe0106924b817581484679259c545f792be21e06125c7d` | `logcat-2026-10-08-daily.txt` | §13's measurement: `result=armed dueInSec=60` → real alarm fire in the background → `start=foreground-service` → `result=failed reason=NETWORK`, plus `userAgent=cached` and the re-armed `86354` |
 | `21b378efa82979878e699cf1fe39e1bdd569419fc5887cd923240df05297708b` | `phone-2026-10-08-daily-ui.png` | both switches ticked, the AC row gone with no data, and 下次约 23 小时 50 分后 after the resume re-read |
 
