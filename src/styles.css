@@ -317,6 +317,20 @@ input {
   margin-top: 8px;
 }
 
+/*
+ * The "this is history, not a live reading" line. Deliberately not red: nothing has gone
+ * wrong — the number is real, it is just from last night — and a warning colour would train
+ * the user to dismiss it. Dashed top rule and dim text instead, so it reads as a caption
+ * attached to the figures above it.
+ */
+.history-note {
+  font-size: 12px;
+  color: var(--dim);
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+  margin: 4px 0 0;
+}
+
 /* status line */
 .status {
   font-size: 14px;

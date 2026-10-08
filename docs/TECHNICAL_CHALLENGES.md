@@ -9,7 +9,7 @@
 时间跨度：2026-10-04 → 2026-10-08。平台：Ubuntu 24.04 + 命令行工具链，无 Android Studio；
 协议验证全部在真机（Android 14 / API 34，arm64-v8a）上完成。
 
-当前状态：99 条 JVM 单测 + 17 条 vitest 全绿；debug 与 release 两种包都能构建；
+当前状态：114 条 JVM 单测 + 17 条 vitest 全绿；debug 与 release 两种包都能构建；
 release 包已用用户自有密钥签名并通过 `apksigner` 校验（尚未真机安装）。
 
 ---
@@ -243,6 +243,33 @@ AGENTS.md 原文禁止后台 Service、WorkManager 和 alarm。用户 2026-10-07
 - WebView 的 User-Agent 被持久化（只记录"有没有"，从不打印内容），因为所有协议事实都是
   带着这个头验证的，冷启动不该退化成 `okhttp/4.12.0` 这个从未测过的身份。
 
+### E6. 一个"兜底"造成的进程崩溃循环（2026-10-08，v0.2a）
+
+- **症状**：装机后第一次启动（屏幕未亮、经 adb 拉起），恢复查询超时，然后**连两个进程在 1.2 秒内死掉**，
+  系统给出 30 分钟的服务重启退避：
+
+```text
+12:20:46.482  startForegroundService() not allowed due to mAllowStartForeground false
+12:20:46.545  Service.startForeground() not allowed due to mAllowStartForeground false
+12:20:46.856  Process cn.scut.bombax (pid 9550) has died: fg  SVC
+12:20:46.858  Scheduling restart of crashed service … in 1000ms
+12:20:48.706  Process cn.scut.bombax (pid 9900) has died: fg  SVC
+12:20:48.707  Scheduling restart of crashed service … in 1800000ms
+```
+
+- **为什么难想到**：E3 里那条"`startService` 兜底"看起来是无害的降级。实际上 **`startService` 会成功**
+  —— 被拒的是随后的 `startForeground()`。而一个"以前台方式启动却始终没能进入前台"的服务，
+  Android 的处理是**判定为崩溃并杀掉宿主进程**，不是静默忽略。
+- **修复**：去掉 `startService` 兜底（拒绝就报告 `refused`，什么都不启动）；把 `startForeground()`
+  本身包进 `runCatching`，失败时清 `noticeRunning`、记 `result=not-foregrounded` 并 **`stopSelf()`**；
+  这种拒绝之后 `onStartCommand` 返回 `START_NOT_STICKY`，不让系统反复重试。
+- **诚实状态**：修复后的构建只验证到"允许"那条路径（`Background started FGS: Allowed` →
+  `result=shown` → 进程存活）；**拒绝分支尚未再次复现**，目前是从系统日志推断出来的修法，
+  今晚 23:00 的投递是第一次真实考验。
+- **可迁移的教训**：给"被拒绝"加兜底之前，先确认兜底成功之后系统对**后续状态**的要求是什么。
+  前台服务的契约是"五秒内进前台"，任何让它进了 `onStartCommand` 又进不了前台的启动方式，
+  都等于给自己埋了一次进程级故障。
+
 ---
 
 ## F. 构建与工具链（无 Android Studio、无 sudo）
@@ -282,7 +309,7 @@ AGENTS.md 原文禁止后台 Service、WorkManager 和 alarm。用户 2026-10-07
 
 ## H. 测试策略：把踩过的坑钉住
 
-- 99 条 JVM 单测 + 17 条 vitest，全部可在无设备、无 Android Studio 环境跑。
+- 114 条 JVM 单测 + 17 条 vitest，全部可在无设备、无 Android Studio 环境跑。
 - 纯逻辑可测的都拆出来测：验证码解析、键盘映射、登录错误分类、token 过期判定、
   cookie 抽取、GZIC/DXC 解析、刷新状态机、每日节奏数学。
 - **专门钉住"曾经的错"**：键盘四行布局 + 两种历史误读各一条断言；间距地板的忙等回归；
@@ -308,6 +335,8 @@ AGENTS.md 原文禁止后台 Service、WorkManager 和 alarm。用户 2026-10-07
 | `error_times` 阈值与锁定时长 | 未文档化也未探测 —— 这正是"每个假设一次真实尝试"上限的理由 |
 | 新版 UI 退出登录后的布局 | 未在手机上看（要看到就得退出登录，花一次真实登录） |
 | release 签名包真机运行 | 未安装。安装需先卸载 debug 版，会连带删掉 Keystore 加密的登录态 |
+| 历史表里真正落进第一行 | 未验证。写行只发生在成功查询之后，而本会话每次查询都死在门户超时；`no_backup/bombax-history.db` 已建、`count(*)=0` 是正确状态（§14.3） |
+| §14.2 崩溃修复的拒绝分支 | 未复现。修复是从系统日志推断的，只验证到"允许"路径；今晚 23:00 的投递是第一次真实考验 |
 | 闹钟在跨夜被 OEM 杀进程后能否复活 | 未测。已知的复活路径是"下次打开应用重挂" |
 
 ---

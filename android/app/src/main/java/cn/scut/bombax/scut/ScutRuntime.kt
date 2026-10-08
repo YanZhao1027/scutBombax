@@ -6,6 +6,7 @@ import android.os.Build
 import cn.scut.bombax.scut.auth.AuthRepository
 import cn.scut.bombax.scut.auth.SecureKeyboardService
 import cn.scut.bombax.scut.billing.BillingRepository
+import cn.scut.bombax.scut.history.BalanceHistoryStore
 import cn.scut.bombax.scut.network.ScutCookieJar
 import cn.scut.bombax.scut.network.ScutHttp
 import java.io.File
@@ -81,6 +82,19 @@ class ScutRuntime private constructor(val app: Context) {
     private var authRepository: AuthRepository? = null
     private var billingRepository: BillingRepository? = null
 
+    /**
+     * The local balance history, or null when it cannot be opened.
+     *
+     * `SQLiteOpenHelper` does not touch the disk until the database is first requested, so this
+     * costs nothing at startup. A history that fails to open must never fail a query: the school
+     * round-trip is the product, the record is the bonus, so every use of this is null-checked.
+     */
+    val history: BalanceHistoryStore? by lazy {
+        runCatching { BalanceHistoryStore(app) }
+            .onFailure { Diag.warn("stage=history result=unavailable reason=${it.javaClass.simpleName}") }
+            .getOrNull()
+    }
+
     private val prefs: SharedPreferences?
         get() = runCatching { app.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }.getOrNull()
 
@@ -129,7 +143,8 @@ class ScutRuntime private constructor(val app: Context) {
 
     fun billing(): BillingRepository = synchronized(lock) {
         billingRepository?.let { return it }
-        BillingRepository(http(), cookieJar, session, auth()).also { billingRepository = it }
+        BillingRepository(http(), cookieJar, session, auth(), history)
+            .also { billingRepository = it }
     }
 
     /**

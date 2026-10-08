@@ -10,6 +10,9 @@ import cn.scut.bombax.scut.auth.AuthRepository
 import cn.scut.bombax.scut.auth.Campus
 import cn.scut.bombax.scut.auth.TokenState
 import cn.scut.bombax.scut.auth.TokenPolicy
+import cn.scut.bombax.scut.history.BalanceHistoryStore
+import cn.scut.bombax.scut.history.SnapshotSource
+import cn.scut.bombax.scut.history.SnapshotWriter
 import cn.scut.bombax.scut.network.ScutCookieJar
 import cn.scut.bombax.scut.network.ScutHttp
 import cn.scut.bombax.scut.network.ScutResponse
@@ -31,10 +34,30 @@ class BillingRepository(
     private val http: ScutHttp,
     private val cookieJar: ScutCookieJar,
     private val session: SessionStore,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    /** Null when history is unavailable; a record that cannot be written must not fail a query. */
+    private val snapshots: SnapshotWriter? = null
 ) {
 
-    fun fetchBills(now: Long = System.currentTimeMillis()): BalanceReading {
+    /**
+     * Queries both balances, and records the result.
+     *
+     * This is the **only** place a history row is written. The page updates the screen and the
+     * notification from the same reading, and a writer at either of those points would produce two
+     * rows per query — which is exactly how a consumption series quietly doubles its own deltas.
+     *
+     * @param source why the query happened, so the nightly series can be told apart from taps
+     */
+    fun fetchBills(
+        source: SnapshotSource = SnapshotSource.UNKNOWN,
+        now: Long = System.currentTimeMillis()
+    ): BalanceReading {
+        val reading = fetchUncached(now)
+        record(reading, source, now)
+        return reading
+    }
+
+    private fun fetchUncached(now: Long): BalanceReading {
         var state = session.require()
         var refreshed = false
 
@@ -63,6 +86,16 @@ class BillingRepository(
             }
             session.save(rebuilt)
             query(rebuilt, System.currentTimeMillis())
+        }
+    }
+
+    private fun record(reading: BalanceReading, source: SnapshotSource, now: Long) {
+        val writer = snapshots ?: return
+        runCatching {
+            BalanceHistoryStore.snapshotOf(reading, atMillis = now, source = source)?.let(writer::record)
+        }.onFailure {
+            // A failed write is a gap in a chart, not a failed query. Reported, never rethrown.
+            Diag.warn("stage=history result=write-failed reason=${it.javaClass.simpleName}")
         }
     }
 
@@ -323,7 +356,13 @@ class BillingRepository(
             electric = electric,
             water = waterValue,
             ac = null,
-            electricText = "平台返回余额",
+            // "元" is USER_VERIFIED, not RUNTIME_VERIFIED: the DFYC answer carries no unit text at
+            // all — `resultObject.leftMoney` is the only quantity field — and the user confirmed
+            // against the school's own page on 2026-10-08 that this number is money, not kWh.
+            // A kWh figure is a different measure and is not read here at all.
+            electricText = "元",
+            // Water has not been checked the same way, so it keeps the neutral label rather than
+            // inheriting a unit because the item next to it happens to have one.
             waterText = "平台返回余额",
             acText = "大学城校区无空调费数据",
             updatedAtMillis = now

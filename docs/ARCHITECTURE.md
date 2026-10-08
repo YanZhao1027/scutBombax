@@ -74,6 +74,8 @@ android/app/src/main/java/cn/scut/bombax/
                                          the plugin
     notice/DailyRefresh.kt               cadence maths + the inexact alarm
     notice/DailyAlarmReceiver.kt         wake → re-arm → hand the refresh to the service
+    history/BalanceHistory.kt            pure logic: profile grouping key, duplicate rule, row model
+    history/BalanceHistoryStore.kt       the SQLite side, under noBackupFilesDir
 ```
 
 Two rules hold the design together:
@@ -247,6 +249,45 @@ Android 12+ will not let that alarm *start* the foreground service, so the daily
 while the notification is already alive. That constraint is why the page re-starts the service on
 every open when the daily switch is armed, and why the honest statement of behaviour is "one
 query a day, from a process you already asked to keep running".
+
+## Local balance history (v0.2a, added 2026-10-08)
+
+The app now keeps a local series of balance readings so that a dormitory's spending can be
+described rather than sampled. Constraints, in the order they bite:
+
+- **One write per query, in one place.** `BillingRepository.fetchBills()` records the snapshot after
+  a successful answer and before returning it. Not the page, not the notification: both of those
+  consume a reading that already exists, and writing from either would double every delta in the
+  series — which is a silent corruption, since a doubled delta reads as doubled consumption.
+- **A failure writes nothing.** A timeout is not a data point. The chart's honest shape depends on
+  gaps being gaps.
+- **Grouping is by dormitory, and the key is hashed.** `profile_id = SHA-256("campus|room")`
+  truncated to 16 hex characters, so the room number — an identifier of where a person lives, in
+  the same category as a student number for this project — never has to appear in a log line or an
+  export header for the series to stay separate. It is not a security boundary (the row itself
+  carries the room); it is what keeps the identifier out of diagnostics.
+- **The database lives under `noBackupFilesDir`** (`bombax-history.db`), separate from the session
+  file and from WebView storage. `allowBackup=false` already covers Android's backup, but a balance
+  history is the kind of file that should stay put through *every* transport an OS offers — auto
+  backup, `adb backup`, device-to-device transfer — until a user-triggered export is designed.
+- **Deleting history is not logging out.** 退出 clears the session; the series stays, because it is
+  the thing the user might still want to look at while signed out. `clearHistory()` is the separate
+  action.
+- **Duplicates are decided by time, not by value.** Two identical readings inside 90 s are the same
+  event reaching the writer twice; identical readings a day apart are a real observation (a flat
+  balance is information). Deduplicating by value alone would erase exactly the flat stretches the
+  chart needs.
+- **Units are stored with the row, and are not all verified.** Electricity is 元
+  (`USER_VERIFIED` — the school's answer carries no unit text; the account owner confirmed it
+  against the official page). Water is still unverified and keeps a neutral label rather than
+  inheriting a unit because it sits next to one that has one.
+- **A falling balance is an estimate, never a bill.** Anything built on this series must exclude or
+  mark as unknown the intervals where the number rises — a top-up, a platform adjustment, a debt
+  correction — rather than recording negative consumption.
+
+Room/KSP was deliberately not introduced: `SQLiteOpenHelper` keeps the build chain unchanged and
+lets the decisions that matter (grouping, dedupe, source classification) live in a pure Kotlin
+object that is unit-tested on a host, leaving only the SQL to device verification.
 
 ## Testing strategy
 

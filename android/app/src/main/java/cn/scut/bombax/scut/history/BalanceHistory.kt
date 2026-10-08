@@ -1,0 +1,118 @@
+package cn.scut.bombax.scut.history
+
+import java.security.MessageDigest
+
+/**
+ * Why a snapshot was recorded.
+ *
+ * Kept as data because the paths are not equally trustworthy for analysis: a `nightly` row is the
+ * one the trend chart can rely on being roughly 24 hours apart, while `manual` rows cluster
+ * wherever the user happened to look. `UNKNOWN` exists so a value that arrived wrong from the page
+ * shows up as itself instead of being silently counted as a tap.
+ */
+enum class SnapshotSource(val wire: String) {
+    MANUAL("manual"),
+    AUTO("auto"),
+    LOGIN("login"),
+    RESTORE("restore"),
+    NIGHTLY("nightly"),
+    UNKNOWN("unknown");
+
+    companion object {
+        fun from(value: String?): SnapshotSource =
+            entries.firstOrNull { it.wire == value?.trim()?.lowercase() } ?: UNKNOWN
+    }
+}
+
+/** One balance reading, as stored. Values are the school's numbers; units are ours. */
+data class BalanceSnapshot(
+    val profileId: String,
+    val campus: String,
+    val room: String,
+    val recordedAtMillis: Long,
+    val electric: Double?,
+    val water: Double?,
+    val ac: Double?,
+    val electricUnit: String,
+    val waterUnit: String,
+    val acUnit: String,
+    val source: SnapshotSource
+)
+
+/**
+ * The part of the history feature that can be proven on a host.
+ *
+ * The database itself is a thin `SQLiteOpenHelper` and can only be exercised on a phone; the
+ * decisions that actually risk corrupting a time series — which account a row belongs to, and
+ * whether a write is a duplicate — are here and are unit-tested.
+ */
+object HistoryLogic {
+
+    /**
+     * Two identical readings closer together than this are the *same event* reaching the writer
+     * twice, not two observations of a flat balance.
+     *
+     * The window is deliberately short. A balance that really does not move for three days is
+     * information (consumption ≈ 0), and deduplicating by value across a wider window would erase
+     * exactly the flat stretches the trend chart needs. The single-choke-point write path in
+     * `BillingRepository` is what guarantees "one query, one row"; this is only the safety net for
+     * a caller that fires twice inside a second.
+     */
+    const val DUPLICATE_WINDOW_MS = 90_000L
+
+    /** Hex characters kept from the digest: 64 bits of a SHA-256, plenty for a handful of rooms. */
+    const val PROFILE_ID_LENGTH = 16
+
+    /**
+     * A local grouping key for one dormitory's series.
+     *
+     * Hashed rather than stored as `campus + room` because the room number identifies a person's
+     * residence: the value never has to appear in a log line, an export header or a screenshot for
+     * the grouping to work. It is not a security boundary — anyone holding the database can see
+     * the room in the row itself — it is what keeps the identifier out of the *diagnostics*, which
+     * is the leak that has actually been audited in this project (§10).
+     */
+    fun profileId(campus: String, room: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest("$campus|$room".toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }.take(PROFILE_ID_LENGTH)
+    }
+
+    /** True when [next] repeats [previous] closely enough to be the same event. */
+    fun isDuplicate(previous: BalanceSnapshot?, next: BalanceSnapshot): Boolean {
+        if (previous == null) return false
+        if (previous.profileId != next.profileId) return false
+        if (next.recordedAtMillis - previous.recordedAtMillis >= DUPLICATE_WINDOW_MS) return false
+        return sameNumbers(previous, next)
+    }
+
+    private fun sameNumbers(a: BalanceSnapshot, b: BalanceSnapshot): Boolean =
+        a.electric == b.electric && a.water == b.water && a.ac == b.ac
+}
+
+/**
+ * The write side of the history, as the billing layer sees it.
+ *
+ * An interface rather than the store itself for two reasons: `BillingRepository` stays free of
+ * Android types so it keeps compiling in JVM tests, and a test can then assert the acceptance rule
+ * that matters — one successful query writes exactly one row, a failed query writes nothing —
+ * without a database.
+ */
+interface SnapshotWriter {
+    fun record(snapshot: BalanceSnapshot)
+}
+
+/** The read side: the newest row for one dormitory, used when the school cannot be reached. */
+interface SnapshotReader {
+    fun latest(profileId: String): BalanceSnapshot?
+
+    /**
+     * The newest row for whichever dormitory was last queried.
+     *
+     * The session record holds no room — only the balance answer does — so the offline fallback
+     * cannot derive a profile id on its own. Reading the newest row overall is not a guess across
+     * accounts: rows always carry their own profile, and the newest one is by construction the
+     * series the screen was showing before the network went away.
+     */
+    fun latestAny(): BalanceSnapshot?
+}

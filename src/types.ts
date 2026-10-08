@@ -69,6 +69,14 @@ export interface Bills {
   updatedAt: number;
 }
 
+/** Why a balance was queried — recorded with the snapshot so a daily series can be isolated. */
+export type SnapshotSource = 'manual' | 'auto' | 'login' | 'restore' | 'nightly' | 'unknown';
+
+/** A stored reading: `Bills`, plus the reason it exists. */
+export interface Snapshot extends Bills {
+  source: SnapshotSource;
+}
+
 export interface LoginInput {
   username: string;
   password: string;

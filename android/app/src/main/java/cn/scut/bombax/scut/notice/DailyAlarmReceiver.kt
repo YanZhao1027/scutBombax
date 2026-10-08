@@ -29,10 +29,13 @@ class DailyAlarmReceiver : BroadcastReceiver() {
         }
         val scheduledAt = intent.getLongExtra(DailyRefresh.EXTRA_TRIGGER_AT, 0L)
         val now = System.currentTimeMillis()
-        val next = DailyRefresh.onFired(app, scheduledAt, now)
+        // The slot is a wall-clock time, so the re-arm does not need `scheduledAt` — it is logged
+        // as the lateness of this delivery, which is the one thing worth knowing about Doze.
+        val next = DailyRefresh.onFired(app, now)
         val started = DailyRefresh.startRefresh(app)
         Diag.event(
-            "stage=daily result=fired start=$started nextInSec=" +
+            "stage=snapshot result=fired lateSec=${((now - scheduledAt) / 1000L).coerceAtLeast(0L)} " +
+                "start=$started nextInSec=" +
                 if (next > 0L) DailySchedule.secondsUntil(now, next) else -1L
         )
     }

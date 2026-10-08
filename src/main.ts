@@ -7,7 +7,8 @@ import {
   type Campus,
   type LoginType,
   type NoticeState,
-  type SessionInfo
+  type SessionInfo,
+  type SnapshotSource
 } from './types';
 import './styles.css';
 
@@ -46,6 +47,7 @@ const els = {
   noticeToggle: $<HTMLInputElement>('notice-toggle'),
   dailyToggle: $<HTMLInputElement>('daily-toggle'),
   dailyDue: $<HTMLElement>('daily-due'),
+  historyNote: $<HTMLElement>('history-note'),
   logoutButton: $<HTMLButtonElement>('logout-button'),
   resultsStatus: $<HTMLElement>('results-status'),
   choices: $<HTMLElement>('refresh-choices'),
@@ -225,6 +227,8 @@ const renderBills = (bills: Bills | null): void => {
     for (const el of [els.electric, els.water, els.ac]) el.textContent = '—';
     els.acRow.hidden = true;
     els.updatedAt.textContent = '等待查询';
+    els.historyNote.hidden = true;
+    els.historyNote.textContent = '';
     return;
   }
   els.room.textContent = bills.room || '未知房间';
@@ -270,13 +274,51 @@ const setBusy = (busy: boolean): void => {
   if (!busy) els.queryState.textContent = '';
 };
 
+/** "今天 23:01" / "昨天 22:58" / "10 月 6 日 23:00" — coarse on purpose. */
+const formatWhen = (millis: number): string => {
+  const when = new Date(millis);
+  const time = when.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' });
+  const startOfDay = (d: Date): number => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOfDay(new Date()) - startOfDay(when)) / 86_400_000);
+  if (days === 0) return `今天 ${time}`;
+  if (days === 1) return `昨天 ${time}`;
+  return `${when.getMonth() + 1} 月 ${when.getDate()} 日 ${time}`;
+};
+
+/**
+ * Shows the newest stored reading when the school cannot be reached.
+ *
+ * The label is the point of the whole function: a balance from last night is useful, and the same
+ * number presented as if it were current is not. So the note names the age and says plainly that
+ * this is not a live figure, and the timestamp line keeps showing when it was actually taken.
+ */
+const showLastKnown = async (reason: string): Promise<void> => {
+  try {
+    const snapshot = await api.lastSnapshot();
+    if (!snapshot) {
+      els.historyNote.hidden = true;
+      els.historyNote.textContent = '';
+      return;
+    }
+    renderBills(snapshot);
+    els.historyNote.textContent = `显示的是 ${formatWhen(snapshot.updatedAt)} 的历史记录（${reason}），不是实时余额`;
+    els.historyNote.hidden = false;
+  } catch {
+    // No history, or the store is unavailable: leave the empty cards rather than invent context.
+    els.historyNote.hidden = true;
+    els.historyNote.textContent = '';
+  }
+};
+
 /** Single entry point for querying so the UI can never overlap requests. */
-const query = async (source: 'manual' | 'auto' | 'login' | 'restore'): Promise<TickOutcome> => {
+const query = async (source: SnapshotSource): Promise<TickOutcome> => {
   if (state.querying) return 'error';
   setBusy(true);
   try {
-    const bills = await api.getBills();
+    const bills = await api.getBills(source);
     renderBills(bills);
+    els.historyNote.hidden = true;
+    els.historyNote.textContent = '';
     const health = await api.health();
     renderSession(health.session);
     setStatus(els.resultsStatus, '', 'idle');
@@ -289,10 +331,14 @@ const query = async (source: 'manual' | 'auto' | 'login' | 'restore'): Promise<T
       if (error.code === 'REAUTH_REQUIRED' || error.code === 'CAPTCHA_REQUIRED') {
         setStatus(els.resultsStatus, '需要重新登录或验证码校验。', 'error');
         void api.health().then((h) => renderSession(h.session)).catch(() => {});
+        // A dead session does not make the last reading worthless — it is still the best estimate
+        // the user has, provided the screen says when it was taken.
+        void showLastKnown('登录状态已失效');
         return 'reauth';
       }
       if (error.code === 'NETWORK') {
         setStatus(els.resultsStatus, '网络暂时不可用，稍后自动重试一次。', 'wait');
+        void showLastKnown('当前无法连接校园一卡通');
         return 'network';
       }
       if (error.code === 'CAMPUS_NETWORK_REQUIRED') {
@@ -301,9 +347,11 @@ const query = async (source: 'manual' | 'auto' | 'login' | 'restore'): Promise<T
         // place; the outcome is still 'network' because the device may move
         // back onto an allowed network, and the retry stays bounded at one.
         setStatus(els.resultsStatus, describeError(error), 'error');
+        void showLastKnown('需要校园网或学校 SSLVPN');
         return 'network';
       }
       setStatus(els.resultsStatus, describeError(error), 'error');
+      void showLastKnown('查询未成功');
       return 'error';
     }
     setStatus(els.resultsStatus, describeError(error), 'error');
@@ -429,7 +477,7 @@ const wire = (): void => {
           els.dailyToggle.disabled = true;
           els.dailyDue.textContent = '未开启';
         }
-        setStatus(els.resultsStatus, '常驻通知已关闭，每日后台刷新同时关闭。', 'idle');
+        setStatus(els.resultsStatus, '常驻通知已关闭，晚间余额快照同时关闭。', 'idle');
         return;
       }
       let status = await api.noticeStatus().catch(() => null);
@@ -444,7 +492,7 @@ const wire = (): void => {
       }
       syncNotice();
       els.dailyToggle.disabled = false;
-      setStatus(els.resultsStatus, '常驻通知已开启（仅前台查询）。', 'ok');
+      setStatus(els.resultsStatus, '常驻通知已开启（余额仍只在前台查询时更新）。', 'ok');
     })();
   });
 
@@ -452,7 +500,7 @@ const wire = (): void => {
     void (async () => {
       if (!els.noticeToggle.checked) {
         els.dailyToggle.checked = false;
-        setStatus(els.resultsStatus, '每日后台刷新需要先开启常驻通知。', 'error');
+        setStatus(els.resultsStatus, '晚间余额快照需要先开启常驻通知。', 'error');
         return;
       }
       try {
@@ -461,8 +509,8 @@ const wire = (): void => {
         setStatus(
           els.resultsStatus,
           status.dailyEnabled
-            ? `每日后台刷新已开启，${els.dailyDue.textContent}。`
-            : '每日后台刷新已关闭。',
+            ? `晚间快照已开启，${els.dailyDue.textContent}。`
+            : '晚间余额快照已关闭。',
           status.dailyEnabled ? 'ok' : 'idle'
         );
       } catch (error) {

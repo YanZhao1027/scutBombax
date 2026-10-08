@@ -9,7 +9,9 @@ import type {
   NoticeState,
   RefreshResult,
   ScutErrorCode,
-  SessionInfo
+  SessionInfo,
+  Snapshot,
+  SnapshotSource
 } from './types';
 import { BridgeError as BridgeErrorClass } from './types';
 
@@ -22,9 +24,11 @@ interface ScutApiNativePlugin {
   health(): Promise<HealthResult>;
   getCaptcha(): Promise<CaptchaChallenge>;
   login(input: LoginInput): Promise<SessionInfo>;
-  getBills(): Promise<Bills>;
+  getBills(source: SnapshotSource): Promise<Bills>;
   refreshSession(): Promise<RefreshResult>;
   logout(): Promise<SessionInfo>;
+  lastSnapshot(): Promise<{ snapshot: Snapshot | null }>;
+  clearHistory(): Promise<{ deleted: number }>;
   noticeStatus(): Promise<NoticeState>;
   requestNoticePermission(): Promise<NoticeState>;
   startNotice(payload: NoticePayload): Promise<{ running: boolean }>;
@@ -109,7 +113,21 @@ export const stopNotice = (): Promise<NoticeState> => call(() => ScutApi.stopNot
 export const enableDaily = (): Promise<NoticeState> => call(() => ScutApi.enableDaily());
 export const disableDaily = (): Promise<NoticeState> => call(() => ScutApi.disableDaily());
 
-export const getBills = (): Promise<Bills> => call(() => ScutApi.getBills());
+/**
+ * Queries both balances and records a history row.
+ *
+ * `source` is passed down rather than stamped here: the page knows whether this was a tap, the
+ * foreground timer or a restore, and the nightly rows come from native code that never goes
+ * through this function at all.
+ */
+export const getBills = (source: SnapshotSource): Promise<Bills> =>
+  call(() => ScutApi.getBills(source));
+
+/** The newest stored reading, or null when nothing has ever been recorded. Never a live value. */
+export const lastSnapshot = (): Promise<Snapshot | null> =>
+  call(async () => (await ScutApi.lastSnapshot()).snapshot ?? null);
+
+export const clearHistory = (): Promise<{ deleted: number }> => call(() => ScutApi.clearHistory());
 
 export const refreshSession = (): Promise<RefreshResult> => call(() => ScutApi.refreshSession());
 

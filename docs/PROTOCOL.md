@@ -18,6 +18,10 @@ RUNTIME_VERIFIED  observed in a live response (status and/or body) on the date
                   no user credentials involved
 SOURCE_VERIFIED   taken from a source of record: SCUT's own published client code,
                   or the old working implementation
+USER_VERIFIED     confirmed by a person looking at the school's own official page
+                  with their own account. Stronger than a guess and weaker than the
+                  two above: it is not reproducible by us without credentials, and it
+                  is about what the school *displays*, not what its API *states*.
 HYPOTHESIS        inherited assumption, not yet proven against SCUT
 DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 ```
@@ -41,6 +45,7 @@ DEVICE_PENDING    can only be closed by a logged-in trace on a physical phone
 | GZIC fee item 1/2/3 semantics and units | SOURCE_VERIFIED | DEVICE_PENDING |
 | DXC redirect chain hop-by-hop requirements | **RUNTIME_VERIFIED 2026-10-06** — `redirect 302 → thirdLogin 302 (JSESSIONID issued) → authorize 302 → getCode 302 → userinfo/ammeterBalance/waterBalance 200` | whether `error_times` or any cookie is load-bearing beyond what worked |
 | the chain is single-use: re-walking it with a live DFYC session short-circuits at `thirdLogin` and breaks `authorize` | **RUNTIME_VERIFIED 2026-10-07** — `authorize` got 200 where 302 was expected; the fix (keep and reuse the DFYC `JSESSIONID`) is **also RUNTIME_VERIFIED**: two refreshes after a login sent only the three balance reads | no |
+| **what unit the DXC balance numbers are in** | the answer carries **no unit text at all** — `resultObject.leftMoney` is the only quantity field on both `ammeterBalance` and `waterBalance`. The electricity figure is **USER_VERIFIED 2026-10-08 as 人民币 (元)**, confirmed by the account owner against the school's own page | the water figure's unit; and whether a kWh field exists that this app does not read |
 
 The only token request sent from the host was an empty-credential control probe; every
 credentialed request was made by the user on the phone.
@@ -573,6 +578,34 @@ device.
 Important: preserve manual redirect handling. Automatic redirect following hides the cookies
 and Location headers this flow depends on, and it would also silently swallow the
 already-established answer above.
+
+## What the balance numbers mean
+
+Both DXC items are read from the same field, `resultObject.leftMoney`, and **the answer carries no
+unit text** — no `unit`, no suffix, nothing that states what the number is measured in. The label
+this app used to show ("平台返回余额") was written by us for exactly that reason, and it should not
+be read as a school-provided unit.
+
+What is known:
+
+- **Electricity is money, not energy — USER_VERIFIED 2026-10-08.** The account owner compared the
+  app's figure against the school's own page and confirmed the DXC electricity balance is
+  人民币 (元). `leftMoney` is consistent with that reading, but the field name alone would not have
+  been enough: the official page also shows a **kWh** figure, which this app does **not** read at
+  all. So "剩余电量" is a different measure from a different field, and any kWh feature has to
+  start by finding that field, not by converting this one.
+- **Water is unverified.** It comes from `waterBalance` through the same `leftMoney` reader, and
+  nobody has confirmed whether the school displays it as 元 or 吨. It keeps a neutral label until
+  someone does — inheriting electricity's unit because the two rows sit next to each other would
+  be the kind of plausible, wrong inference this project has already paid for twice.
+- **GZIC is separately unverified**, and its fee items return a different envelope entirely
+  (`code/msg/map` with a Chinese `信息` sentence). Confirming DXC says nothing about GZIC.
+
+One consequence for anything built on top of this history, and worth stating before the first
+chart: a fall in `leftMoney` is an **estimate of spending over that interval**, never a bill.
+It is the balance after whatever the meter consumed, and it can move for reasons other than
+usage — a top-up, a platform adjustment, a debt correction. Intervals where the number rises must
+be excluded from consumption maths rather than recorded as negative usage.
 
 ## Diagnostics
 

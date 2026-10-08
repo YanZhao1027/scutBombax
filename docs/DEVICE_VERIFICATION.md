@@ -844,6 +844,13 @@ force-stop left the alarm armed with nothing to wake, which is the state that pr
 above. Making it survive a real kill anyway would need an exact alarm (`SCHEDULE_EXACT_ALARM` is
 not a permission this app should ask for) or `WorkManager`, and neither was taken.
 
+**Amended 2026-10-08 while building §14:** the plain `startService` fallback mentioned above has
+been removed, because it was worse than the refusal it was meant to soften. A service started as a
+foreground service that then gets refused by `startForeground` is not merely ignored — Android
+records it as *crashed* and kills the process. See §14.2 for the reproduction and the fix. The
+conclusion of this section is unchanged: the daily path is reachable only while the notification's
+service is already alive.
+
 Related, and the reason the alarm is re-armed on every app open: **installing and force-stopping
 both clear the app's alarms** —
 
@@ -909,3 +916,106 @@ node reflects the HTML attribute, not the DOM property that `input.checked = tru
 checkbox state from a screenshot or from the page's own `noticeStatus()` console line — the
 `enabled=true` on the daily row was the reliable signal here, since the code only enables that
 switch while the notification is implied.
+
+## 14. v0.2a: local history, the 23:00 slot, and one crash (2026-10-08)
+
+Scope of this step, from `docs/PRODUCT_REQUIREMENTS.md`: record every successful balance query
+into a local series, fall back to the newest stored reading when the school cannot be reached,
+and move the nightly sample from "24 hours after the switch" to **23:00 Beijing time**. Charts
+wait until there is data to draw.
+
+### 14.1 The slot, verified the moment it was installed
+
+```text
+12:20:33.719  stage=daily result=armed dueInSec=38366 api=34
+```
+
+12:20:33 + 38 366 s = **23:00:00**, to the second. That is the whole point of the change: the
+switch was turned on at 00:57 the previous night, and under the old interval logic the sample
+would have tried to happen at 00:57 every day — after the dormitory network's ~00:06 cut-off, and
+at a time that meant nothing. The same computation now runs on every app open and is idempotent,
+so the anchor bookkeeping (and the drift question in §13.2) is gone rather than fixed.
+
+Twelve host tests cover the rule, including: a delivery 45 s late still yields tomorrow's 23:00
+(no drift, by construction), a device set to UTC or Los Angeles computes the same instant, and
+"exactly 23:00:00" never arms an alarm at `now`.
+
+### 14.2 A crash the new code caused, and what it taught
+
+The first install of this step was launched over adb while the screen was off. The page booted,
+the restore query timed out after 10 s, and the boot path that re-starts the notification ran:
+
+```text
+12:20:46.482  ActivityManager: startForegroundService() not allowed due to mAllowStartForeground false
+12:20:46.545  ActivityManager: Service.startForeground() not allowed due to mAllowStartForeground false
+12:20:46.601  ActivityTaskManager:   Force finishing activity cn.scut.bombax/.MainActivity
+12:20:46.856  ActivityManager: Process cn.scut.bombax (pid 9550) has died: fg  SVC
+12:20:46.858  ActivityManager: Scheduling restart of crashed service … in 1000ms for start-requested
+12:20:48.706  ActivityManager: Process cn.scut.bombax (pid 9900) has died: fg  SVC
+12:20:48.707  ActivityManager: Scheduling restart of crashed service … in 1800000ms for start-requested
+```
+
+Two processes, 1.2 seconds apart, then a **30-minute** backoff. The mechanism is the part worth
+remembering: `startService` as a fallback for a refused `startForegroundService` *succeeds*. The
+service then runs, calls `startForeground()`, is refused again, and a service that was started in
+the foreground state but never goes foreground is treated as crashed — the system kills the host
+process rather than quietly ignoring it. The fallback that §13.3 recorded as "also refused, so we
+log it" was therefore not a safety net at all; in the state where it succeeded it was the crash.
+
+Three changes, all in `BalanceNoticeService`:
+
+- the `startService` fallback is gone. A refusal is reported as `refused` and nothing starts;
+- `startForeground()` itself is wrapped: on refusal the service logs
+  `result=not-foregrounded`, clears `noticeRunning` and **`stopSelf()`s**, so the worst case is a
+  missing notification rather than a dead app;
+- `onStartCommand` returns `START_NOT_STICKY` after such a refusal, so the system does not
+  re-restart something that has already told us it cannot run.
+
+Honest status, updated minutes later on the same build: the **throwing** variant of the refusal was
+reproduced and is now handled cleanly —
+
+```text
+12:30:18.191  stage=dxc.userInfo … io=SocketTimeoutException
+12:30:18.218  ActivityManager: Background started FGS: Disallowed [uidState: TPSL; code:DENIED]
+12:30:18.218  ActivityManager: startForegroundService() not allowed due to mAllowStartForeground false
+12:30:18.223  stage=notice result=start-refused reason=ForegroundServiceStartNotAllowedException
+```
+
+`pidof` still returns the same process afterwards, there is no `has died: fg SVC`, and no
+`Scheduling restart of crashed service` — the refusal is reported and the app keeps working, which
+is exactly the behaviour the fallback used to destroy.
+
+The **non-throwing** variant (the one that actually crashed: `startForegroundService` accepted,
+`startForeground()` refused) has not been reproduced against the fixed build. `show()`'s catch is
+therefore reasoned from the 12:20 system logs rather than observed; tonight's 23:00 delivery is the
+first natural chance to see it.
+
+### 14.3 The history store, as far as it can be verified without the school
+
+```bash
+adb shell run-as cn.scut.bombax sqlite3 no_backup/bombax-history.db 'select count(*) from balance_snapshot;'
+# 0
+```
+
+The database exists at `no_backup/bombax-history.db` — created on the first read, before any write —
+and is empty, which is the correct state: **rows are only produced by a successful query**, and
+every query in this session died on the captive portal. The schema, the profile grouping and the
+duplicate rule are host-tested (11 cases), including the two that protect the series: an identical
+balance 24 hours later is a real observation and must be kept, while an identical balance three
+seconds later is the same event twice and must not be.
+
+Also confirmed here: the write happens in exactly one place (`BillingRepository.fetchBills`), so
+the page and the notification cannot each add a row — and a failed query writes nothing, which is
+what keeps a network outage from drawing a cliff into the chart.
+
+### 14.4 What v0.2a still needs before it can be called verified
+
+- **The first row.** One successful query on campus Wi-Fi or the school VPN writes a snapshot;
+  until then the offline fallback has nothing to show and the note stays hidden.
+- **The offline display itself**: open the app with history present and the network off, and check
+  that the figures, the timestamp and the 历史记录 caption all appear and that nothing reads as live.
+- **Tonight's 23:00 delivery**, which is the first real test of the calendar slot *and* of the
+  refusal path in §14.2.
+- **The water unit**, still unverified; and the `resultKeys` probe (§14.1's build carries it) has
+  not produced a line yet because no query has succeeded — it is the thing that will tell us whether
+  a kWh field exists at all.

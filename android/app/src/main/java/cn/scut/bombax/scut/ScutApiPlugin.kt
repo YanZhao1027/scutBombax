@@ -16,6 +16,8 @@ import cn.scut.bombax.scut.auth.LoginInput
 import cn.scut.bombax.scut.auth.LoginType
 import cn.scut.bombax.scut.auth.TokenState
 import cn.scut.bombax.scut.billing.BalanceReading
+import cn.scut.bombax.scut.history.BalanceSnapshot
+import cn.scut.bombax.scut.history.SnapshotSource
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
@@ -124,11 +126,46 @@ class ScutApiPlugin : Plugin() {
 
     @PluginMethod
     fun getBills(call: PluginCall) {
+        // The page knows why it asked — a tap, the timer, a login, a restore — and the history
+        // needs that to tell a nightly series point from a curious glance. An unrecognised value
+        // becomes `unknown` rather than being assumed to be a tap.
+        val source = SnapshotSource.from(call.getString("source"))
         submit(call) {
             if (runtime.session.peek() == null) {
                 throw ScutException(AppError.NO_SESSION, "尚未登录", "bills/noSession")
             }
-            billsJson(runtime.billing().fetchBills())
+            billsJson(runtime.billing().fetchBills(source))
+        }
+    }
+
+    /**
+     * The newest stored reading, for the screen to fall back on when the school cannot be reached.
+     *
+     * Returns `null` rather than an empty object when there is no history, so the page cannot
+     * mistake "never queried" for "queried and got zeros".
+     */
+    @PluginMethod
+    fun lastSnapshot(call: PluginCall) {
+        submit(call) {
+            val stored = runtime.history?.latestAny()
+            if (stored == null) {
+                JSObject().apply { put("snapshot", JSObject.NULL) }
+            } else {
+                JSObject().apply { put("snapshot", snapshotJson(stored)) }
+            }
+        }
+    }
+
+    @PluginMethod
+    fun clearHistory(call: PluginCall) {
+        submit(call) {
+            val history = runtime.history
+                ?: throw ScutException(
+                    AppError.UPSTREAM_UNAVAILABLE,
+                    "本机历史记录暂不可用",
+                    "history/unavailable"
+                )
+            JSObject().apply { put("deleted", history.clear(profileId = null).toLong()) }
         }
     }
 
@@ -194,9 +231,14 @@ class ScutApiPlugin : Plugin() {
                 call.getString("unit").orEmpty(),
                 call.getString("updated").orEmpty()
             )
-            ContextCompat.startForegroundService(context, intent)
-            runtime.noticeRunning = true
-            JSObject().apply { put("running", true) }
+            // Refused is a reportable outcome, not an exception: the page still has the numbers on
+            // screen, it just could not pin them to the shade right now.
+            val started = BalanceNoticeService.start(context, intent)
+            runtime.noticeRunning = started != "refused"
+            JSObject().apply {
+                put("running", started != "refused")
+                put("how", started)
+            }
         }
     }
 
@@ -225,7 +267,7 @@ class ScutApiPlugin : Plugin() {
             if (runtime.session.peek() == null) {
                 throw ScutException(
                     AppError.NO_SESSION,
-                    "请先登录，再开启每日后台刷新",
+                    "请先登录，再开启晚间余额快照",
                     "daily/noSession"
                 )
             }
@@ -233,7 +275,7 @@ class ScutApiPlugin : Plugin() {
             if (enabled == 0L) {
                 throw ScutException(
                     AppError.UPSTREAM_UNAVAILABLE,
-                    "系统不接受定时唤醒，无法开启每日刷新",
+                    "系统不接受定时唤醒，无法开启晚间余额快照",
                     "daily/arm-failed"
                 )
             }
@@ -308,8 +350,24 @@ class ScutApiPlugin : Plugin() {
         put("canRefresh", public.canRefresh)
     }
 
-    private fun billsJson(reading: BalanceReading): JSObject = JSObject().apply {
-        put("campus", reading.campus)
+    /**
+     * The same shape as `billsJson`, plus the two fields that make a stale reading honest:
+     * when it was taken and why. The page must not be able to render history as present.
+     */
+    private fun snapshotJson(stored: BalanceSnapshot): JSObject = JSObject().apply {
+        put("campus", stored.campus)
+        put("room", stored.room)
+        putNumberOr("electric", stored.electric)
+        putNumberOr("water", stored.water)
+        putNumberOr("ac", stored.ac)
+        put("electricUnit", stored.electricUnit)
+        put("waterUnit", stored.waterUnit)
+        put("acUnit", stored.acUnit)
+        put("updatedAt", stored.recordedAtMillis)
+        put("source", stored.source.wire)
+    }
+
+    private fun billsJson(reading: BalanceReading): JSObject = JSObject().apply {        put("campus", reading.campus)
         put("room", reading.room)
         putNumberOr("electric", reading.electric)
         putNumberOr("water", reading.water)

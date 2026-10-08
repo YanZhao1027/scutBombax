@@ -42,14 +42,16 @@
           <span id="query-state"></span>
         </p>
 
+        <p id="history-note" class="history-note" role="status" aria-live="polite" hidden></p>
+
         <p class="notice-line">
           <label><input id="notice-toggle" type="checkbox" />常驻通知</label>
           <span class="hint">把最近一次结果贴在通知栏；查询仍只发生在前台</span>
         </p>
 
         <p class="notice-line">
-          <label><input id="daily-toggle" type="checkbox" disabled />每日后台刷新</label>
-          <span class="hint">一天一次，只查余额不登录。<span id="daily-due">未开启</span></span>
+          <label><input id="daily-toggle" type="checkbox" disabled />晚间余额快照</label>
+          <span class="hint">每天约 23:00 记一次余额，供离线查看与用量统计。<span id="daily-due">未开启</span></span>
         </p>
 
         <p class="segmented" id="refresh-choices" role="radiogroup" aria-label="自动刷新">

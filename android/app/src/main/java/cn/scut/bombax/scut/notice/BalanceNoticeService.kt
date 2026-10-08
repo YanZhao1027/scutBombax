@@ -12,11 +12,13 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import cn.scut.bombax.R
 import cn.scut.bombax.scut.AppError
 import cn.scut.bombax.scut.Diag
 import cn.scut.bombax.scut.ScutException
 import cn.scut.bombax.scut.ScutRuntime
+import cn.scut.bombax.scut.history.SnapshotSource
 import cn.scut.bombax.scut.billing.BalanceReading
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -51,11 +53,9 @@ class BalanceNoticeService : Service() {
      * intent (or from the cached copy) and never from the network.
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // The service is the authority on whether it is running: the plugin's flag and this one
-        // are the same object, so a page that reloads after a process death sees the truth.
-        ScutRuntime.get(applicationContext).noticeRunning = true
         val data = NoticeData.of(intent, applicationContext)
-        show(data)
+        // A refusal inside show() stops the service, so there is nothing to refresh after it.
+        if (!show(data)) return START_NOT_STICKY
         if (intent?.action == ACTION_REFRESH) refresh()
         return START_STICKY
     }
@@ -67,19 +67,42 @@ class BalanceNoticeService : Service() {
         super.onDestroy()
     }
 
-    private fun show(data: NoticeData) {
+    /**
+     * Shows the notification, and takes the process out of the service's way if it cannot.
+     *
+     * `startForeground` is not a formality: when the system has already decided this app may not
+     * run a foreground service, the call is refused, and a service that was started as a
+     * foreground service but never went foreground is treated as *crashed* — the whole process is
+     * killed and the service is rescheduled with a backoff. Measured on this device on
+     * 2026-10-08: two processes died in 1.2 s and the system waited 30 minutes before trying
+     * again. So a refusal stops the service immediately and reports it, instead of dying.
+     */
+    private fun show(data: NoticeData): Boolean {
         data.cache(applicationContext)
         val notification = build(applicationContext, data)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        val started = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
         }
+        if (started.isFailure) {
+            ScutRuntime.get(applicationContext).noticeRunning = false
+            Diag.warn(
+                "stage=notice result=not-foregrounded reason=" +
+                    (started.exceptionOrNull()?.javaClass?.simpleName ?: "unknown")
+            )
+            stopSelf()
+            return false
+        }
+        ScutRuntime.get(applicationContext).noticeRunning = true
         Diag.event("stage=notice result=shown updated=${data.updatedAtLabel}")
+        return true
     }
 
     /**
@@ -103,7 +126,9 @@ class BalanceNoticeService : Service() {
                     Diag.warn("stage=daily result=no-session")
                     return@execute
                 }
-                runCatching { runtime.billing().fetchBills() }
+                runCatching {
+                    runtime.billing().fetchBills(source = SnapshotSource.NIGHTLY)
+                }
                     .onSuccess { reading ->
                         show(NoticeData.from(reading))
                         Diag.event("stage=daily result=ok")
@@ -150,6 +175,29 @@ class BalanceNoticeService : Service() {
         /** The alarm's entry point: no payload, because the point is to go and get a new one. */
         fun refreshIntent(context: Context): Intent =
             Intent(context, BalanceNoticeService::class.java).apply { action = ACTION_REFRESH }
+
+        /**
+         * Starts the service from wherever it was asked, and reports how it went.
+         *
+         * There is deliberately **no** `startService` fallback here. Starting a service whose
+         * contract is "I will be a foreground service" while the system will not allow a
+         * foreground service is how the process gets killed outright: the service never reaches
+         * `startForeground`, Android records it as crashed, and it is rescheduled with a backoff
+         * (measured 2026-10-08: two deaths 1.2 s apart, then a 30-minute wait). A clean refusal is
+         * a better outcome than a crash loop, so the caller is told `refused` and nothing is
+         * started. When the service is *already* running this call succeeds anyway — that is the
+         * path the nightly alarm relies on.
+         */
+        fun start(context: Context, intent: Intent): String {
+            val app = context.applicationContext
+            return runCatching {
+                ContextCompat.startForegroundService(app, intent)
+                "foreground-service"
+            }.getOrElse { failure ->
+                Diag.warn("stage=notice result=start-refused reason=${failure.javaClass.simpleName}")
+                "refused"
+            }
+        }
 
         fun createChannel(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
