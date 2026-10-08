@@ -1062,3 +1062,66 @@ release signature means uninstalling the debug build, which deletes the Keystore
 history database, and the user's instruction is to hold until they confirm the swap. The ordering
 note worth keeping is that the history is only two rows deep today, so the cost of switching now is
 two rows; after a month of nightly samples it would be a month.
+
+## 15. Release 0.2.0 on the phone (2026-10-08, in progress)
+
+The user approved the signature swap and explicitly allowed the data wipe: no import/export
+feature is being built for a handful of snapshots, so the debug build's session and history
+database were discarded rather than migrated. The pre-swap state is recorded in
+`evidence/release-swap-2026-10-08.txt` — a **record, not a restore path**: an uninstall takes
+`/data/data/cn.scut.bombax` with it, and a release build cannot read a debug build's private
+directory, so nothing can be put back without a designed export/import feature.
+
+### 15.1 What the swap proved
+
+```bash
+adb uninstall cn.scut.bombax && adb install .../release/app-release.apk
+adb shell dumpsys package cn.scut.bombax | grep flags
+```
+
+```text
+versionCode=2  versionName=0.2.0  flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ]
+```
+
+No `DEBUGGABLE` — the phone is running the signed release build now. `apksigner verify` exits 0
+and the certificate digest is still `ef607f9d…`, the same key that signed the first release APK,
+so the update path from here on is in-place rather than another wipe.
+
+First launch of the release build, on a device that had just lost its Wi-Fi association:
+
+```text
+14:32:15.053  stage=session result=disk-ready path=noBackupFilesDir
+14:32:15.053  stage=runtime result=ready api=34 release=14 userAgent=absent
+14:32:15.056  plugin=ScutApi ready api=34 release=14 bridge=2
+14:32:15.529  stage=captcha … status=-1 ms=6 io=UnknownHostException
+```
+
+Four things worth naming, because each is a different claim:
+
+- the **Keystore-backed session store initialises on a release build** (`disk-ready`). This is not
+  automatic: the debug build had been the only thing ever exercising it, and a release signature
+  changes the Keystore key's owning UID, so a fresh key had to be generated and probed;
+- `userAgent=absent` is the correct clean-install state, and it is the same code path the nightly
+  alarm depends on — the first query after a login will cache the WebView UA for future cold
+  starts;
+- the captcha request failing in 6 ms with `UnknownHostException` is the honest answer for a
+  device whose Wi-Fi shows `Supplicant state: DISCONNECTED`, and the app surfaced it as a network
+  error without crashing;
+- `POST_NOTIFICATIONS: granted=false` and **zero pending alarms** are both correct for a fresh
+  install with no session: the permission is asked for when the user turns the notification on,
+  and 晚间余额快照 deliberately refuses to arm without a session to query with.
+
+### 15.2 Still pending, and who can do each
+
+| Item | Blocked on |
+| --- | --- |
+| Login + first query on the release build | **the user**: unlock the phone, rejoin campus Wi-Fi (or the school SSL VPN), authenticate the portal, then enter account / password / captcha. Credentials are never typed by the assistant and never logged |
+| First nightly-capable snapshot row | the login above |
+| Offline cold start showing history with the 历史记录 caption | one successful query first |
+| 常驻通知 toggle and the runtime permission prompt | the user's tap |
+| 23:00 alarm registered from the release build | a session existing |
+| Tonight's 23:00 delivery: no crash, refusal recorded if the system denies it, one `nightly` row if the request succeeds, no catch-up if it is missed | the above, plus the phone being on and the service alive |
+
+If tonight's 23:00 attempt fails on the network it still verifies scheduling and service
+lifecycle, and it must be recorded as a failed sample rather than a snapshot — a missed slot is
+left missed, by design.
