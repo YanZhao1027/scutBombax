@@ -16,6 +16,7 @@ enum class SnapshotSource(val wire: String) {
     LOGIN("login"),
     RESTORE("restore"),
     NIGHTLY("nightly"),
+    TEST("test"),
     UNKNOWN("unknown");
 
     companion object {

@@ -56,7 +56,10 @@ class BalanceNoticeService : Service() {
         val data = NoticeData.of(intent, applicationContext)
         // A refusal inside show() stops the service, so there is nothing to refresh after it.
         if (!show(data)) return START_NOT_STICKY
-        if (intent?.action == ACTION_REFRESH) refresh()
+        when (intent?.action) {
+            ACTION_REFRESH -> refresh(SnapshotSource.NIGHTLY)
+            ACTION_REFRESH_TEST -> refresh(SnapshotSource.TEST)
+        }
         return START_STICKY
     }
 
@@ -113,7 +116,8 @@ class BalanceNoticeService : Service() {
      * failed refresh must not make the shade look like the balance is unknown, because the previous
      * reading is still the best estimate the user has.
      */
-    private fun refresh() {
+    private fun refresh(source: SnapshotSource) {
+        val stage = if (source == SnapshotSource.TEST) "snapshotTest" else "daily"
         val runtime = ScutRuntime.get(applicationContext)
         val last = NoticeData.cached(applicationContext)
         try {
@@ -123,25 +127,25 @@ class BalanceNoticeService : Service() {
                 // onStartCommand.
                 if (runtime.session.peek() == null) {
                     show(last.asNeedsRelogin())
-                    Diag.warn("stage=daily result=no-session")
+                    Diag.warn("stage=$stage result=no-session")
                     return@execute
                 }
                 runCatching {
-                    runtime.billing().fetchBills(source = SnapshotSource.NIGHTLY)
+                    runtime.billing().fetchBills(source = source)
                 }
                     .onSuccess { reading ->
                         show(NoticeData.from(reading))
-                        Diag.event("stage=daily result=ok")
+                        Diag.event("stage=$stage result=ok")
                     }
                     .onFailure { failure ->
                         val code = (failure as? ScutException)?.error
                         show(last.asFailure(code))
-                        Diag.warn("stage=daily result=failed reason=${code?.name ?: failure.javaClass.simpleName}")
+                        Diag.warn("stage=$stage result=failed reason=${code?.name ?: failure.javaClass.simpleName}")
                     }
             }
         } catch (rejected: java.util.concurrent.RejectedExecutionException) {
             show(last.asFailure(AppError.BUSY))
-            Diag.warn("stage=daily result=failed reason=queue-closed")
+            Diag.warn("stage=$stage result=failed reason=queue-closed")
         }
     }
 
@@ -150,6 +154,7 @@ class BalanceNoticeService : Service() {
         const val NOTIFICATION_ID = 0xB0
 
         const val ACTION_REFRESH = "cn.scut.bombax.action.REFRESH"
+        const val ACTION_REFRESH_TEST = "cn.scut.bombax.action.REFRESH_TEST"
 
         const val EXTRA_ROOM = "room"
         const val EXTRA_ELECTRIC = "electric"
@@ -175,6 +180,9 @@ class BalanceNoticeService : Service() {
         /** The alarm's entry point: no payload, because the point is to go and get a new one. */
         fun refreshIntent(context: Context): Intent =
             Intent(context, BalanceNoticeService::class.java).apply { action = ACTION_REFRESH }
+
+        fun testRefreshIntent(context: Context): Intent =
+            Intent(context, BalanceNoticeService::class.java).apply { action = ACTION_REFRESH_TEST }
 
         /**
          * Starts the service from wherever it was asked, and reports how it went.

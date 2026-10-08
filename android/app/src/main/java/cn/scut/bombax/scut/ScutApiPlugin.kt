@@ -52,7 +52,7 @@ class ScutApiPlugin : Plugin() {
 
     companion object {
         /** Version of the JS-facing surface, bumped when a method is added. */
-        const val BRIDGE_VERSION = "3"
+        const val BRIDGE_VERSION = "4"
     }
 
     /** Capacitor exposes a nullable context; the activity is always there once the bridge is up. */
@@ -312,7 +312,7 @@ class ScutApiPlugin : Plugin() {
         }
     }
 
-    // ---------------------------------------------------------- daily refresh
+    // ---------------------------------------------------------- configurable daily snapshot and one-off verification
     //
     // One query a day, inexact alarm, no login attempt, no retry loop. Off by default.
 
@@ -340,6 +340,50 @@ class ScutApiPlugin : Plugin() {
         }
     }
 
+    /** Store a Beijing daily clock setting even while the daily switch is off. */
+    @PluginMethod
+    fun setDailyTime(call: PluginCall) {
+        val hour = call.getInt("hour")
+        val minute = call.getInt("minute")
+        submit(call) {
+            if (hour == null || minute == null || !DailySchedule.validTime(hour, minute)) {
+                throw ScutException(AppError.INVALID_INPUT, "请选择有效的每日查询时间", "daily/time")
+            }
+            val next = DailyRefresh.setTime(appCtx, System.currentTimeMillis(), hour, minute)
+            if (next < 0L) {
+                throw ScutException(AppError.UPSTREAM_UNAVAILABLE, "定时设置保存失败", "daily/time-save")
+            }
+            noticeJson()
+        }
+    }
+
+    /** A separate inexact test alarm around five minutes from now, only by explicit user tap. */
+    @PluginMethod
+    fun scheduleSnapshotTest(call: PluginCall) {
+        submit(call) {
+            requireNoticeAllowed()
+            if (runtime.session.peek() == null) {
+                throw ScutException(AppError.NO_SESSION, "请先登录后再测试", "snapshotTest/noSession")
+            }
+            if (!runtime.noticeRunning) {
+                throw ScutException(AppError.INVALID_INPUT, "请先开启常驻通知", "snapshotTest/noticeOff")
+            }
+            val due = DailyRefresh.scheduleTest(appCtx, System.currentTimeMillis())
+            if (due == 0L) {
+                throw ScutException(AppError.UPSTREAM_UNAVAILABLE, "系统无法安排本次测试", "snapshotTest/arm-failed")
+            }
+            noticeJson()
+        }
+    }
+
+    @PluginMethod
+    fun cancelSnapshotTest(call: PluginCall) {
+        submit(call) {
+            DailyRefresh.cancelTest(appCtx)
+            noticeJson()
+        }
+    }
+
     @PluginMethod
     fun disableDaily(call: PluginCall) {
         submit(call) {
@@ -352,6 +396,8 @@ class ScutApiPlugin : Plugin() {
         val context = appCtx
         val now = System.currentTimeMillis()
         val nextDue = DailyRefresh.nextDue(context, now)
+        val (hour, minute) = DailyRefresh.selectedTime(context)
+        val testDue = DailyRefresh.testDue(context)
         return JSObject().apply {
             put("granted", noticePermissionGranted())
             put("enabled", NotificationManagerCompat.from(context).areNotificationsEnabled())
@@ -359,6 +405,10 @@ class ScutApiPlugin : Plugin() {
             put("dailyEnabled", DailyRefresh.isEnabled(context))
             // -1 while the switch is off; seconds until the next planned wake otherwise.
             put("nextDueIn", if (nextDue == 0L) -1L else DailySchedule.secondsUntil(now, nextDue))
+            put("dailyHour", hour)
+            put("dailyMinute", minute)
+            put("testPending", testDue > 0L)
+            put("testDueIn", if (testDue == 0L) -1L else DailySchedule.secondsUntil(now, testDue))
         }
     }
 
