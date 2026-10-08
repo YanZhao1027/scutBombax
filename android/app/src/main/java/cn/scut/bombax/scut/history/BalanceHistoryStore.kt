@@ -57,6 +57,8 @@ class BalanceHistoryStore private constructor(
         }
         db.insert(TABLE, null, snapshot.toValues())
         prune(db, snapshot.profileId)
+        // Redacted by construction — see HistoryLogic.recordLogLine.
+        Diag.event(HistoryLogic.recordLogLine(snapshot))
     }
 
     override fun latest(profileId: String): BalanceSnapshot? = readLatest(readableDatabase, profileId)

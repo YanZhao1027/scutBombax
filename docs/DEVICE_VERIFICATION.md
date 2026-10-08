@@ -1125,3 +1125,50 @@ Four things worth naming, because each is a different claim:
 If tonight's 23:00 attempt fails on the network it still verifies scheduling and service
 lifecycle, and it must be recorded as a failed sample rather than a snapshot — a missed slot is
 left missed, by design.
+
+### 15.3 Release acceptance, item by item (17:00–17:09)
+
+```text
+16:58:12.698  stage=history result=recorded source=restore electric=true water=true ac=false
+16:58:29.209  stage=notice  result=shown updated=16:58:12
+17:03:00.523  stage=daily   result=armed dueInSec=21419          ← 17:03:00 + 21419 s = 23:00:00
+17:05:27.765  stage=dxc.userInfo … io=ConnectException  (offline, dead-proxy trick)
+17:05:27.777  stage=notice  result=shown updated=17:01:04        ← cached figures, cached time
+17:09:06.010  dxc.userInfo / ammeterBalance / waterBalance 200   ← three requests, no chain re-walk
+17:09:06.096  stage=history result=recorded source=restore
+17:09:06.117  stage=notice  result=shown updated=17:09:05
+```
+
+| Item | Result |
+| --- | --- |
+| Login on the release build | RUNTIME_VERIFIED — the user logged in once, first try; the token came back with `expiresIn=6047594s` ≈ 70 days |
+| In-place release → release update keeps the session | RUNTIME_VERIFIED — three reinstalls, each followed by `result=restored`, no re-login needed. This is the whole point of having a private signing key |
+| First snapshot row written | RUNTIME_VERIFIED — `result=recorded source=restore` |
+| Offline cold start shows history, labelled | RUNTIME_VERIFIED — screen text read out of the accessibility tree: "显示的是 今天 17:01 的历史记录（当前无法连接校园一卡通），不是实时余额" |
+| Notification permission flow | RUNTIME_VERIFIED after the fix below — dialog → 允许 → notice posted without a second tap |
+| 23:00 alarm registered, and re-armed after a kill | RUNTIME_VERIFIED — `origWhen 1791471600000` = 23:00:00 Beijing, present again after each `force-stop` |
+| Cached-display rule from §13.5 ("not verified") | **now verified** — offline, the shade kept the 17:01 figures rather than showing the placeholder the page sent |
+| Tonight's 23:00 delivery | PENDING |
+
+Two bugs surfaced by testing on a release build specifically, because a release build is the only
+place they could show up:
+
+1. **`run-as` refuses, so the history was invisible.** `run-as: package not debuggable` is the
+   correct security posture, and it also means the write path has no observable effect on the
+   device a user actually holds. Fixed by logging a redacted line on every accepted row —
+   presence flags only, no room, no grouping key, no balance, no timestamp, with two tests that
+   fail if any of them appear.
+2. **The permission callback signature crashed the app.** The first version of
+   `requestNoticePermission` answered with the pre-dialog state, so the page reverted its own
+   switch and the user had to toggle twice; the fix — Capacitor's
+   `requestPermissionForAlias(alias, call, callbackName)` — then crashed with
+   `IllegalArgumentException: Wrong number of arguments; expected 2, got 1` at 16:54:24, because
+   `Plugin.triggerPermissionCallback` invokes `method.invoke(this, savedCall)`: **one argument**.
+   The grant map is not passed to the callback. Fixed and re-verified end to end; the signature
+   requirement is now written down next to the method, because the javadoc does not say it.
+
+Also worth keeping: **how to test the offline path without touching Wi-Fi.** `svc wifi disable`
+works but drops the association, and an open campus network will not auto-join afterwards — that
+cost 40 minutes of manual rejoining earlier today. `settings put global http_proxy 127.0.0.1:1`
+fails every connection in 2 ms instead, leaves the association intact, and is undone with
+`:0`. Verified by a 200 from the captcha endpoint after restoring.

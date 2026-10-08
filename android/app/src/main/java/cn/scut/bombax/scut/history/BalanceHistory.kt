@@ -92,6 +92,19 @@ object HistoryLogic {
         return sameNumbers(previous, next)
     }
 
+    /**
+     * The line logged after a row is accepted.
+     *
+     * A release build cannot be inspected with `run-as` — that is precisely what not being
+     * debuggable means — so without this there is no way to see the history feature working on the
+     * phone users actually get. Presence flags only: **no room, no grouping key, no balance value,
+     * no timestamp**, and `BalanceHistoryTest` fails if any of them appear.
+     */
+    fun recordLogLine(snapshot: BalanceSnapshot): String =
+        "stage=history result=recorded source=${snapshot.source.wire} " +
+            "electric=${snapshot.electric != null} water=${snapshot.water != null} " +
+            "ac=${snapshot.ac != null}"
+
     private fun sameNumbers(a: BalanceSnapshot, b: BalanceSnapshot): Boolean =
         a.electric == b.electric && a.water == b.water && a.ac == b.ac
 }

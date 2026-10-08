@@ -204,8 +204,12 @@ const syncNotice = (): void => {
  */
 const renderDaily = (status: NoticeState): void => {
   els.dailyToggle.checked = status.dailyEnabled;
-  // Daily refresh implies the notice service, so it can only be offered while that is live.
-  els.dailyToggle.disabled = !(status.running || status.dailyEnabled);
+  // Enabled whenever the notification is live, armed, or simply switched on by the user. The last
+  // clause is the fix for a race seen on 2026-10-08: dismissing the permission prompt fires a
+  // visibility change, whose status read can land while `startNotice` is still queued behind a
+  // query — and that transient `running:false` used to take the control away the moment the user
+  // had earned it.
+  els.dailyToggle.disabled = !(status.running || status.dailyEnabled || els.noticeToggle.checked);
   els.dailyDue.textContent = status.dailyEnabled
     ? `下次约 ${formatSpan(status.nextDueIn)}后`
     : '未开启';

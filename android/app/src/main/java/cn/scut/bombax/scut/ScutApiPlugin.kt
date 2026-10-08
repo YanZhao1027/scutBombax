@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import cn.scut.bombax.scut.notice.BalanceNoticeService
@@ -23,6 +22,14 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
+
+/** The alias the notification permission is asked under; see `requestNoticePermission`.
+ *
+ * A file-level constant rather than a companion one, because annotation arguments are resolved
+ * outside the class body and cannot see it. */
+private const val NOTICE_PERMISSION_ALIAS = "notifications"
 
 /**
  * The only bridge between the WebView and SCUT.
@@ -34,14 +41,17 @@ import com.getcapacitor.annotation.CapacitorPlugin
  * The stack itself is [ScutRuntime], which is process-wide and shared with the notification
  * service. That sharing is the whole reason at-most-one-in-flight survives the daily alarm.
  */
-@CapacitorPlugin(name = "ScutApi")
+@CapacitorPlugin(
+    name = "ScutApi",
+    permissions = [
+        Permission(alias = NOTICE_PERMISSION_ALIAS, strings = [Manifest.permission.POST_NOTIFICATIONS])
+    ]
+)
 class ScutApiPlugin : Plugin() {
 
     companion object {
         /** Version of the JS-facing surface, bumped when a method is added. */
         const val BRIDGE_VERSION = "2"
-
-        private const val NOTICE_PERMISSION_REQUEST = 0xB1
     }
 
     /** Capacitor exposes a nullable context; the activity is always there once the bridge is up. */
@@ -206,14 +216,32 @@ class ScutApiPlugin : Plugin() {
 
     @PluginMethod
     fun requestNoticePermission(call: PluginCall) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val activity = activity ?: return
-            ActivityCompat.requestPermissions(
-                activity,
-                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                NOTICE_PERMISSION_REQUEST
-            )
+        // Below Android 13 the runtime permission does not exist, and if it is already granted
+        // there is nothing to ask — either way, answer with the real state.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || noticePermissionGranted()) {
+            submit(call) { noticeJson() }
+            return
         }
+        // Hand the call to Capacitor's activity-result launcher so it resolves **after** the
+        // person answers the dialog. Answering immediately used to read `granted=false` while the
+        // dialog was still open, which made the page revert its own switch and left the user
+        // toggling twice — found during the 2026-10-08 release acceptance.
+        requestPermissionForAlias(NOTICE_PERMISSION_ALIAS, call, "handleNoticePermissionResult")
+    }
+
+    /**
+     * The permission dialog is gone; answer with the system's state rather than with the callback
+     * map, so this response and `noticeStatus()` can never disagree.
+     *
+     * **The signature is one parameter, and Capacitor's reflection will crash the app if it is
+     * not.** `Plugin.triggerPermissionCallback` invokes `method.invoke(this, savedCall)` — a first
+     * version of this method took `(call, grantResults)` as the javadoc suggests, and the app died
+     * with `IllegalArgumentException: Wrong number of arguments; expected 2, got 1` the moment the
+     * user answered the dialog (seen on the release build, 2026-10-08 16:54:24). The grant result
+     * is not needed anyway: the state is read from the system below.
+     */
+    @PermissionCallback
+    fun handleNoticePermissionResult(call: PluginCall) {
         submit(call) { noticeJson() }
     }
 

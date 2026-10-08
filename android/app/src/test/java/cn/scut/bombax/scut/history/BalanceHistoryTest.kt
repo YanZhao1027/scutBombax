@@ -2,6 +2,7 @@ package cn.scut.bombax.scut.history
 
 import cn.scut.bombax.scut.billing.BalanceReading
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -127,6 +128,37 @@ class BalanceHistoryTest {
         assertEquals(SnapshotSource.NIGHTLY, SnapshotSource.from("NIGHTLY"))
         assertEquals(SnapshotSource.UNKNOWN, SnapshotSource.from("definitely-not-a-source"))
         assertEquals(SnapshotSource.UNKNOWN, SnapshotSource.from(null))
+    }
+
+    @Test
+    fun `the recorded log line carries presence flags and nothing else`() {
+        // This line is the only way to see the history feature work on a release build, so it is
+        // also the one place a balance or a room could leak into logcat by accident.
+        val row = snapshot(at = 1_791_436_553_952L, electric = 31.13, water = 28.2)
+        val line = HistoryLogic.recordLogLine(row)
+
+        assertEquals(
+            "stage=history result=recorded source=nightly electric=true water=true ac=false",
+            line
+        )
+        assertFalse(line.contains("31.13"))
+        assertFalse(line.contains("28.2"))
+        assertFalse(line.contains(room))
+        assertFalse(line.contains(row.profileId))
+        assertFalse(line.contains("1791436553952"))
+    }
+
+    @Test
+    fun `a missing balance is logged as absent, not as a number`() {
+        val partial = BalanceHistoryStore.snapshotOf(
+            BalanceReading("DXC", room, null, 28.2, null, "元", "", "", 1_791_436_553_952L),
+            atMillis = 1_791_436_553_952L,
+            source = SnapshotSource.MANUAL
+        )!!
+        assertEquals(
+            "stage=history result=recorded source=manual electric=false water=true ac=false",
+            HistoryLogic.recordLogLine(partial)
+        )
     }
 
     @Test
