@@ -23,7 +23,12 @@
     </header>
 
     <main>
-      <section id="results-panel" hidden>
+      <!--
+        The reading and the trend. NOT gated on a session: the moment the numbers are most needed
+        is when the network is down, the session expired, or the user signed out — and a stored
+        reading is still the best estimate they have, as long as it says when it was taken.
+      -->
+      <section id="history-panel" hidden>
         <p class="room"><strong id="room-name">宿舍</strong><span id="user-name"></span></p>
 
         <figure class="electric" aria-live="polite">
@@ -36,11 +41,7 @@
           <span id="ac-row" hidden>空调 <strong id="ac-value">—</strong><span id="ac-unit"></span></span>
         </p>
 
-        <p class="meta">
-          <button id="query-button" type="button">刷新</button>
-          <span>更新 <span id="updated-at">等待查询</span></span>
-          <span id="query-state"></span>
-        </p>
+        <p class="meta"><span>更新 <span id="updated-at">等待查询</span></span></p>
 
         <p id="history-note" class="history-note" role="status" aria-live="polite" hidden></p>
 
@@ -60,6 +61,14 @@
           <ul id="trend-increases" class="trend-increases"></ul>
           <p id="trend-empty" class="hint" hidden>暂无电费历史。查询成功后会自动记录。</p>
         </section>
+      </section>
+
+      <!-- Everything that can talk to the school, or schedule a talk to it. Session-gated. -->
+      <section id="results-panel" hidden>
+        <p class="meta">
+          <button id="query-button" type="button">刷新</button>
+          <span id="query-state"></span>
+        </p>
 
         <p class="notice-line">
           <label><input id="notice-toggle" type="checkbox" />常驻通知</label>
@@ -154,6 +163,10 @@
           <button id="health-btn" type="button" class="quiet">健康检查</button>
           <button id="refresh-token-btn" type="button" class="quiet">测试 refresh_token</button>
           <button id="clear-btn" type="button" class="quiet danger">清除登录状态</button>
+          <button id="clear-history-btn" type="button" class="quiet danger">清除本机历史</button>
+        </p>
+        <p class="hint">
+          退出登录不会删除本机历史；历史只在单独确认后被清除。
         </p>
         <p class="hint">
           学校会下发 refresh_token，但实测不接受 <code>grant_type=refresh_token</code>；

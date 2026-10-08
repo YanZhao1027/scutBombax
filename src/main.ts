@@ -12,6 +12,7 @@ import {
 } from './types';
 import './styles.css';
 import { drawElectricTrend } from './trend';
+import { deriveView, historyCaption } from './view';
 
 /**
  * Look up an element by id, and fail loudly at module load if it is not there.
@@ -42,6 +43,7 @@ const els = {
   loginStatus: $<HTMLParagraphElement>('login-status'),
   panelLogin: $<HTMLElement>('login-panel'),
   panelResults: $<HTMLElement>('results-panel'),
+  historyPanel: $<HTMLElement>('history-panel'),
   pill: $<HTMLElement>('session-pill'),
   room: $<HTMLElement>('room-name'),
   userName: $<HTMLElement>('user-name'),
@@ -73,11 +75,20 @@ const els = {
   nativeLog: $<HTMLElement>('native-log'),
   refreshTokenBtn: $<HTMLButtonElement>('refresh-token-btn'),
   healthBtn: $<HTMLButtonElement>('health-btn'),
-  clearBtn: $<HTMLButtonElement>('clear-btn')
+  clearBtn: $<HTMLButtonElement>('clear-btn'),
+  clearHistoryBtn: $<HTMLButtonElement>('clear-history-btn')
 };
 
 const state = {
   session: null as SessionInfo | null,
+  /** There is at least one stored reading on this device, live or not. */
+  hasHistory: false,
+  /** The figures on screen came from a query that just succeeded. */
+  live: false,
+  /** When the stored reading on screen was taken, so the caption can name its own age. */
+  storedAt: null as number | null,
+  /** Why the school could not be reached, when there is a reason to give. */
+  storedReason: null as string | null,
   bills: null as Bills | null,
   captchaKey: '',
   querying: false
@@ -162,14 +173,44 @@ const applyPrefs = (authenticated: boolean): void => {
   }
 };
 
+/**
+ * Applies the view rule from `view.ts`: reading and trend whenever there is something to read,
+ * school-facing controls only with a session, login whenever there is not.
+ *
+ * Every visibility change in the app goes through here. That is not tidiness — the first version
+ * set these flags in three places and one of them was inside the logout path, which is how
+ * signing out ended up erasing numbers the device still had.
+ */
+const applyView = (): void => {
+  const view = deriveView({
+    authenticated: Boolean(state.session?.authenticated),
+    live: state.live,
+    hasHistory: state.hasHistory
+  });
+  els.historyPanel.hidden = !view.historyVisible;
+  els.panelResults.hidden = !view.controlsVisible;
+  els.panelLogin.hidden = !view.loginVisible;
+  // The caption is produced here rather than by each caller, because "every caller remembers to
+  // label a stale reading" is exactly the kind of rule that fails silently. Anything that is not
+  // a live reading says so, with its own timestamp.
+  if (view.caption === 'history' && state.storedAt !== null) {
+    els.historyNote.textContent = historyCaption(formatWhen(state.storedAt), state.storedReason);
+    els.historyNote.hidden = false;
+  } else {
+    els.historyNote.hidden = true;
+    els.historyNote.textContent = '';
+  }
+};
+
 const renderSession = (session: SessionInfo | null): void => {
   state.session = session;
   const authed = Boolean(session?.authenticated);
   els.pill.dataset.state = authed ? 'ok' : 'off';
   els.pill.innerHTML = `<i></i> ${authed ? '已登录' : '未登录'}`;
-  els.panelResults.hidden = !authed;
-  // One screen at a time: the login form has nothing to do above a live session.
-  els.panelLogin.hidden = authed;
+  // The reading and the trend are not session-gated, so signing out leaves the last known
+  // numbers on screen with their age; only the controls that can reach the school disappear.
+  if (!authed) state.live = false;
+  applyView();
   // The picker must not disagree with the session it belongs to: a restored DXC session with
   // GZIC showing would make the next login query the wrong campus.
   if (authed && session?.campus) els.campus.value = session.campus;
@@ -179,8 +220,8 @@ const renderSession = (session: SessionInfo | null): void => {
       } · refresh_token ${session?.canRefresh ? '已下发' : '无'}`
     : '会话：未登录';
   if (!authed) {
-    state.bills = null;
-    renderBills(null);
+    // `state.bills` deliberately survives: it is the last thing the school actually said, and
+    // clearing it here is what used to blank a screen that still had something to show.
     refresher.stop();
     syncIntervalUi();
   }
@@ -242,18 +283,29 @@ const formatSpan = (seconds: number): string => {
   return `${Math.max(minutes, 1)} 分`;
 };
 
-const renderBills = (bills: Bills | null): void => {
-  state.bills = bills;
-  if (bills && !els.trendPanel.hidden) void refreshTrend();
+/**
+ * Paints a reading, and records whether it is live.
+ *
+ * `null` no longer wipes the figures. It used to, from inside `renderSession`, which meant that
+ * losing a session — the exact moment a stored reading is worth something — blanked the screen.
+ * Now `null` only means "there is nothing to paint yet", and `applyView` decides whether the
+ * panel is shown at all.
+ */
+const renderBills = (bills: Bills | null, live = true): void => {
   if (!bills) {
-    els.room.textContent = '宿舍';
-    for (const el of [els.electric, els.water, els.ac]) el.textContent = '—';
-    els.acRow.hidden = true;
-    els.updatedAt.textContent = '等待查询';
-    els.historyNote.hidden = true;
-    els.historyNote.textContent = '';
+    state.bills = null;
+    state.live = false;
+    state.storedAt = null;
+    applyView();
     return;
   }
+  state.bills = bills;
+  state.live = live;
+  state.storedAt = bills.updatedAt;
+  // A reading the school just confirmed is also a row in the local store: `fetchBills` writes it
+  // before it returns, so claiming history exists here is a fact rather than a hope.
+  state.hasHistory = true;
+  if (!els.trendPanel.hidden) void refreshTrend();
   els.room.textContent = bills.room || '未知房间';
   els.electric.textContent = formatValue(bills.electric);
   els.water.textContent = formatValue(bills.water);
@@ -267,6 +319,7 @@ const renderBills = (bills: Bills | null): void => {
   els.updatedAt.textContent = new Date(bills.updatedAt).toLocaleTimeString('zh-CN', {
     hour12: false
   });
+  applyView();
 };
 
 let trendRange: number | 'all' = 30;
@@ -337,17 +390,22 @@ const formatWhen = (millis: number): string => {
  * number presented as if it were current is not. So the note names the age and says plainly that
  * this is not a live figure, and the timestamp line keeps showing when it was actually taken.
  */
-const showLastKnown = async (reason: string): Promise<void> => {
+const showLastKnown = async (reason: string | null): Promise<void> => {
   try {
     const snapshot = await api.lastSnapshot();
     if (!snapshot) {
-      els.historyNote.hidden = true;
-      els.historyNote.textContent = '';
+      // Nothing stored: the placeholders stay, and no caption is invented for them.
+      state.hasHistory = false;
+      applyView();
       return;
     }
-    renderBills(snapshot);
-    els.historyNote.textContent = `显示的是 ${formatWhen(snapshot.updatedAt)} 的历史记录（${reason}），不是实时余额`;
-    els.historyNote.hidden = false;
+    // A query that already succeeded owns the screen. The stored row behind it is the same
+    // reading, one round trip older, and painting it would replace a live number with a stale
+    // one and then have to label the result as history.
+    if (state.live) return;
+    state.hasHistory = true;
+    state.storedReason = reason;
+    renderBills(snapshot, false);
   } catch {
     // No history, or the store is unavailable: leave the empty cards rather than invent context.
     els.historyNote.hidden = true;
@@ -593,6 +651,24 @@ const wire = (): void => {
     })();
   });
   els.logoutButton.addEventListener('click', () => void clearSession(true));
+  // Separate from 退出, and it asks. Losing a session should not cost someone weeks of readings,
+  // and losing readings should not be a single careless tap either.
+  els.clearHistoryBtn.addEventListener('click', () => {
+    void (async () => {
+      const sure = window.confirm('将删除本机保存的全部余额历史与趋势，登录状态不受影响。确定吗？');
+      if (!sure) return;
+      try {
+        const { deleted } = await api.clearHistory();
+        state.hasHistory = false;
+        state.live = false;
+        renderBills(null);
+        if (!els.trendPanel.hidden) void refreshTrend();
+        setStatus(els.resultsStatus, `本机历史已清除（${deleted} 条）。`, 'ok');
+      } catch (error) {
+        setStatus(els.resultsStatus, describeError(error), 'error');
+      }
+    })();
+  });
   els.clearBtn.addEventListener('click', () => void clearSession(true));
   els.healthBtn.addEventListener('click', () => {
     void api
@@ -679,6 +755,10 @@ const boot = async (): Promise<void> => {
   try {
     const result = await api.health();
     renderSession(result.session);
+    // The stored reading is a local read, so it runs on every start — signed out is precisely
+    // the state where it is the only thing worth showing. No school request is involved, and a
+    // query that later succeeds replaces it with a live reading.
+    void showLastKnown(null);
     // Reflect a service the OS may still be holding on to, rather than showing an off switch
     // next to a live notification. A still-armed daily alarm implies one too: waking that service
     // is the only thing the alarm does.

@@ -1172,3 +1172,39 @@ works but drops the association, and an open campus network will not auto-join a
 cost 40 minutes of manual rejoining earlier today. `settings put global http_proxy 127.0.0.1:1`
 fails every connection in 2 ms instead, leaves the association intact, and is undone with
 `:0`. Verified by a 200 from the captcha endpoint after restoring.
+
+## 16. History outside the login gate (PR #1 follow-up, host-verified)
+
+The trend panel and the offline caption both lived inside `#results-panel`, which is hidden when
+there is no session — so the feature that exists for "the network is down / the session expired /
+I signed out" was unreachable in exactly those three states. The same rule was broken from the
+other side by `renderSession`, which called `renderBills(null)` on sign-out and blanked figures
+the device still held.
+
+Restructured: `#history-panel` (reading, caption, trend) is shown whenever there is something to
+read, `#results-panel` now holds only what can reach the school (query, auto-refresh, the two
+notification switches, logout), and `#login-panel` is shown whenever there is no session. All
+three are set in one place, from `deriveView({ authenticated, live, hasHistory })` in
+`src/view.ts` — a pure function with nine host tests, because "every caller remembers to gate and
+label correctly" is the assumption that produced the bug.
+
+Two rules worth stating:
+
+- **The caption is produced by the view, not by the caller.** Anything on screen that is not a
+  live reading gets `显示的是 … 的历史记录…不是实时余额`, with its own timestamp, whether the
+  reason is a network failure, an expired session or simply signing out. A caller can no longer
+  paint a stored reading and forget to label it.
+- **A live reading owns the screen.** `showLastKnown()` returns early while `state.live` is true:
+  the stored row behind a fresh query is the same number one round trip older, and painting it
+  would replace a live figure with a stale one and then have to describe the result as history.
+
+`清除本机历史` is now a separate action under 会话与诊断, behind its own confirmation, and
+`退出` no longer touches it. `window.confirm` failing open would be the wrong direction, so the
+handler requires a truthy answer before calling `clearHistory()`.
+
+**Status: host-verified only.** `pnpm build`, 39 vitest (17 refresh + 13 trend + 9 view),
+`check:dom` and 116 JVM tests pass, and the release APK builds. It is **not installed**: tonight's
+23:00 sample has to be taken by the build already on the phone, and an install would clear the
+alarm and stop the service mid-window. Device acceptance of the five states — signed in, signed
+out with history, signed out without history, after 退出, after a session expires — follows the
+23:00 check.
