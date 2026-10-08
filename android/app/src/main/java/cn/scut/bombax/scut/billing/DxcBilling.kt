@@ -47,6 +47,23 @@ object DxcParser {
         return raw.toDoubleOrNull()
     }
 
+    /**
+     * The **field names** of `resultObject`, sorted.
+     *
+     * This exists to settle a semantic question the school's answer never states: `leftMoney`
+     * is read for both the electricity and the water item, and the response carries no unit
+     * text, so whether the number is 元 or 度/kWh is currently inferred from the field name
+     * alone — and the user reports that the official page shows a 度 figure and a 元 figure
+     * side by side (2026-10-08). Names are protocol structure, not user data: **no value is
+     * ever returned by this function**, and it is logged once per successful query so the next
+     * live run can tell us whether a second, unit-bearing field exists that we are ignoring.
+     */
+    fun resultKeys(json: JSONObject): String {
+        val result = json.optJSONObject("resultObject") ?: return "none"
+        val names = result.keys().asSequence().toSortedSet()
+        return if (names.isEmpty()) "none" else names.joinToString(",")
+    }
+
     fun message(json: JSONObject): String? =
         json.optString("message").takeIf { it.isNotBlank() }
 

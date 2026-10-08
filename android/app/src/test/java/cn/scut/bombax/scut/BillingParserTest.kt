@@ -138,6 +138,28 @@ class DxcParserTest {
     }
 
     @Test
+    fun `resultKeys reports names and never a value`() {
+        // This string goes into logcat once per successful query, so the test is the guarantee:
+        // a balance, a room or a student number must not be able to ride along with the names.
+        val json = JSONObject(
+            """{"statusCode":"200","resultObject":{
+               "leftMoney":"128.50","roomName":"G9-301","studentNo":"202199999",
+               "powerLeft":52.0}}"""
+        )
+        val keys = DxcParser.resultKeys(json)
+        assertEquals("leftMoney,powerLeft,roomName,studentNo", keys)
+        assertFalse(keys.contains("128.50"))
+        assertFalse(keys.contains("G9-301"))
+        assertFalse(keys.contains("202199999"))
+    }
+
+    @Test
+    fun `resultKeys degrades to none instead of throwing`() {
+        assertEquals("none", DxcParser.resultKeys(JSONObject("""{"statusCode":"200"}""")))
+        assertEquals("none", DxcParser.resultKeys(JSONObject("""{"resultObject":{}}""")))
+    }
+
+    @Test
     fun `a failed dfyc call names the stage only`() {
         var caught: ScutException? = null
         try {

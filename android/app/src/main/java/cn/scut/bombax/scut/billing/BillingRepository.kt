@@ -310,7 +310,13 @@ class BillingRepository(
                 "${Stages.DXC_AMMETER}=${electric != null} ${Stages.DXC_WATER}=${waterValue != null}"
             )
         }
-        Diag.event("stage=dxc result=ok room=present electric=true water=true ac=none")
+        // Field names only, never values: this is the probe that will settle whether the
+        // number we read is 元 or 度 (see DxcParser.resultKeys).
+        Diag.event(
+            "stage=dxc result=ok room=present electric=true water=true ac=none " +
+                "ammeterKeys=${DxcParser.resultKeys(ammeterJson)} " +
+                "waterKeys=${DxcParser.resultKeys(waterJson)}"
+        )
         return BalanceReading(
             campus = "DXC",
             room = room,
