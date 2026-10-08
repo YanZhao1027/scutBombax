@@ -13,10 +13,20 @@ import {
 import './styles.css';
 import { drawElectricTrend } from './trend';
 
+/**
+ * Look up an element by id, and fail loudly at module load if it is not there.
+ *
+ * The constraint is `Element` rather than `HTMLElement` because the trend chart needs an
+ * `SVGSVGElement`, which is not an `HTMLElement`. That also means the cast cannot be a plain
+ * `as T`: an `HTMLElement` does not sufficiently overlap an arbitrary `T extends Element`, and
+ * `tsc --noEmit` rejects it (TS2352) — which is a build failure, not a lint nit, because
+ * `pnpm build` runs the typecheck first. The double cast through `unknown` is the honest way to
+ * say "the id is the contract here"; `pnpm check:dom` is what enforces it.
+ */
 const $ = <T extends Element>(id: string): T => {
   const el = document.getElementById(id);
   if (!el) throw new Error(`missing element #${id}`);
-  return el as T;
+  return el as unknown as T;
 };
 
 const els = {
