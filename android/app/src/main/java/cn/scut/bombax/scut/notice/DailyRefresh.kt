@@ -183,6 +183,7 @@ object DailyRefresh {
         return prefs(context).edit().remove(KEY_TEST_DUE).commit()
     }
 
+    @Synchronized
     fun cancelTest(context: Context) {
         prefs(context).edit().remove(KEY_TEST_DUE).commit()
         runCatching { alarmManager(context)?.cancel(pendingIntent(context, ACTION_TEST, TEST_REQUEST_CODE, 0L)) }

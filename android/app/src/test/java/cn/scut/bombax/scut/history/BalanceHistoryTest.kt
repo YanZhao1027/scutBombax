@@ -126,6 +126,7 @@ class BalanceHistoryTest {
         assertEquals(SnapshotSource.MANUAL, SnapshotSource.from("manual"))
         assertEquals(SnapshotSource.AUTO, SnapshotSource.from(" auto "))
         assertEquals(SnapshotSource.NIGHTLY, SnapshotSource.from("NIGHTLY"))
+        assertEquals(SnapshotSource.TEST, SnapshotSource.from("test"))
         assertEquals(SnapshotSource.UNKNOWN, SnapshotSource.from("definitely-not-a-source"))
         assertEquals(SnapshotSource.UNKNOWN, SnapshotSource.from(null))
     }

@@ -279,6 +279,7 @@ const renderDaily = (status: NoticeState): void => {
     ? `下次约 ${formatSpan(status.nextDueIn)}后`
     : '未开启';
   els.snapshotTestButton.disabled = !status.running || !state.session?.authenticated;
+  els.snapshotTestButton.dataset.pending = String(status.testPending);
   els.snapshotTestButton.textContent = status.testPending
     ? '取消本次测试'
     : '约 5 分钟后测试一次';
@@ -652,7 +653,7 @@ const wire = (): void => {
   });
 
   els.snapshotTestButton.addEventListener('click', () => {
-    const cancel = els.snapshotTestButton.textContent === '取消本次测试';
+    const cancel = els.snapshotTestButton.dataset.pending === 'true';
     els.snapshotTestButton.disabled = true;
     const operation = cancel ? api.cancelSnapshotTest() : api.scheduleSnapshotTest();
     void operation.then((status) => {
