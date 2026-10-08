@@ -44,6 +44,23 @@
 
         <p id="history-note" class="history-note" role="status" aria-live="polite" hidden></p>
 
+        <p class="meta"><button id="trend-toggle" class="quiet" type="button" aria-expanded="false" aria-controls="trend-panel">查看电费趋势 →</button></p>
+        <section id="trend-panel" class="trend-panel" aria-label="电费历史" hidden>
+          <h2>电费趋势</h2>
+          <p id="trend-summary" class="hint">仅显示本机历史记录</p>
+          <div class="trend-ranges" role="group" aria-label="趋势时间范围">
+            <button type="button" data-trend-range="7">7 天</button>
+            <button type="button" data-trend-range="30" aria-pressed="true">30 天</button>
+            <button type="button" data-trend-range="90">90 天</button>
+            <button type="button" data-trend-range="all">全部</button>
+          </div>
+          <div class="trend-svg"><svg id="trend-svg" viewBox="0 0 360 224" role="img" tabindex="0" aria-label="电费余额变化。触摸或使用方向键浏览记录。"></svg></div>
+          <p id="trend-selected" class="trend-selected" aria-live="polite"></p>
+          <h2 class="trend-subtitle">余额增项</h2>
+          <ul id="trend-increases" class="trend-increases"></ul>
+          <p id="trend-empty" class="hint" hidden>暂无电费历史。查询成功后会自动记录。</p>
+        </section>
+
         <p class="notice-line">
           <label><input id="notice-toggle" type="checkbox" />常驻通知</label>
           <span class="hint">把最近一次结果贴在通知栏；查询仍只发生在前台</span>

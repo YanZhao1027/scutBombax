@@ -11,6 +11,7 @@ import {
   type SnapshotSource
 } from './types';
 import './styles.css';
+import { drawElectricTrend } from './trend';
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
@@ -48,6 +49,13 @@ const els = {
   dailyToggle: $<HTMLInputElement>('daily-toggle'),
   dailyDue: $<HTMLElement>('daily-due'),
   historyNote: $<HTMLElement>('history-note'),
+  trendToggle: $<HTMLButtonElement>('trend-toggle'),
+  trendPanel: $<HTMLElement>('trend-panel'),
+  trendSvg: $<SVGSVGElement>('trend-svg'),
+  trendSummary: $<HTMLElement>('trend-summary'),
+  trendSelected: $<HTMLElement>('trend-selected'),
+  trendIncreases: $<HTMLUListElement>('trend-increases'),
+  trendEmpty: $<HTMLElement>('trend-empty'),
   logoutButton: $<HTMLButtonElement>('logout-button'),
   resultsStatus: $<HTMLElement>('results-status'),
   choices: $<HTMLElement>('refresh-choices'),
@@ -226,6 +234,7 @@ const formatSpan = (seconds: number): string => {
 
 const renderBills = (bills: Bills | null): void => {
   state.bills = bills;
+  if (bills && !els.trendPanel.hidden) void refreshTrend();
   if (!bills) {
     els.room.textContent = '宿舍';
     for (const el of [els.electric, els.water, els.ac]) el.textContent = '—';
@@ -248,6 +257,28 @@ const renderBills = (bills: Bills | null): void => {
   els.updatedAt.textContent = new Date(bills.updatedAt).toLocaleTimeString('zh-CN', {
     hour12: false
   });
+};
+
+let trendRange: number | 'all' = 30;
+let trendRequest = 0;
+
+/** Querying history is strictly local, unlike getBills. No chart-generated SCUT requests. */
+const refreshTrend = async (): Promise<void> => {
+  if (els.trendPanel.hidden) return;
+  const request = ++trendRequest;
+  try {
+    const history = await api.electricHistory();
+    if (request !== trendRequest || els.trendPanel.hidden) return;
+    drawElectricTrend({
+      svg: els.trendSvg,
+      summary: els.trendSummary,
+      selected: els.trendSelected,
+      increases: els.trendIncreases,
+      empty: els.trendEmpty
+    }, history, trendRange);
+  } catch {
+    if (request === trendRequest) els.trendSummary.textContent = '本地历史暂不可用';
+  }
 };
 
 const loadCaptcha = async (): Promise<void> => {
@@ -465,6 +496,22 @@ const clearSession = async (notify: boolean): Promise<void> => {
 };
 
 const wire = (): void => {
+  els.trendToggle.addEventListener('click', () => {
+    const opening = els.trendPanel.hidden;
+    els.trendPanel.hidden = !opening;
+    els.trendToggle.setAttribute('aria-expanded', String(opening));
+    els.trendToggle.textContent = opening ? '收起电费趋势 ↑' : '查看电费趋势 →';
+    if (opening) void refreshTrend();
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-trend-range]').forEach(button => {
+    button.addEventListener('click', () => {
+      trendRange = button.dataset.trendRange === 'all' ? 'all' : Number(button.dataset.trendRange);
+      document.querySelectorAll<HTMLButtonElement>('[data-trend-range]').forEach(item => {
+        item.setAttribute('aria-pressed', String(item === button));
+      });
+      void refreshTrend();
+    });
+  });
   els.loginForm.addEventListener('submit', (event) => {
     event.preventDefault();
     void submitLogin();
