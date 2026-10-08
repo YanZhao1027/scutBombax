@@ -1208,3 +1208,49 @@ handler requires a truthy answer before calling `clearHistory()`.
 alarm and stop the service mid-window. Device acceptance of the five states — signed in, signed
 out with history, signed out without history, after 退出, after a session expires — follows the
 23:00 check.
+
+## 17. The first real daily snapshot (2026-10-08 23:14, release build)
+
+PR #1 head `50709fe` (configurable clock + one-off verification alarm) was checked on the host
+first: `pnpm typecheck`, 43 vitest, `check:dom`, `pnpm build`, 122 JVM tests and
+`assembleRelease` all pass. The APK's certificate digest is still `ef607f9d…`, so it went on the
+phone with `adb install -r` — **no uninstall**, and the session and history came through
+untouched (`result=restored`, then a live query at 22:38:49).
+
+The user-selected slot was still the default 23:00. What actually happened:
+
+```text
+23:14:57.312  stage=daily   result=armed dueInSec=85502 hour=23 minute=0 api=34
+23:14:57.317  stage=snapshot result=fired lateSec=897 start=foreground-service nextInSec=85502
+23:14:57.9xx  dxc.redirect → thirdLogin → authorize → getCode  session-established
+23:14:57.929  dxc.userInfo 200 · 23:14:57.965 ammeterBalance 200 · 23:14:58.022 waterBalance 200
+23:14:58.028  stage=history result=recorded source=daily electric=true water=true ac=false
+23:14:58.038  stage=notice  result=shown updated=23:14
+23:14:58.038  stage=daily   result=ok
+```
+
+Five things this settles:
+
+1. **The whole chain works from a locked, Dozing phone with no user action**: alarm → receiver →
+   service → `ScutRuntime` → SQLite. `start=foreground-service` was allowed precisely because
+   the notice service was already alive — §13.3's constraint, now confirmed in the positive
+   direction on a release build.
+2. **The first row is labelled `daily`, not `nightly`** — the source split is real on device, and
+   the legacy rows still parse.
+3. **No drift.** The re-arm computed `origWhen 1791558000000`, exactly 86 400 000 ms after
+   tonight's slot: tomorrow 23:00:00, not 23:14. A late delivery does not move the schedule,
+   because the schedule is a wall-clock time and not an interval.
+4. **No crash, no restart.** The same process (`pid 13891`) that started at 22:38 handled the
+   delivery at 23:14; nothing was logged in `crash`, and the system never reported
+   `has died: fg SVC`.
+5. **The chosen time is a lower bound, not an appointment.** The alarm was due at 23:00:00 and
+   was delivered at 23:14:57 — `lateSec=897`, ~15 minutes — because the device was in Doze and
+   `setAndAllowWhileIdle` waits for a maintenance window. It fired at all because the phone was
+   charging and left on; on a deeper night it can be considerably later. The UI says
+   "每天尝试查询一次，系统可能延迟", which is the honest claim.
+
+Evidence: `evidence/logcat-2026-10-08-first-daily-snapshot.txt`.
+
+Still open on this round: the 约 5 分钟后测试一次 control and the five-state UI pass (signed in /
+signed out with history / signed out without / after 退出 / after expiry) both need a tap on an
+unlocked screen, which is the user's to give.
