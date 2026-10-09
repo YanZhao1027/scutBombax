@@ -1311,9 +1311,11 @@ an identifier and does not go in the evidence):
 
 The room is written as a placeholder here on purpose: the line above was transcribed from the
 accessibility tree, and the transcription initially carried the real identifier into the
-repository — which is exactly what §17.2's own rule forbids. Redacted in this commit; the value
-remains in the pushed history of `d98ac86`, so if this repository is ever opened to other people
-that commit needs filtering, not just the file.
+repository — which is exactly what §17.2's own rule forbids. The two documentation commits that
+carried it were replaced on 2026-10-09 by one commit with the **same tree** (`13eb1f91…`), so the
+identifier is unreachable from any ref on this branch now. What the rewrite does *not* do is make
+the replaced commit disappear from GitHub: fetching it by its pinned SHA still serves the old
+text, which is measured and recorded in `docs/RELEASE_ACCEPTANCE.md` §7.
 
 Three claims, each with its own evidence:
 

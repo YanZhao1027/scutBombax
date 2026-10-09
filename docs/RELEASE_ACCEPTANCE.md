@@ -36,7 +36,7 @@ adb shell dumpsys package cn.scut.bombax | grep -E "versionCode|versionName|flag
 
 ## 0.1 主机侧门禁，写这份报告时重跑了一遍
 
-在 HEAD `d98ac86`（§17.2 之后，仅文档改动）上：
+在 §17.2 之后的那个文档 HEAD（历史整理后为 `89cd718`，树 `13eb1f91…`，内容与整理前逐字节相同）上：
 
 | 命令 | 结果 |
 | --- | --- |
@@ -57,7 +57,7 @@ adb shell dumpsys package cn.scut.bombax | grep -E "versionCode|versionName|flag
 | 1 | 暂不做历史导入/导出；切换签名时允许清空 | 按决议执行：代码里没有任何导入/导出功能；卸载 Debug → 安装 Release，会话与历史确实被丢弃 | RUNTIME_VERIFIED | §15 / §15.1 |
 | 2 | 确认 Release APK 用已验证的正式签名，`versionCode=2`、`versionName=0.2.0` | 见 §0，今天重新核过，APK 字节与签名指纹都对上 | RUNTIME_VERIFIED | §14.6 / 本文 §0 |
 | 3 | 切换前保留脱敏证据与测试报告 | `release-swap-2026-10-08.txt`（含 pristine 一份）留存，明确注明它是**记录**而非还原路径；历史原始行导出为 `history-2026-10-08-first-rows.txt`，只含数值、不含房间号 | RUNTIME_VERIFIED | §15 / `EVIDENCE_INDEX.md` |
-| 4 | 首次登录由用户本人完成；禁止记录密码、token、宿舍号 | 两次登录（昨日下午、今晨 10:2x）都由用户亲手输入；应用日志与通知内容不含宿舍号。**但 §17.2 的一次屏幕转写把宿舍号写进了仓库（提交 `d98ac86`），本次提交已就地脱敏，历史里那条仍在**——见 §4 | RUNTIME_VERIFIED（凭据侧）/ 已修正的文档失误（标识符侧） | §15.3 / 本文 §4 |
+| 4 | 首次登录由用户本人完成；禁止记录密码、token、宿舍号 | 凭据侧守住：两次登录（昨日下午、今晨 10:2x）都由用户亲手输入，应用日志与通知内容不含宿舍号。标识符侧**违反过一次**：§17.2 的屏幕转写把宿舍号写进了仓库，现已随历史整理从分支上移除——见 §4 与 §7 | RUNTIME_VERIFIED（凭据侧）/ 已修正的文档失误（标识符侧） | §15.3 / 本文 §4 / 本文 §7 |
 | 5 | 装后 5 项检查（登录查询 / 首条快照 / 离线冷启动历史 / 通知状态 / 23:00 闹钟登记） | 5 项全部观测到 | RUNTIME_VERIFIED | §15.3 |
 | 6 | 23:00 后台触发：不崩溃；被拒就如实记录；成功则形成一条 nightly 快照；错过不补查 | 23:14:57 投递（`lateSec=897`），全链路成功、写入 `source=daily`、进程未死、重排到次日 23:00:00 且不补查 | RUNTIME_VERIFIED | §17 |
 | 7 | 提交严格区分已验证/未验证的验收报告 | 本文；未验证项集中在 §3 | — | — |
@@ -94,6 +94,10 @@ adb shell dumpsys package cn.scut.bombax | grep -E "versionCode|versionName|flag
 （§13.3 那条约束的正向确认）；同一进程（22:38 起）处理完投递，`crash` 缓冲区无记录，系统未报
 `has died: fg SVC`。UI 文案"系统可能延迟"因此不是免责套话，而是实测下界。
 
+这条只算**一次**端到端成功：它证明链路能通，不证明以后每次都准点、也不证明每次都能在后台成功
+执行。Doze 深度、充电状态、Wi-Fi 关联是否在维护窗口里可用，都不在应用控制内；`setAndAllowWhileIdle`
+本身就是不精确闹钟。连续多日的投递成功率见 §3。
+
 **一次性验证闹钟（§17.1）。** 用户点"约 5 分钟后测试一次"后：待决测试闹钟被消费、图表摘要
 7 → 10 条、最新点 10/9 09:19 ¥22.38、按钮回到空闲标签且 `testPending=false`（只能由
 `consumeTest()` 产生）。三个独立信号一致。
@@ -114,12 +118,13 @@ adb shell dumpsys package cn.scut.bombax | grep -E "versionCode|versionName|flag
 
 | 项 | 为什么还没验 | 谁能解除 |
 | --- | --- | --- |
-| 重新登录后 23:00 闹钟重新登记 | 退出后按设计零闹钟；下一次登录归用户 | 用户登录 → 我打开两个开关并读 `dumpsys alarm` |
+| 重新登录后每日闹钟按**所选时刻**重新登记 | 退出后按设计零闹钟；下一次登录归用户。23:00 不再是要求，只是当时的默认值 | 用户登录 → 我打开两个开关、设时刻、读 `dumpsys alarm` |
 | 第 12 条记录 `source=login` | 同上，需要一次真实登录 | 用户登录 |
 | 第 11 条（今晨 10:25）的 source 标签 | release 不可 `run-as`（正确行为），且该行写入时本次日志抓取尚未开始（12:59 起） | 无法回溯，保持未验证 |
 | 会话过期状态（`authenticated=false` + 原因串） | 只能等令牌自然过期或人为失效，不制造 | 下次自然发生时记录 |
+| 连续多日投递成功率（准点性、后台成功率） | 目前只有一次自然投递样本（23:14:57 / 迟到 897 s）+ 一次定时测试样本 | 让开关继续开着，按天累积；不为此增加任何补查逻辑 |
 | 无会话且无历史（空态） | 验证它要清空本机唯一一条真实序列 | 明确不在本机做 |
-| §17.1 里 `stage=snapshotTest result=fired/ok` 两行日志本身 | 检视时已被 logcat 轮转掉；结论由消费位点+行数+图表三个旁证支撑 | 下次测试时先起抓取 |
+| §17.1 里 `stage=snapshotTest result=fired/ok` 两行日志本身 | 检视时已被 logcat 轮转掉；结论由消费位点+行数+图表三个旁证支撑 | **下一次测试前先起日志抓取**（已排入计划） |
 | `source=daily` 行的原始时间戳核对 | 同 `run-as` 限制，靠去标识日志行 + 图表条数间接确认 | 结构上无法在本机加强 |
 | GZIC 余额 | 校区不同，需要 GZIC 账号 | 用户 |
 | 水费单位、`leftEle/leftFreeEle/leftFreeMoney/elePrice` 语义 | 接口没声明单位；电费"元"是 USER_VERIFIED，不是 API 事实 | 观察积累，见 §5 |
@@ -139,9 +144,14 @@ adb shell dumpsys package cn.scut.bombax | grep -E "versionCode|versionName|flag
 - 屏幕证据优先从 `uiautomator` 的可访问性树读取文字，而不是截图：房间号是标识符，不进仓库、
   不进证据文件。历史 PNG 截图只在早期（Debug 阶段）留存，且已归档在仓库外的 `evidence/`。
 - **这条规则本轮被我自己违反过一次。** §17.2 记录退出后屏幕时，把可访问性树里的房间号原样
-  抄进了 `DEVICE_VERIFICATION.md`，随 `d98ac86` 推到了远端。本次提交把文件里的那处替换成
-  `<楼栋-房号>`，并在这里写明：**文件已脱敏，git 历史未改**（不为此强推重写共享分支）。
-  如果这个仓库将来要对其他人开放，需要先过滤该提交。
+  抄进了 `DEVICE_VERIFICATION.md`，随那两个文档提交推到了远端。处置分两步：先把文件里
+  那处换成 `<楼栋-房号>`，再按用户决定把携带它的两个文档提交整理成一个（`89cd718`），整理前后
+  **整棵树 SHA 相同**（`13eb1f91…`）——过程见 §7。仓库是公开的，所以这不是形式问题。
+- **强推不等于内容消失，这一点是实测而非推测。** 整理后按固定 SHA 取旧提交
+  （`raw.githubusercontent.com/…/<旧 SHA>/docs/DEVICE_VERIFICATION.md`）仍能取到含房间号的旧文本；
+  取新 HEAD 只有占位符。要让旧对象也失效，得向 GitHub Support 申请清理 PR 引用与缓存，
+  受理与否由 GitHub 判断。旧提交同时被记录在 `refs/pull/1/merge` 这类 GitHub 自建引用里，
+  下一次推送会由 GitHub 用新 HEAD 重新生成它。
 - 密码不进任何存储（`hint` 里也这样对用户写着）；token 只进 Keystore 背书的 AES-256-GCM
   不可导出密钥加密的 `noBackupFilesDir/scut-session.bin`，`allowBackup=false`。
 - 本轮验收中，助手侧从未输入过任何凭据，两次登录都由用户亲手完成。
@@ -192,8 +202,52 @@ KDoc 已明写这一点；任何面向多用户或可导出的版本发布之前
   维护，工具链不去纠正它。
 - 下一次正式发布使用新标签 `v0.2.2` / `versionCode=3`，并且**由构建产出反推记录**（任务 #22），
   而不是手工记账。
-- PR #1 保持 Draft，测试通过后只更新、不自动合并（用户的明确指示）。本报告与上一节两处脱敏
-  只是文档提交，代码仍未动；远端分支 `feat/electric-trend-v3` 在此之前是 `d98ac86`。
+- PR #1 保持 Draft，测试通过后只更新、不自动合并（用户的明确指示）。本轮所有改动都只有文档，
+  应用代码与 APK 字节没动。
+
+### 7.1 房号泄露的历史整理：过程、判据、边界
+
+判据由用户提出，也是这份记录唯一有意义的通过条件：**整理前后完整 Git tree SHA 必须一致**，
+即只换历史，不换内容。
+
+```bash
+# 1) 先把可恢复的东西放到仓库外，权限收紧
+git bundle create ../backups/feat-electric-trend-v3-PRE-REWRITE-2026-10-09.bundle \
+  refs/heads/feat/electric-trend-v3
+git bundle verify …            # "The bundle records a complete history"
+chmod 600 ../backups/*.bundle  # 这份备份里含未脱敏文本，因此目录 0700、文件 0600
+
+# 2) 确认远端没有别人在推（lease 用远端当时的值 <旧 HEAD>，而不是本地跟踪引用）
+git ls-remote origin | grep electric-trend
+git ls-remote origin | grep 'pull/1/head'
+
+# 3) 用同一个树、同一个父提交，造一个整理后的提交
+git commit-tree 13eb1f918ad74dfba15affc6d891029f44d9019a -p 1caf532… -F msg   # → 89cd718
+git update-ref refs/heads/feat/electric-trend-v3 89cd718
+
+# 4) 判据核对
+git rev-parse <旧 HEAD>^{tree} 89cd718^{tree}   # 两行相同
+git diff --stat <旧 HEAD> 89cd718               # 空
+git status --short                              # 空
+for c in $(git rev-list feat/electric-trend-v3); do git grep -qF '<房间号>' $c; done   # 0 命中
+
+# 5) 只强推这一条 PR 分支
+git push --force-with-lease=refs/heads/feat/electric-trend-v3:<旧 HEAD> \
+  git@github.com:YanZhao1027/scutBombax.git feat/electric-trend-v3:refs/heads/feat/electric-trend-v3
+```
+
+`<旧 HEAD>` 的具体 SHA **不写在这份公开文档里**：旧对象仍可按固定 SHA 取到（见 §4），把 SHA 印在
+文档上等于给还在服务的旧内容做索引。它记在本地 `backups/README-pre-rewrite.txt`（0600），
+向 GitHub Support 提清理申请时用那份。
+
+结果：`+ <旧 HEAD>...89cd718 …（forced update）`，lease 生效说明远端确实没被别人移动过；
+`refs/pull/1/head` 随推送前进到 `89cd718`。约束也都核对过——`refs/heads/main` 仍是
+`2ccc3ed…`，`alpha` / `v0.1.0` / `v0.1-classic-ui` / `v0.2.0` / `v0.2.1` 五个标签对象
+逐字未变，没有执行任何 `--mirror` 推送。
+
+边界写清楚，别把"整理过了"说成"清除了"：旧提交仍可按固定 SHA 取到（§4 已实测）；本地
+`backups/` 里那份 bundle 仍含未脱敏文本，它是恢复路径，也是同一份风险；GitHub 侧缓存与
+PR 引用需要 Support 处理。
 
 ---
 
@@ -207,5 +261,11 @@ Release 0.2.0 在真机上通过了批准时列出的第 1–6 项；第 7 项�
 两条发布门槛（字段语义、HMAC 用户级隔离）仍然开着，它们不阻塞继续积累数据，但阻塞任何多用户
 或可导出的发布。
 
-本轮唯一一处由验收过程本身造成的问题是 §4 记录的那次房间号入库：文件已脱敏，历史提交没改。
-它不影响 app 的行为，但它是这份报告里最该被看见的一条——**规则写在文档里不等于规则被遵守**。
+本轮唯一一处由验收过程本身造成的问题是 §4 记录的那次房间号入库：文件已脱敏，携带它的两个文档
+提交已按"树 SHA 必须一致"的判据整理成一个（§7.1），但旧提交按固定 SHA 仍可取到，GitHub 侧的
+引用与缓存需要 Support 处理，受理与否不由我们判断。它不影响 app 的行为，却是这份报告里最该被
+看见的一条——**规则写在文档里不等于规则被遵守**。
+
+用户核对后确定的两条后续做法已纳入本报告：其一，验收"装的是什么包"一律**从设备反查**
+（`pm path` + `sha256sum` + `apksigner verify`），不再以构建时间或 `lastUpdateTime` 推断；其二，
+每日查询时刻不再固定 23:00，由使用者选定即可，闹钟重排正确就算通过。
