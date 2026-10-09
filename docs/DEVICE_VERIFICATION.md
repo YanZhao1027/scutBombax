@@ -1254,3 +1254,29 @@ Evidence: `evidence/logcat-2026-10-08-first-daily-snapshot.txt`.
 Still open on this round: the 约 5 分钟后测试一次 control and the five-state UI pass (signed in /
 signed out with history / signed out without / after 退出 / after expiry) both need a tap on an
 unlocked screen, which is the user's to give.
+
+### 17.1 The one-off verification alarm, and what it proves
+
+The user tapped 约 5 分钟后测试一次 at about 09:14 the following morning. Three independent
+signals say the chain ran and landed:
+
+```bash
+adb shell dumpsys alarm | grep -c SNAPSHOT_TEST     # no pending test alarm — it was consumed
+```
+
+- the chart summary reads **本地历史 · 最近 10 条记录**, up from 7 the previous evening
+  (8 = the 22:38 restore, 9 = the 23:14 daily, 10 = this test);
+- the newest plotted point is **10/9 09:19 ¥22.38** — five minutes after the tap, so this
+  delivery was not deferred at all (the device was awake and charging);
+- the button is back to its idle label and `testPending` is false, which only happens through
+  `consumeTest()` — a call site that exists solely in the test branch of the receiver.
+
+Caveat kept honest: the `stage=snapshotTest result=fired` / `result=ok` log lines had already
+rotated out of logcat by the time the run was inspected, so the *labels* on those lines are
+verified by code path and by the consumed-pref evidence, not by a captured log. The row's
+`source=test` value is likewise not directly readable — `run-as` is refused on a non-debuggable
+build, which is the correct behaviour and the reason the redacted `result=recorded` line exists.
+
+Also visible in the same pass: the balance has fallen from ¥29.91 (16:42) to ¥28.43 (20:15) to
+¥22.38 (next morning 09:19) with no increases flagged — the first real consumption-shaped series,
+and the trend's 余额增项 list correctly staying empty on it.
