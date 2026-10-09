@@ -216,7 +216,7 @@ KDoc 已明写这一点；任何面向多用户或可导出的版本发布之前
 git bundle create ../backups/feat-electric-trend-v3-PRE-REWRITE-2026-10-09.bundle \
   refs/heads/feat/electric-trend-v3
 git bundle verify …            # "The bundle records a complete history"
-chmod 600 ../backups/*.bundle  # 这份备份里含未脱敏文本，因此目录 0700、文件 0600
+chmod 600 ../backups/*.bundle  # 这份备份含未脱敏文本，因此目录 0700、文件 0600（当时；§7.2 里删掉，恢复路径换成干净 bundle）
 
 # 2) 确认远端没有别人在推（lease 用远端当时的值 <旧 HEAD>，而不是本地跟踪引用）
 git ls-remote origin | grep electric-trend
@@ -260,9 +260,48 @@ git push --force-with-lease=refs/heads/feat/electric-trend-v3:<旧 HEAD> \
 | `refs/heads/main` | 200 | 66,489 | 0 | 否（这一节还没进 main） |
 
 边界写清楚，别把"整理过了"说成"清除了"：**PR 的所有可见引用都取到干净版本，旧文本只在"按被替换
-提交的固定 SHA 直接请求"这条路上还活着**，加上 GitHub 缓存与别人已克隆走的副本。本地
-`backups/` 里那份 bundle 同样仍含未脱敏文本——它是恢复路径，也是同一份风险，所以目录 0700、
-文件 0600，且不属于仓库内容。
+提交的固定 SHA 直接请求"这条路上还活着**，加上 GitHub 缓存与别人已克隆走的副本。本地清理不能
+替代 GitHub Support 申请，两件事各自独立（见 §7.2）。
+
+### 7.2 本地未脱敏副本的清理（用户批准，顺序有讲究）
+
+顺序是用户定的：**先建干净备份，再删旧备份，最后才动 reflog**——否则"清理"会把恢复能力一起清掉。
+
+```bash
+# 1) 干净备份：只打包 main 与当前分支可达的提交，不用 --all
+git bundle create ../backups/scutbombax-CLEAN-2026-10-09.bundle \
+  refs/heads/main refs/heads/feat/electric-trend-v3
+git bundle list-heads …; git bundle verify …        # "records a complete history"
+# 反证：克隆这份 bundle，被替换的提交与那个 blob 根本不在对象库里
+git clone … /tmp/check && git -C /tmp/check cat-file -t <旧提交>   # could not get object info
+git -C /tmp/check rev-list --all | … git grep -F '<房间号>'        # 0 命中
+
+# 2) 删除含未脱敏文本的旧 PRE-REWRITE bundle（不上传、不进 evidence/）
+rm ../backups/feat-electric-trend-v3-PRE-REWRITE-2026-10-09.bundle
+
+# 3) 只过期不可达记录，保留正常本地恢复记录
+git reflog expire --expire-unreachable=now --all
+git gc --prune=now
+
+# 4) 验证：旧对象、旧 blob 均已消失；引用与工作树正常
+git cat-file -t <旧提交1> <旧提交2> <旧 blob>   # 三个都是 could not get object info
+git for-each-ref; git status --short; git fsck --no-dangling   # 干净
+git fetch origin --prune                        # 之后再次确认可达提交 0 命中
+```
+
+恢复能力实测过一遍：克隆新 bundle → `git checkout -b feat/electric-trend-v3
+origin/feat/electric-trend-v3`（bundle 只列分支引用，所以克隆后默认什么都没检出，这一步必须写下来），
+`docs/RELEASE_ACCEPTANCE.md`、`docs/DEVICE_VERIFICATION.md`、`src/main.ts`、`ScutRuntime.kt`、
+`package.json` 与工作副本**逐字节相同**，且克隆库里 0 条提交含房间号。清理后主机门禁重跑：
+typecheck 干净、43 vitest 通过、`check:dom` 无缺失 id、`git status` 空。
+
+三条不过头的说法，都是这段流程的边界：
+
+- 普通 `rm` 在 SSD、写时复制文件系统和系统快照上**不宣称不可恢复**；这里是"不再以文件形式
+  存在"，不是"物理上不存在"。
+- 会话与工具日志仍含该标识符（`~/.qoder/projects/…`、`~/.qoder/logs/…`，本轮已把它们收紧到
+  0600）。删它们等于删掉这次对话的历史，那是用户的决定，不是顺手能做的清理。
+- 本地清理与 GitHub 残留是两件事：旧提交按其固定 SHA 仍能取到（§7.1 的量测），需要 Support 处理。
 
 ---
 
