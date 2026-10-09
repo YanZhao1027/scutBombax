@@ -85,8 +85,17 @@ cd /home/zyubuntu/scutbombax/scutBombax && git bundle create ../evidence/scutBom
 | --- | --- | --- |
 | `899aaccca1866d80f27cca7fa6b8b814532a2f9614177ed98d7bbbe58e959e79` | `app-release-2026-10-08T2236-pr1-50709fe.apk` (3,727,900 B) | the release build **actually running on the phone**: PR #1 head `50709fe`, `versionCode=2` / `versionName=0.2.0`, certificate SHA-256 `ef607f9d…`. The archive name carries the build time, not the capture time. The device copy hashes identically (`adb shell sha256sum …/base.apk`), which is what makes "what is installed" a measured fact rather than an inference from `lastUpdateTime` |
 | `0f7d719e97ec91433febdc3c84492d7fea56781742ccc6d1a901e96c3870ecf6` | `logcat-2026-10-09-signout.txt` (4 lines, 252 B) | §17.2: the whole logout coupling in order — `notice=removed`, `daily=disabled`, `snapshotTest=cancelled`, `logout=cleared`. Checked for room number, password, bearer/cookie headers, token shapes and UUIDs before archiving; zero hits |
+| `bf97cfbe98674e74c1ee065dc1fcd16a284265defaff83aed6a2a5965df01a5c` | `logcat-2026-10-09-round2.txt` (36 lines) | §19: the re-login round — `result=recorded source=login`, the notice re-posting, `stage=daily result=armed dueInSec=14453`, and the two lines §17.1 could only infer: `stage=snapshotTest result=fired lateSec=225 start=foreground-service` and `result=ok`, with `result=recorded source=test` between them |
+| `de8f55848ff7f8cb12d3a3456fba1d1066e35f168b63e5ccf5cbd59ec92307a7` | `app-release-2026-10-09T1915-format-countdown.apk` (3,727,898 B) | the same branch rebuilt after the countdown fix and the privacy guard: certificate still `ef607f9d…`. **Deliberately not installed** — an install clears the app's alarms, and tonight's second natural daily sample on the running build is worth more than an early screenshot of a formatter fix |
 
 Manifest: `sha256-2026-10-09.txt`.
+
+Text files here are checked by the same guard the repository uses:
+`pnpm check:privacy --paths ../evidence` (run from `scutBombax/`) applies the shape rules and the
+local denylist to every readable file under the archive. Its limits are stated rather than assumed:
+binaries are skipped by suffix (screenshots, APKs, bundles) and anything over 4 MB is skipped by
+size, so the PNGs in this directory remain reviewed **by hand** — which is why the signed-out screen
+was recorded as five transcribed strings instead of a capture.
 
 The screenshot that would have shown the signed-out screen was **not** taken. The room number is
 an identifier, and `uiautomator`'s accessibility tree gives the same text without putting that

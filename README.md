@@ -107,7 +107,10 @@ Verified build loop (Java 21 must be a full JDK; see `docs/UBUNTU24.md` §9):
 ```bash
 pnpm install
 pnpm build          # tsc --noEmit && vite build
-pnpm test           # vitest: refresh-state machine
+pnpm test           # vitest: refresh state, view gating, trend, snapshot time, privacy guard
+pnpm check:dom      # ids and CSP, so a template edit cannot silently drop a control
+pnpm check:privacy  # no identifier or credential-shaped value in anything tracked
+pnpm hooks:install  # once per clone: run the privacy guard at commit time too
 pnpm exec cap sync android
 
 cd android
@@ -115,6 +118,12 @@ JAVA_HOME="$HOME/opt/jdk-21.0.12.1+1" ./gradlew clean testDebugUnitTest assemble
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb logcat -s ScutBombax:V
 ```
+
+The privacy guard is not decoration. A room number entered a documentation commit on 2026-10-09
+after being transcribed off a phone screen, in a public repository — see
+`docs/RELEASE_ACCEPTANCE.md` §4/§7, which records what the rewrite fixed and what it could not.
+Personal values that must never recur go in `privacy-denylist.local.txt` (gitignored, never
+uploaded); the guard reports every hit masked, so the check itself cannot become the leak.
 
 Use a physical Android phone for protocol testing. An emulator is not required.
 

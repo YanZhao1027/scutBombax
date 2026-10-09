@@ -13,7 +13,7 @@ import {
 import './styles.css';
 import { drawElectricTrend } from './trend';
 import { deriveView, historyCaption } from './view';
-import { formatBeijingClock, parseBeijingClock } from './snapshot-time';
+import { formatBeijingClock, formatCountdown, parseBeijingClock } from './snapshot-time';
 
 /**
  * Look up an element by id, and fail loudly at module load if it is not there.
@@ -276,7 +276,7 @@ const renderDaily = (status: NoticeState): void => {
   els.dailyToggle.disabled = !(status.running || status.dailyEnabled || els.noticeToggle.checked);
   els.dailyTime.value = formatBeijingClock(status.dailyHour, status.dailyMinute);
   els.dailyDue.textContent = status.dailyEnabled
-    ? `下次约 ${formatSpan(status.nextDueIn)}后`
+    ? `下次约 ${formatCountdown(status.nextDueIn)}后`
     : '未开启';
   els.snapshotTestButton.disabled = !status.running || !state.session?.authenticated;
   els.snapshotTestButton.dataset.pending = String(status.testPending);
@@ -285,18 +285,9 @@ const renderDaily = (status: NoticeState): void => {
     : '约 5 分钟后测试一次';
   els.snapshotTestState.textContent = status.testPending
     ? status.testDueIn > 0
-      ? `预计 ${formatSpan(status.testDueIn)}后（可能延迟）`
+      ? `预计 ${formatCountdown(status.testDueIn)}后（可能延迟）`
       : '等待系统投递'
     : '单次测试，不改变每日设置';
-};
-
-/** Coarse on purpose: an inexact alarm is a promise about a day, not about a minute. */
-const formatSpan = (seconds: number): string => {
-  if (!Number.isFinite(seconds) || seconds < 0) return '—';
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.round((seconds % 3600) / 60);
-  if (hours > 0) return `${hours} 小时 ${minutes} 分`;
-  return `${Math.max(minutes, 1)} 分`;
 };
 
 /**

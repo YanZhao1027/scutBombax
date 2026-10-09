@@ -1,0 +1,10 @@
+# Paths the privacy guard skips. Keep this list short and give every line a reason: the guard's
+# value comes from there being almost nothing in it.
+#
+# Format is a path prefix or a `*` glob relative to the repository root. A single line can also opt
+# out inside a file by ending it with `privacy:ignore`, which stays visible in review.
+#
+# Nothing is listed today: the shape rules were tuned (see scripts/check-privacy.test.mjs) so that
+# timestamps, epochs, `SHA-256`, HTML anchors and presence-flagged token notes all stay quiet.
+# If `--paths` scanning of the third-party bundles under the evidence archive starts reporting
+# minified JavaScript, exclude by suffix rather than adding real documents here.

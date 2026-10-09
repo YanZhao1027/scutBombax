@@ -1341,3 +1341,68 @@ The item-by-item verdict for Release 0.2.0 — the seven approved requirements, 
 graded, and the list of things still unverified with who can unblock them — is
 [`RELEASE_ACCEPTANCE.md`](RELEASE_ACCEPTANCE.md). This file stays the raw record; that one is the
 report, and it points back here rather than restating the evidence.
+
+## 19. Re-login, notice, daily alarm, and the first *early* test sample (2026-10-09 18:42–19:09)
+
+The user logged in themselves at 18:42–18:47 (one attempt, `result=ok`). Everything below is the
+same process (`pid 17538`) with no reinstall, so the session restored from the Keystore blob and
+the history database kept its rows.
+
+```text
+18:42:54.411  stage=session result=disk-ready path=noBackupFilesDir
+18:42:54.411  stage=runtime result=ready api=34 release=14 userAgent=cached
+18:45:32.855  stage=captcha … status=200 ms=181          (after three UnknownHostException retries)
+18:47:25.352  stage=login.captchaForm result=ok campus=DXC refreshToken=present
+18:47:25.937  stage=history result=recorded source=login electric=true water=true ac=false
+18:58:28.979  stage=notice  result=shown updated=18:47:25
+18:59:06.282  stage=daily   result=armed dueInSec=14453 hour=23 minute=0 api=34
+19:00:07.600  stage=snapshotTest result=armed dueInSec=300
+19:08:52.612  stage=snapshotTest result=fired lateSec=225 start=foreground-service
+19:08:53.010  stage=history result=recorded source=test electric=true water=true ac=false
+19:08:53.014  stage=notice  result=shown updated=19:08
+19:08:53.015  stage=snapshotTest result=ok
+```
+
+**`source=login` is now on the record.** §17.1 left the test row's label to inference; this time
+the log capture was running before the tap, so `fired` / `ok` / `recorded source=test` are all
+first-hand. The row count went 11 → 12 → 13, and `dumpsys alarm` shows no pending
+`SNAPSHOT_TEST` afterwards — the pending token was consumed, which only `consumeTest()` does.
+
+**The test fired *late*, and late is not failure.** Planned at +300 s, delivered at +525 s
+(`lateSec=225`) on an awake, charging device — the inexact window (`window=+3m44s998ms`) is what
+the UI means by "系统可能延迟". Two samples now exist for the one-off alarm (09:14 → 09:19 on time,
+19:00 → 19:08 late), so the honest statement is *the alarm arrives within a few minutes, not at a
+promised second*.
+
+**Re-arming after a fresh login works.** `dueInSec=14453` at 18:59:06 puts the next slot at
+23:00:00 the same evening, and `origWhen 1791558000000` in `dumpsys alarm` is that instant to the
+millisecond. The daily path is armed from a session the user created, not from a debug build.
+
+**Notification and foreground service, both confirmed:** `NotificationRecord … id=176 importance=2`
+is posted, `ServiceRecord … isForeground=true foregroundId=176`, and the MIUI shade files it under
+静音 — which is why the check is `dumpsys`, not a screenshot.
+
+**Balance semantics, one more observation.** The electric balance fell 21.81 (10:25) → 17.07
+(18:47) → and the trend panel's 余额增项 list stayed empty across the whole series. Still an
+observation, not a consumption figure: 字段语义 remains unverified (§20 of the report's follow-up A).
+
+Two strings from the accessibility tree worth keeping: the pill read `已登录`, and the daily line
+read `下次约 4 小时 1 分后` — consistent with the armed alarm, and computed by the app rather than
+by me. The room renders as `<楼栋-房号>` in every note here, per §17.2's rule and now per the
+mechanical check in `scripts/check-privacy.mjs`.
+
+### 19.1 A countdown that could display sixty minutes
+
+At 19:09 the same line read `下次约 3 小时 60 分后`. The device was right and the formatter was
+wrong: it floored the hours and **rounded the remainder separately**, so 3 h 59 min 36 s became
+"3 小时" plus `round(59.6) = 60`. Nothing else in the app is affected — the alarm itself was armed
+to `origWhen 1791558000000` — but a countdown that can print 60 is a countdown nobody trusts.
+
+Fixed by rounding the span once and splitting it afterwards (`formatCountdown` in
+`src/snapshot-time.ts`, moved there from `main.ts` so it is unit-testable), with four tests pinning
+the cases: the phone's own value now reads `4 小时 0 分`, `23:59:30` before an alarm reads
+`24 小时 0 分`, and sub-minute spans still say `1 分` rather than `0 分`. **Host-tested only** —
+53 vitest, `check:dom`, `check:privacy` and the release build pass, and the rebuilt APK is signed
+by the same key (`ef607f9d…`), but it is **not installed**: an install would clear tonight's armed
+23:00 alarm, and the second natural daily sample is worth more than an early screenshot of a
+formatter fix. It goes on the phone with the `versionCode=3` round.

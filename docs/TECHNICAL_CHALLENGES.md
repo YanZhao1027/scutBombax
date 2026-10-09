@@ -300,6 +300,14 @@ AGENTS.md 原文禁止后台 Service、WorkManager 和 alarm。用户 2026-10-07
 - **文档与证据不带设备标识符**：证据文件入库前先 grep 序列号 / IPv4 / IPv6 / SSID / BSSID /
   bearer token / cookie 值；含学号的截图直接删除；`dumpsys connectivity` 这类输出
   会同时打印 SSID、BSSID 和 IP，因此只用于当场判断，不作为证据归档。
+- **G-附：把"标识符不进仓库"做成闸门（2026-10-09 加）。** 上面这条规则写下之后仍然失守过一次：
+  从 `uiautomator` 可访问性树读屏时把宿舍房号原样抄进了文档，而这个仓库是公开的。事后的历史整理
+  见 `RELEASE_ACCEPTANCE.md` §7.1–§7.2；真正解决问题的是 `scripts/check-privacy.mjs`——
+  形状层（楼栋-房号 / 身份证 / 手机号 / "凭据名 = 真实值"，后者由 `looksLikeSecret` 卡掉
+  `bearer <access_token>`、`password: string`、`els.password.value`、`refresh_token=not-a-real-token-0000`
+  这些仓库里合法的写法）+ 值层（gitignored 的 `privacy-denylist.local.txt`），输出**一律打码**，
+  挂在 `pnpm check:privacy`、`pnpm test`（子进程用例，泄露即套件失败）和 pre-commit 钩子三处。
+  难点不在写规则，在于把 5 处误报修干净：报错的检查会被绕过，从不报的检查等于没有。
 - **凭据不经过助手**：所有密码输入都由用户在手机上完成；助手侧只接受"成功/失败"，
   并且优先使用**零凭据探针**（`frontInfo`、`/plat/js/*`、键盘瓦片图、假 token 差分）取证。
 - **明确拒绝的便利**：存查询密码、端侧 OCR 解验证码（那是在对抗学校故意放置的自动化防护，

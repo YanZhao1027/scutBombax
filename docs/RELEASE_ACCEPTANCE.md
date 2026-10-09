@@ -41,8 +41,9 @@ adb shell dumpsys package cn.scut.bombax | grep -E "versionCode|versionName|flag
 | 命令 | 结果 |
 | --- | --- |
 | `pnpm typecheck` | 干净 |
-| `pnpm test` | 43 通过（`snapshot-time` 4 + `view` 9 + `trend` 13 + `refresh` 17） |
+| `pnpm test` | 55 通过（`refresh` 17 + `trend` 13 + `view` 9 + `snapshot-time` 8 + `check-privacy` 6 + `privacy` 门禁 2） |
 | `pnpm check:dom` | `missing ids: none`，CSP 9 条指令 |
+| `pnpm check:privacy` | 全仓干净，denylist 1 条；`--selftest` 通过 |
 | `./gradlew testDebugUnitTest` | 122 通过，0 失败 0 跳过（12 个类） |
 
 手机上的那份 APK 是 `50709fe` 构建的字节，这些主机测试跑的是同一分支的 HEAD；两者相差只有
@@ -57,7 +58,7 @@ adb shell dumpsys package cn.scut.bombax | grep -E "versionCode|versionName|flag
 | 1 | 暂不做历史导入/导出；切换签名时允许清空 | 按决议执行：代码里没有任何导入/导出功能；卸载 Debug → 安装 Release，会话与历史确实被丢弃 | RUNTIME_VERIFIED | §15 / §15.1 |
 | 2 | 确认 Release APK 用已验证的正式签名，`versionCode=2`、`versionName=0.2.0` | 见 §0，今天重新核过，APK 字节与签名指纹都对上 | RUNTIME_VERIFIED | §14.6 / 本文 §0 |
 | 3 | 切换前保留脱敏证据与测试报告 | `release-swap-2026-10-08.txt`（含 pristine 一份）留存，明确注明它是**记录**而非还原路径；历史原始行导出为 `history-2026-10-08-first-rows.txt`，只含数值、不含房间号 | RUNTIME_VERIFIED | §15 / `EVIDENCE_INDEX.md` |
-| 4 | 首次登录由用户本人完成；禁止记录密码、token、宿舍号 | 凭据侧守住：两次登录（昨日下午、今晨 10:2x）都由用户亲手输入，应用日志与通知内容不含宿舍号。标识符侧**违反过一次**：§17.2 的屏幕转写把宿舍号写进了仓库，现已随历史整理从分支上移除——见 §4 与 §7 | RUNTIME_VERIFIED（凭据侧）/ 已修正的文档失误（标识符侧） | §15.3 / 本文 §4 / 本文 §7 |
+| 4 | 首次登录由用户本人完成；禁止记录密码、token、宿舍号 | 凭据侧守住：两次登录（昨日下午、今晨 10:2x）与傍晚那次重登都由用户亲手输入，应用日志与通知内容不含宿舍号。标识符侧**违反过一次**：§17.2 的屏幕转写把宿舍号写进了仓库，现已随历史整理从分支上移除，并补了**机械检查**（§7.3）——见 §4 与 §7 | RUNTIME_VERIFIED（凭据侧）/ 已修正并已被工具钉住的文档失误（标识符侧） | §15.3 / §19 / 本文 §4 / §7 |
 | 5 | 装后 5 项检查（登录查询 / 首条快照 / 离线冷启动历史 / 通知状态 / 23:00 闹钟登记） | 5 项全部观测到 | RUNTIME_VERIFIED | §15.3 |
 | 6 | 23:00 后台触发：不崩溃；被拒就如实记录；成功则形成一条 nightly 快照；错过不补查 | 23:14:57 投递（`lateSec=897`），全链路成功、写入 `source=daily`、进程未死、重排到次日 23:00:00 且不补查 | RUNTIME_VERIFIED | §17 |
 | 7 | 提交严格区分已验证/未验证的验收报告 | 本文；未验证项集中在 §3 | — | — |
@@ -112,19 +113,28 @@ adb shell dumpsys package cn.scut.bombax | grep -E "versionCode|versionName|flag
 **五个界面状态里，真机已覆盖三种情形。** 有会话；无会话有历史；以及经由真实"退出"动作到达的
 退出后状态（二者同一路径但各自记录）。离线且历史可显示的状态另有 §15.3 的独立证据。
 
+**登录后重开排期，并把上一轮缺的原始日志补齐（18:42–19:09，§19）。** 用户自己重登一次（一次成功），
+`stage=history result=recorded source=login` 这一行第一次被抓到——§17.1 当时只能靠旁证推断的行标签，
+现在是直接观测。打开常驻通知后 `stage=notice result=shown`、`NotificationRecord id=176 importance=2`
+张贴、`ServiceRecord … isForeground=true foregroundId=176`；再开每日快照，`dueInSec=14453` 落在
+23:00:00，`dumpsys alarm` 的 `origWhen 1791558000000` 与该时刻**逐毫秒相同**。
+"约 5 分钟后测试一次"这一轮的 `fired / ok` 两行也在：19:00:07 登记 `dueInSec=300`，19:08:52 投递
+`lateSec=225`，随后 `result=recorded source=test`、`snapshotTest result=ok`，待决测试闹钟被消费。
+这一条**迟到但不算失败**：5 分钟是计划下界，不是约定时刻；两个样本（一次准点、一次晚 225 s）合起来
+才是"约几分钟内到达"这个说法的依据。
+
 ---
 
 ## 3. 未验证 / 待定（写明缺什么、谁能补）
 
 | 项 | 为什么还没验 | 谁能解除 |
 | --- | --- | --- |
-| 重新登录后每日闹钟按**所选时刻**重新登记 | 退出后按设计零闹钟；下一次登录归用户。23:00 不再是要求，只是当时的默认值 | 用户登录 → 我打开两个开关、设时刻、读 `dumpsys alarm` |
-| 第 12 条记录 `source=login` | 同上，需要一次真实登录 | 用户登录 |
+| **非默认**每日时刻的保存与闹钟重排 | 本轮只按默认 23:00 开启并验证；改时刻这条路径（`setDailyTime` → 重排）还没在真机上走 | 用户在界面里选一个真实想用的时刻即可 |
 | 第 11 条（今晨 10:25）的 source 标签 | release 不可 `run-as`（正确行为），且该行写入时本次日志抓取尚未开始（12:59 起） | 无法回溯，保持未验证 |
 | 会话过期状态（`authenticated=false` + 原因串） | 只能等令牌自然过期或人为失效，不制造 | 下次自然发生时记录 |
-| 连续多日投递成功率（准点性、后台成功率） | 目前只有一次自然投递样本（23:14:57 / 迟到 897 s）+ 一次定时测试样本 | 让开关继续开着，按天累积；不为此增加任何补查逻辑 |
+| 连续多日投递成功率（准点性、后台成功率） | 自然投递只有两个样本（昨晚 23:14 迟到 897 s、今晚待定），定时测试两个（一次准点、一次 +225 s） | 让开关继续开着按天累积；不为此加补查逻辑 |
+| `3 小时 60 分` 那个倒计时显示修复的真机效果 | 修复已过主机门禁并重新签名构建（`de8f5584…`，同一把钥匙），但**没有安装**：安装会清掉今晚已登记的 23:00 闹钟 | 随 `versionCode=3` 那一轮一起上机 |
 | 无会话且无历史（空态） | 验证它要清空本机唯一一条真实序列 | 明确不在本机做 |
-| §17.1 里 `stage=snapshotTest result=fired/ok` 两行日志本身 | 检视时已被 logcat 轮转掉；结论由消费位点+行数+图表三个旁证支撑 | **下一次测试前先起日志抓取**（已排入计划） |
 | `source=daily` 行的原始时间戳核对 | 同 `run-as` 限制，靠去标识日志行 + 图表条数间接确认 | 结构上无法在本机加强 |
 | GZIC 余额 | 校区不同，需要 GZIC 账号 | 用户 |
 | 水费单位、`leftEle/leftFreeEle/leftFreeMoney/elePrice` 语义 | 接口没声明单位；电费"元"是 USER_VERIFIED，不是 API 事实 | 观察积累，见 §5 |
@@ -293,7 +303,7 @@ git fetch origin --prune                        # 之后再次确认可达提交
 origin/feat/electric-trend-v3`（bundle 只列分支引用，所以克隆后默认什么都没检出，这一步必须写下来），
 `docs/RELEASE_ACCEPTANCE.md`、`docs/DEVICE_VERIFICATION.md`、`src/main.ts`、`ScutRuntime.kt`、
 `package.json` 与工作副本**逐字节相同**，且克隆库里 0 条提交含房间号。清理后主机门禁重跑：
-typecheck 干净、43 vitest 通过、`check:dom` 无缺失 id、`git status` 空。
+typecheck 干净、43 vitest 通过（闸门加入后是 55，见 §7.3）、`check:dom` 无缺失 id、`git status` 空。
 
 三条不过头的说法，都是这段流程的边界：
 
@@ -301,7 +311,37 @@ typecheck 干净、43 vitest 通过、`check:dom` 无缺失 id、`git status` �
   存在"，不是"物理上不存在"。
 - 会话与工具日志仍含该标识符（`~/.qoder/projects/…`、`~/.qoder/logs/…`，本轮已把它们收紧到
   0600）。删它们等于删掉这次对话的历史，那是用户的决定，不是顺手能做的清理。
-- 本地清理与 GitHub 残留是两件事：旧提交按其固定 SHA 仍能取到（§7.1 的量测），需要 Support 处理。
+- 本地清理与 GitHub 残留是两件事：旧提交按其固定 SHA 仍能取到（§7.1 的量测）。**用户决定不再走
+  Support 工单**：泄露的只有本人宿舍号，权衡之后接受这份残留。申请所需的最小事实仍然留在
+  `backups/README-pre-rewrite.txt`（0600，含被替换提交的 SHA，不含房号原文），随时可以提。
+
+### 7.3 让下一次进不去：机械检查，而不是自觉
+
+用户的要求是"之后用户信息不可能进我们这里或者上传"。这句话只能由**检查**兑现，所以本轮加了
+`scripts/check-privacy.mjs`，挂在三个地方：`pnpm check:privacy`、`pnpm test`（`src/privacy.test.ts`
+以子进程调用它，泄露会让测试套件失败）、以及提交时的 pre-commit 钩子
+（`scripts/git-hooks/pre-commit` + `pnpm hooks:install`，本仓库克隆已安装并实测：把含房号形状的
+临时文件 `git add` 之后提交被拦下）。
+
+规则分两层。形状层不需要任何本机数据：楼栋-房号、18 位身份证、11 位大陆手机号、以及
+"凭据名 = 看起来真实的值"（`looksLikeSecret` 要求长度、数字、大小写混合或 `eyJ` 前缀，因此
+`refreshToken=present`、`bearer <access_token>`、`password: string`、`els.password.value`、
+`refresh_token=not-a-real-token-0000` 这些仓库里合法写法都不报）。值层是
+`privacy-denylist.local.txt`（gitignore、0600、当前恰好 1 条），管的是"这个具体房间不能再出现"。
+
+三件事值得留档：
+
+- **误报是设计出来的对手。** 第一次全仓扫描报了 5 处，全部来自既有文档与代码里对凭据的*描述*；
+  不修好它们，这个检查一周内就会被绕过。现在 `--selftest` 把 8 条必报和 14 条必不报钉住。
+- **它确实抓得住原来那个错误。** 把 §17.2 那次屏幕转写在仓库外重建成一个临时文件，扫描器报了三条
+  （形状、语境、denylist），且输出全部打码——**报告工具本身不能变成第二次泄露**。临时文件已删。
+- **边界说清楚。** 它不认识未知的学号格式（长度与字符集因年级而异，硬猜会淹死在误报里），所以
+  "永不记录用户名/学号"仍由 `Diag` 的去标识化路径和两条 JVM 测试保证；它也不管"上传"，因为
+  本项目没有后端、没有任何出站上传，那条路由 AGENTS.md 的禁令和本检查的 git 覆盖面共同保证。
+
+门禁现状（含本轮改动，Kotlin 测试夹具改用命名常量并注明合成数据）：typecheck 干净、**55 条 vitest**
+（43 + 6 守卫 + 4 倒计时 + 2 门禁）、122 条 JVM 测试、`check:dom` 无缺失 id、`assembleRelease` 通过，
+新 APK `de8f5584…` 签名证书仍是 `ef607f9d…`。**未安装**，理由见 §3。
 
 ---
 
@@ -316,9 +356,11 @@ Release 0.2.0 在真机上通过了批准时列出的第 1–6 项；第 7 项�
 或可导出的发布。
 
 本轮唯一一处由验收过程本身造成的问题是 §4 记录的那次房间号入库：文件已脱敏，携带它的两个文档
-提交已按"树 SHA 必须一致"的判据整理成一个（§7.1），但旧提交按固定 SHA 仍可取到，GitHub 侧的
-引用与缓存需要 Support 处理，受理与否不由我们判断。它不影响 app 的行为，却是这份报告里最该被
-看见的一条——**规则写在文档里不等于规则被遵守**。
+提交已按"树 SHA 必须一致"的判据整理成一个（§7.1），本地未脱敏副本也按"先建干净备份、再删旧的、
+最后清不可达历史"的顺序处理掉了（§7.2）。旧提交按其固定 SHA 在 GitHub 上仍可取到，量测过；
+**用户在知情后决定不提 Support 工单**，接受这份只对本人有意义的残留，同时把要求改成面向未来的
+那条——用户信息不可能再进仓库，这由 §7.3 的检查保证，不再由自觉保证。它不影响 app 的行为，
+却是这份报告里最该被看见的一条：**规则写在文档里不等于规则被遵守。**
 
 用户核对后确定的两条后续做法已纳入本报告：其一，验收"装的是什么包"一律**从设备反查**
 （`pm path` + `sha256sum` + `apksigner verify`），不再以构建时间或 `lastUpdateTime` 推断；其二，
