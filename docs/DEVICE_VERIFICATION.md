@@ -1406,3 +1406,48 @@ the cases: the phone's own value now reads `4 小时 0 分`, `23:59:30` before a
 by the same key (`ef607f9d…`), but it is **not installed**: an install would clear tonight's armed
 23:00 alarm, and the second natural daily sample is worth more than an early screenshot of a
 formatter fix. It goes on the phone with the `versionCode=3` round.
+
+## 20. The user's own slot: 21:25, delivered late, and the session-stale path (2026-10-09 21:20–21:47)
+
+The user set the daily time to **21:25** themselves, which closes the "configurable slot" question
+without requiring a 23:00 window. What the log shows, in order:
+
+```text
+21:20:55.614  stage=daily result=armed dueInSec=244 hour=21 minute=25 api=34
+21:28:03.302  stage=snapshot result=fired lateSec=183 start=foreground-service nextInSec=86216
+21:28:03.547  dxc.userInfo … status=302
+21:28:03.548  stage=dxc result=session-stale detail=dxc.userInfo/302 target=…/oauth/authorize
+21:28:04.047  stage=dxc.getCode result=session-established
+21:28:04.153/.272/.356  dxc.userInfo · ammeterBalance · waterBalance 200
+21:28:04.358  stage=history result=recorded source=daily electric=true water=true ac=false
+21:28:04.362  stage=notice  result=shown updated=21:28        ← 21:28:03.300 re-armed next slot first
+21:28:04.362  stage=daily   result=ok
+```
+
+Four things this settles, none of them by inference:
+
+1. **The chosen time is honoured.** `dueInSec=244` at 21:20:55 is 21:25:00, and the re-arm written
+   at the moment of firing is `origWhen 1791638700000` = **2026-10-10 21:25:00.000** in
+   `dumpsys alarm` — the slot survived its own delivery instead of drifting to "24 h after the fire".
+2. **One alarm, not two.** `setTime` re-armed rather than added: the pending list holds a single
+   `DAILY_REFRESH`, so changing the clock cannot leave a stale 23:00 registration behind.
+3. **Late again, and still a success.** Due 21:25:00, delivered 21:28:03 — `lateSec=183` with the
+   screen on and the phone charging. Three samples now (准点 / +225 s / +183 s), which is the
+   honest basis for the UI's "系统可能延迟".
+4. **The session-stale path is real on a release build, in the background.** The DFYC session had
+   died (2 h 41 min after login, consistent with §8's tens-of-minutes measurement) and said so with
+   a **302**. The app classified it as `session-stale` instead of an outage, rebuilt the chain
+   exactly **once**, and then completed the query and wrote the row. This is the recovery rule
+   working as documented, observed without a foreground click — and the second daily row is
+   `source=daily`, so the count went 13 → 14 → 15 (15 after the 21:47 manual refresh below).
+
+One display finding worth keeping separate from the scheduling result: while the page sat open,
+the daily fire updated the **notification and the database but not the page**. The countdown still
+read `下次约 4 分后` and the trend summary `最近 13 条记录`, both of which were true at 21:21 and
+false by 21:29. A foreground refresh at 21:47:26 (`result=recorded source=manual`) re-read the
+status, and the same page then showed `下次约 23 小时 38 分后` and `最近 15 条记录`. Nothing is
+scheduled wrongly — an open WebView is simply not told. Recording it as a freshness gap, not a
+scheduling bug, and not fixing it in the middle of a verification round.
+
+Evidence: `evidence/logcat-2026-10-09-custom-slot.txt` (28 lines, scanned by the privacy guard
+before archiving: zero hits against the shape rules and the local denylist).
