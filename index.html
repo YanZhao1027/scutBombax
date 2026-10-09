@@ -63,6 +63,16 @@
         </section>
       </section>
 
+      <!-- DXC only; no school/account authentication is passed into these external apps. -->
+      <section id="recharge-panel" aria-label="官方充值">
+        <p class="recharge-actions">
+          <button id="recharge-wechat" type="button">发送到微信充值 ↗</button>
+          <button id="recharge-browser" type="button" class="quiet">浏览器打开</button>
+        </p>
+        <p id="recharge-hint" class="hint">大学城校区 · 分享至微信聊天后，点链接进入官方充值页。</p>
+        <p id="recharge-status" class="status" role="status" aria-live="polite"></p>
+      </section>
+
       <!-- Everything that can talk to the school, or schedule a talk to it. Session-gated. -->
       <section id="results-panel" hidden>
         <p class="meta">

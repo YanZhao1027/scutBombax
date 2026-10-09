@@ -20,7 +20,9 @@ export type ScutErrorCode =
   | 'BUSY'
   | 'INVALID_INPUT'
   | 'NETWORK'
-  | 'CAMPUS_NETWORK_REQUIRED';
+  | 'CAMPUS_NETWORK_REQUIRED'
+  | 'WECHAT_UNAVAILABLE'
+  | 'RECHARGE_OPEN_FAILED';
 
 export class BridgeError extends Error {
   constructor(

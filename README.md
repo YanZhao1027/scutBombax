@@ -1,5 +1,11 @@
 # scutBombax
 
+> **充值入口（1.0.1 候选）：** 大学城校区新增“发送到微信充值”和“浏览器打开”。
+> Android 不能可靠地将任意网页一键强制置入微信内置浏览器；需要在微信里选择聊天并点开分享的链接。
+> 本 App 不处理微信支付或校方认证结果。广州国际校区充值地址未验证，入口禁用。
+> 验证范围和限制见 [docs/RECHARGE_HANDOFF.md](docs/RECHARGE_HANDOFF.md)。
+
+
 A lightweight Android client for querying SCUT dormitory utility balances without Android Studio.
 
 The project is intentionally designed for **Ubuntu 24.04 + terminal/VS Code/Neovim + Android SDK command-line tools + Gradle**. The UI will be built with web technologies and packaged with Capacitor, while all SCUT network requests are sent by Android native code through OkHttp so they are not subject to browser CORS.

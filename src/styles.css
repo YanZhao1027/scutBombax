@@ -518,3 +518,26 @@ input {
 #snapshot-test-button:disabled {
   opacity: 0.45;
 }
+
+/* Recharge is a simple external handoff, not a payment surface in Bombax. */
+#recharge-panel {
+  margin: 18px 0;
+  padding: 14px 0;
+  border-block: 1px solid var(--line);
+}
+.recharge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+#recharge-wechat {
+  padding: 9px 13px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #fff;
+  background: var(--accent);
+  font-weight: 600;
+}
+#recharge-panel .hint { margin-top: 9px; }
+#recharge-panel .status:not(:empty) { margin-top: 8px; }

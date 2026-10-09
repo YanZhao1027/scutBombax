@@ -41,6 +41,8 @@ interface ScutApiNativePlugin {
   setDailyTime(input: { hour: number; minute: number }): Promise<NoticeState>;
   scheduleSnapshotTest(): Promise<NoticeState>;
   cancelSnapshotTest(): Promise<NoticeState>;
+  shareRechargeToWeChat(): Promise<{ handoff: 'wechat-share' }>;
+  openRechargeInBrowser(): Promise<{ handoff: 'browser' }>;
 }
 
 const ScutApi = registerPlugin<ScutApiNativePlugin>('ScutApi');
@@ -56,7 +58,9 @@ const KNOWN_CODES: ScutErrorCode[] = [
   'BUSY',
   'INVALID_INPUT',
   'NETWORK',
-  'CAMPUS_NETWORK_REQUIRED'
+  'CAMPUS_NETWORK_REQUIRED',
+  'WECHAT_UNAVAILABLE',
+  'RECHARGE_OPEN_FAILED'
 ];
 
 /**
@@ -102,6 +106,12 @@ const call = async <T>(fn: () => Promise<T>): Promise<T> => {
 /** No payload, only a signal to refresh native-owned local state. Never queries SCUT. */
 export const onLocalSnapshotChanged = (listener: () => void): Promise<PluginListenerHandle> =>
   ScutApi.addListener('localSnapshotChanged', listener);
+
+/** These handoffs launch external apps only. They do not query SCUT or report payment success. */
+export const shareRechargeToWeChat = (): Promise<{ handoff: 'wechat-share' }> =>
+  call(() => ScutApi.shareRechargeToWeChat());
+export const openRechargeInBrowser = (): Promise<{ handoff: 'browser' }> =>
+  call(() => ScutApi.openRechargeInBrowser());
 
 export const health = (): Promise<HealthResult> => call(() => ScutApi.health());
 
