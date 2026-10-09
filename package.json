@@ -1,6 +1,6 @@
 {
   "name": "scut-bombax",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,11 +8,14 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/check-privacy.mjs && tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check:dom": "node scripts/check-dom.mjs",
+    "check:privacy": "node scripts/check-privacy.mjs",
+    "check:privacy:selftest": "node scripts/check-privacy.mjs --selftest",
+    "hooks:install": "./scripts/install-hooks.sh",
     "check:env": "./scripts/check-env.sh",
     "android": "pnpm build && cap sync android",
     "apk": "cd android && ../scripts/with-jdk.sh ./gradlew assembleDebug",

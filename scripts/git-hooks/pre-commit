@@ -1,0 +1,19 @@
+#!/bin/sh
+# Runs the privacy guard over exactly what is about to be committed.
+#
+# Installed by scripts/install-hooks.sh into .git/hooks/pre-commit (that directory is not versioned,
+# so a fresh clone has to run `pnpm hooks:install` once — the README says so).
+#
+# This hook exists because a documentation commit on 2026-10-09 carried a dormitory identifier that
+# had been transcribed from an accessibility tree. The rule was written down beforehand; writing it
+# down was not a control.
+
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+if [ ! -x "$(command -v node)" ]; then
+  echo "pre-commit: node not found, cannot run the privacy guard" >&2
+  exit 1
+fi
+
+exec node scripts/check-privacy.mjs --staged

@@ -34,3 +34,6 @@ android/keystore.properties
 # Temporary
 tmp/
 .cache/
+
+# The privacy guard's local exact-value list: never committed, never uploaded.
+privacy-denylist.local.txt

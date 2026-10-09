@@ -4,11 +4,14 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import cn.scut.bombax.scut.notice.BalanceNoticeService
 import cn.scut.bombax.scut.notice.DailyRefresh
 import cn.scut.bombax.scut.notice.DailySchedule
+import cn.scut.bombax.scut.notice.LocalSnapshotSignals
 import cn.scut.bombax.scut.auth.CaptchaService
 import cn.scut.bombax.scut.auth.Campus
 import cn.scut.bombax.scut.auth.LoginInput
@@ -24,6 +27,7 @@ import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
+import org.json.JSONArray
 
 /** The alias the notification permission is asked under; see `requestNoticePermission`.
  *
@@ -51,7 +55,7 @@ class ScutApiPlugin : Plugin() {
 
     companion object {
         /** Version of the JS-facing surface, bumped when a method is added. */
-        const val BRIDGE_VERSION = "2"
+        const val BRIDGE_VERSION = "5"
     }
 
     /** Capacitor exposes a nullable context; the activity is always there once the bridge is up. */
@@ -62,9 +66,20 @@ class ScutApiPlugin : Plugin() {
     private val runtime: ScutRuntime
         get() = ScutRuntime.get(appCtx)
 
+    @Volatile private var listeningForLocalUpdates = false
+
+    /** A signal, not data: JS must read the local SQLite-backed bridge for actual values. */
+    private val onLocalSnapshotChanged: () -> Unit = {
+        Handler(Looper.getMainLooper()).post {
+            if (listeningForLocalUpdates) notifyListeners("localSnapshotChanged", JSObject())
+        }
+    }
+
     /** App-local plugin registration happens in MainActivity before the bridge loads. */
     override fun load() {
         super.load()
+        listeningForLocalUpdates = true
+        LocalSnapshotSignals.subscribe(onLocalSnapshotChanged)
         // The WebView's own UA is the identity every protocol fact in docs/PROTOCOL.md was
         // verified with; the daily alarm can start this process with no WebView, so the runtime
         // keeps a copy.
@@ -82,7 +97,7 @@ class ScutApiPlugin : Plugin() {
             val versionName = runCatching {
                 val context = getContext()
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName
-            }.getOrNull() ?: "0.2.0"
+            }.getOrNull() ?: "1.0.0"
             JSObject().apply {
                 put("ok", true)
                 put("platform", "android")
@@ -162,6 +177,34 @@ class ScutApiPlugin : Plugin() {
                 JSObject().apply { put("snapshot", JSObject.NULL) }
             } else {
                 JSObject().apply { put("snapshot", snapshotJson(stored)) }
+            }
+        }
+    }
+
+    /**
+     * A local-only chart read. Never fetches SCUT, never writes or synthesises history.
+     * Uses the last displayed meter profile so an offline chart works without a session.
+     * No room number or grouping hash crosses this new bridge method.
+     */
+    @PluginMethod
+    fun electricHistory(call: PluginCall) {
+        submit(call) {
+            val history = runtime.history
+            val latest = history?.latestAny()
+            val points = JSONArray()
+            if (latest != null) {
+                history?.listForProfile(latest.profileId).orEmpty().forEach { stored ->
+                    points.put(JSObject().apply {
+                        put("updatedAt", stored.recordedAtMillis)
+                        putNumberOr("electric", stored.electric)
+                        put("source", stored.source.wire)
+                    })
+                }
+            }
+            JSObject().apply {
+                put("campus", latest?.campus ?: JSObject.NULL)
+                put("unit", latest?.electricUnit.orEmpty())
+                put("points", points)
             }
         }
     }
@@ -279,11 +322,12 @@ class ScutApiPlugin : Plugin() {
             // The user asked for no notification; a daily alarm that restarts the service would
             // put one straight back up. Both switches go together on the way off.
             DailyRefresh.disable(context)
+            DailyRefresh.cancelTest(context)
             noticeJson()
         }
     }
 
-    // ---------------------------------------------------------- daily refresh
+    // ---------------------------------------------------------- configurable daily snapshot and one-off verification
     //
     // One query a day, inexact alarm, no login attempt, no retry loop. Off by default.
 
@@ -295,7 +339,7 @@ class ScutApiPlugin : Plugin() {
             if (runtime.session.peek() == null) {
                 throw ScutException(
                     AppError.NO_SESSION,
-                    "请先登录，再开启晚间余额快照",
+                    "请先登录，再开启每日余额快照",
                     "daily/noSession"
                 )
             }
@@ -303,10 +347,54 @@ class ScutApiPlugin : Plugin() {
             if (enabled == 0L) {
                 throw ScutException(
                     AppError.UPSTREAM_UNAVAILABLE,
-                    "系统不接受定时唤醒，无法开启晚间余额快照",
+                    "系统不接受定时唤醒，无法开启每日余额快照",
                     "daily/arm-failed"
                 )
             }
+            noticeJson()
+        }
+    }
+
+    /** Store a Beijing daily clock setting even while the daily switch is off. */
+    @PluginMethod
+    fun setDailyTime(call: PluginCall) {
+        val hour = call.getInt("hour")
+        val minute = call.getInt("minute")
+        submit(call) {
+            if (hour == null || minute == null || !DailySchedule.validTime(hour, minute)) {
+                throw ScutException(AppError.INVALID_INPUT, "请选择有效的每日查询时间", "daily/time")
+            }
+            val next = DailyRefresh.setTime(appCtx, System.currentTimeMillis(), hour, minute)
+            if (next < 0L) {
+                throw ScutException(AppError.UPSTREAM_UNAVAILABLE, "定时设置保存失败", "daily/time-save")
+            }
+            noticeJson()
+        }
+    }
+
+    /** A separate inexact test alarm around five minutes from now, only by explicit user tap. */
+    @PluginMethod
+    fun scheduleSnapshotTest(call: PluginCall) {
+        submit(call) {
+            requireNoticeAllowed()
+            if (runtime.session.peek() == null) {
+                throw ScutException(AppError.NO_SESSION, "请先登录后再测试", "snapshotTest/noSession")
+            }
+            if (!runtime.noticeRunning) {
+                throw ScutException(AppError.INVALID_INPUT, "请先开启常驻通知", "snapshotTest/noticeOff")
+            }
+            val due = DailyRefresh.scheduleTest(appCtx, System.currentTimeMillis())
+            if (due == 0L) {
+                throw ScutException(AppError.UPSTREAM_UNAVAILABLE, "系统无法安排本次测试", "snapshotTest/arm-failed")
+            }
+            noticeJson()
+        }
+    }
+
+    @PluginMethod
+    fun cancelSnapshotTest(call: PluginCall) {
+        submit(call) {
+            DailyRefresh.cancelTest(appCtx)
             noticeJson()
         }
     }
@@ -323,6 +411,8 @@ class ScutApiPlugin : Plugin() {
         val context = appCtx
         val now = System.currentTimeMillis()
         val nextDue = DailyRefresh.nextDue(context, now)
+        val (hour, minute) = DailyRefresh.selectedTime(context)
+        val testDue = DailyRefresh.testDue(context)
         return JSObject().apply {
             put("granted", noticePermissionGranted())
             put("enabled", NotificationManagerCompat.from(context).areNotificationsEnabled())
@@ -330,6 +420,12 @@ class ScutApiPlugin : Plugin() {
             put("dailyEnabled", DailyRefresh.isEnabled(context))
             // -1 while the switch is off; seconds until the next planned wake otherwise.
             put("nextDueIn", if (nextDue == 0L) -1L else DailySchedule.secondsUntil(now, nextDue))
+            put("nextDueAt", nextDue)
+            put("testDueAt", testDue)
+            put("dailyHour", hour)
+            put("dailyMinute", minute)
+            put("testPending", testDue > 0L)
+            put("testDueIn", if (testDue == 0L) -1L else DailySchedule.secondsUntil(now, testDue))
         }
     }
 
@@ -362,6 +458,8 @@ class ScutApiPlugin : Plugin() {
     }
 
     override fun handleOnDestroy() {
+        listeningForLocalUpdates = false
+        LocalSnapshotSignals.unsubscribe(onLocalSnapshotChanged)
         // Memory only: the stored copy is what makes the next start stay signed in. The shared
         // queue deliberately outlives the Activity — the notification service owns it too.
         runtime.onActivityDestroyed()

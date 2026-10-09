@@ -70,7 +70,7 @@ export interface Bills {
 }
 
 /** Why a balance was queried — recorded with the snapshot so a daily series can be isolated. */
-export type SnapshotSource = 'manual' | 'auto' | 'login' | 'restore' | 'nightly' | 'unknown';
+export type SnapshotSource = 'manual' | 'auto' | 'login' | 'restore' | 'nightly' | 'daily' | 'test' | 'unknown';
 
 /** A stored reading: `Bills`, plus the reason it exists. */
 export interface Snapshot extends Bills {
@@ -102,6 +102,15 @@ export interface NoticeState {
   dailyEnabled: boolean;
   /** Seconds until the next planned wake; -1 when the daily switch is off. */
   nextDueIn: number;
+  /** Native owned scheduled epoch millis (may be in the past while Android delays delivery). */
+  nextDueAt: number;
+  testDueAt: number;
+  /** User-selected Beijing wall-clock time, stored natively. */
+  dailyHour: number;
+  dailyMinute: number;
+  /** One-off inexact verification alarm, independent of the daily setting. */
+  testPending: boolean;
+  testDueIn: number;
 }
 
 export interface NoticePayload {
@@ -137,4 +146,18 @@ export interface NativeLogLine {
   elapsedMs: number;
   /** Non-sensitive service code from an upstream JSON body. */
   serviceCode?: string;
+}
+
+/** Read-only, local electricity history; never includes room, account or token. */
+export interface ElectricHistoryPoint {
+  updatedAt: number;
+  electric: number | null;
+  source: SnapshotSource;
+}
+
+export interface ElectricHistory {
+  campus: Campus | null;
+  /** Unit may be unknown, especially outside the DXC user-verified field. */
+  unit: string;
+  points: ElectricHistoryPoint[];
 }

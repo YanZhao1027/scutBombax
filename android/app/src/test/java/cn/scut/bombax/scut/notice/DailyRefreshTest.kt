@@ -108,6 +108,58 @@ class DailyRefreshTest {
     }
 
     @Test
+    fun `a chosen nearby future time is scheduled today and not tomorrow`() {
+        val now = beijingMillis(2026, 10, 8, 20, 26)
+        assertEquals(
+            beijingMillis(2026, 10, 8, 20, 32),
+            DailySchedule.nextSnapshotAt(now, 20, 32)
+        )
+    }
+
+    @Test
+    fun `a chosen time that has passed waits until tomorrow`() {
+        val now = beijingMillis(2026, 10, 8, 20, 26)
+        assertEquals(
+            beijingMillis(2026, 10, 9, 20, 25),
+            DailySchedule.nextSnapshotAt(now, 20, 25)
+        )
+    }
+
+    @Test
+    fun `a chosen time at midnight crosses the calendar date safely`() {
+        val now = beijingMillis(2026, 10, 8, 23, 59)
+        assertEquals(
+            beijingMillis(2026, 10, 9, 0, 5),
+            DailySchedule.nextSnapshotAt(now, 0, 5)
+        )
+    }
+
+    @Test
+    fun `changing chosen time does not depend on device timezone`() {
+        val now = beijingMillis(2026, 10, 8, 20, 26)
+        val target = DailySchedule.nextSnapshotAt(now, 20, 40)
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+        assertEquals(target, DailySchedule.nextSnapshotAt(now, 20, 40))
+    }
+
+    @Test
+    fun `invalid times are not accepted as clock settings`() {
+        assertEquals(false, DailySchedule.validTime(24, 0))
+        assertEquals(false, DailySchedule.validTime(23, 60))
+        assertEquals(false, DailySchedule.validTime(-1, 0))
+        assertEquals(true, DailySchedule.validTime(0, 0))
+        assertEquals(true, DailySchedule.validTime(23, 59))
+    }
+
+    @Test
+    fun `an early one-time test is a distinct five-minute intent`() {
+        val now = beijingMillis(2026, 10, 8, 20, 26)
+        assertEquals(300_000L, DailySchedule.TEST_DELAY_MS)
+        assertTrue(now + DailySchedule.TEST_DELAY_MS < DailySchedule.nextSnapshotAt(now))
+        assertNotEquals(DailyRefresh.ACTION_TEST, DailyRefresh.ACTION_DAILY)
+    }
+
+    @Test
     fun `the slot is not midnight, which is when the dorm network drops`() {
         // Sampling at the boundary would produce a missing row every single night.
         assertNotEquals(0, hourAndMinute(DailySchedule.nextSnapshotAt(beijingMillis(2026, 10, 8, 20))).first)

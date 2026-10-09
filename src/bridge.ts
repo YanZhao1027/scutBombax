@@ -1,4 +1,4 @@
-import { registerPlugin } from '@capacitor/core';
+import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import type {
   Bills,
   NoticePayload,
@@ -11,7 +11,8 @@ import type {
   ScutErrorCode,
   SessionInfo,
   Snapshot,
-  SnapshotSource
+  SnapshotSource,
+  ElectricHistory
 } from './types';
 import { BridgeError as BridgeErrorClass } from './types';
 
@@ -21,6 +22,7 @@ import { BridgeError as BridgeErrorClass } from './types';
  * host; the WebView is blocked by CORS there by design.
  */
 interface ScutApiNativePlugin {
+  addListener(eventName: 'localSnapshotChanged', listener: () => void): Promise<PluginListenerHandle>;
   health(): Promise<HealthResult>;
   getCaptcha(): Promise<CaptchaChallenge>;
   login(input: LoginInput): Promise<SessionInfo>;
@@ -28,6 +30,7 @@ interface ScutApiNativePlugin {
   refreshSession(): Promise<RefreshResult>;
   logout(): Promise<SessionInfo>;
   lastSnapshot(): Promise<{ snapshot: Snapshot | null }>;
+  electricHistory(): Promise<ElectricHistory>;
   clearHistory(): Promise<{ deleted: number }>;
   noticeStatus(): Promise<NoticeState>;
   requestNoticePermission(): Promise<NoticeState>;
@@ -35,6 +38,9 @@ interface ScutApiNativePlugin {
   stopNotice(): Promise<NoticeState>;
   enableDaily(): Promise<NoticeState>;
   disableDaily(): Promise<NoticeState>;
+  setDailyTime(input: { hour: number; minute: number }): Promise<NoticeState>;
+  scheduleSnapshotTest(): Promise<NoticeState>;
+  cancelSnapshotTest(): Promise<NoticeState>;
 }
 
 const ScutApi = registerPlugin<ScutApiNativePlugin>('ScutApi');
@@ -93,6 +99,10 @@ const call = async <T>(fn: () => Promise<T>): Promise<T> => {
   }
 };
 
+/** No payload, only a signal to refresh native-owned local state. Never queries SCUT. */
+export const onLocalSnapshotChanged = (listener: () => void): Promise<PluginListenerHandle> =>
+  ScutApi.addListener('localSnapshotChanged', listener);
+
 export const health = (): Promise<HealthResult> => call(() => ScutApi.health());
 
 export const getCaptcha = (): Promise<CaptchaChallenge> => call(() => ScutApi.getCaptcha());
@@ -112,6 +122,13 @@ export const startNotice = (payload: NoticePayload): Promise<{ running: boolean 
 export const stopNotice = (): Promise<NoticeState> => call(() => ScutApi.stopNotice());
 export const enableDaily = (): Promise<NoticeState> => call(() => ScutApi.enableDaily());
 export const disableDaily = (): Promise<NoticeState> => call(() => ScutApi.disableDaily());
+export const setDailyTime = (hour: number, minute: number): Promise<NoticeState> =>
+  call(() => ScutApi.setDailyTime({ hour, minute }));
+/** One manually requested, inexact verification via the real native Alarm chain. */
+export const scheduleSnapshotTest = (): Promise<NoticeState> =>
+  call(() => ScutApi.scheduleSnapshotTest());
+export const cancelSnapshotTest = (): Promise<NoticeState> =>
+  call(() => ScutApi.cancelSnapshotTest());
 
 /**
  * Queries both balances and records a history row.
@@ -131,6 +148,9 @@ export const getBills = (source: SnapshotSource): Promise<Bills> =>
 /** The newest stored reading, or null when nothing has ever been recorded. Never a live value. */
 export const lastSnapshot = (): Promise<Snapshot | null> =>
   call(async () => (await ScutApi.lastSnapshot()).snapshot ?? null);
+
+/** Read the existing on-device SQLite rows. This does not trigger a school request. */
+export const electricHistory = (): Promise<ElectricHistory> => call(() => ScutApi.electricHistory());
 
 export const clearHistory = (): Promise<{ deleted: number }> => call(() => ScutApi.clearHistory());
 

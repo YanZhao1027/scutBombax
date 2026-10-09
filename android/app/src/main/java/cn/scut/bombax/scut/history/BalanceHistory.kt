@@ -5,7 +5,7 @@ import java.security.MessageDigest
 /**
  * Why a snapshot was recorded.
  *
- * Kept as data because the paths are not equally trustworthy for analysis: a `nightly` row is the
+ * Kept as data because the paths are not equally trustworthy for analysis: a `daily` row is the
  * one the trend chart can rely on being roughly 24 hours apart, while `manual` rows cluster
  * wherever the user happened to look. `UNKNOWN` exists so a value that arrived wrong from the page
  * shows up as itself instead of being silently counted as a tap.
@@ -15,7 +15,9 @@ enum class SnapshotSource(val wire: String) {
     AUTO("auto"),
     LOGIN("login"),
     RESTORE("restore"),
-    NIGHTLY("nightly"),
+    NIGHTLY("nightly"), // legacy fixed 23:00 rows, kept readable
+    DAILY("daily"),    // new user-selected daily clock slot
+    TEST("test"),      // explicit early one-off verification
     UNKNOWN("unknown");
 
     companion object {

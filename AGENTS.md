@@ -248,6 +248,13 @@ plugin state. This section's foreground-timer rules are otherwise unchanged and 
 
 Never commit secrets or credentials.
 
+Never commit a person's identifiers either — dormitory building and room, student number, name.
+This is enforced by `scripts/check-privacy.mjs` (`pnpm check:privacy`, and at commit time once
+`pnpm hooks:install` has been run), because the rule was written down here on 2026-10-05 and a
+room number still entered a documentation commit on 2026-10-09, transcribed from a device screen.
+Text read off the phone is paraphrased (`<楼栋-房号>`), never pasted; exact values that must not
+recur go in `privacy-denylist.local.txt`, which is gitignored and never uploaded.
+
 Never log:
 
 - username/student number

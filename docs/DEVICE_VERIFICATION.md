@@ -1172,3 +1172,282 @@ works but drops the association, and an open campus network will not auto-join a
 cost 40 minutes of manual rejoining earlier today. `settings put global http_proxy 127.0.0.1:1`
 fails every connection in 2 ms instead, leaves the association intact, and is undone with
 `:0`. Verified by a 200 from the captcha endpoint after restoring.
+
+## 16. History outside the login gate (PR #1 follow-up, host-verified)
+
+The trend panel and the offline caption both lived inside `#results-panel`, which is hidden when
+there is no session — so the feature that exists for "the network is down / the session expired /
+I signed out" was unreachable in exactly those three states. The same rule was broken from the
+other side by `renderSession`, which called `renderBills(null)` on sign-out and blanked figures
+the device still held.
+
+Restructured: `#history-panel` (reading, caption, trend) is shown whenever there is something to
+read, `#results-panel` now holds only what can reach the school (query, auto-refresh, the two
+notification switches, logout), and `#login-panel` is shown whenever there is no session. All
+three are set in one place, from `deriveView({ authenticated, live, hasHistory })` in
+`src/view.ts` — a pure function with nine host tests, because "every caller remembers to gate and
+label correctly" is the assumption that produced the bug.
+
+Two rules worth stating:
+
+- **The caption is produced by the view, not by the caller.** Anything on screen that is not a
+  live reading gets `显示的是 … 的历史记录…不是实时余额`, with its own timestamp, whether the
+  reason is a network failure, an expired session or simply signing out. A caller can no longer
+  paint a stored reading and forget to label it.
+- **A live reading owns the screen.** `showLastKnown()` returns early while `state.live` is true:
+  the stored row behind a fresh query is the same number one round trip older, and painting it
+  would replace a live figure with a stale one and then have to describe the result as history.
+
+`清除本机历史` is now a separate action under 会话与诊断, behind its own confirmation, and
+`退出` no longer touches it. `window.confirm` failing open would be the wrong direction, so the
+handler requires a truthy answer before calling `clearHistory()`.
+
+**Status: host-verified only.** `pnpm build`, 39 vitest (17 refresh + 13 trend + 9 view),
+`check:dom` and 116 JVM tests pass, and the release APK builds. It is **not installed**: tonight's
+23:00 sample has to be taken by the build already on the phone, and an install would clear the
+alarm and stop the service mid-window. Device acceptance of the five states — signed in, signed
+out with history, signed out without history, after 退出, after a session expires — follows the
+23:00 check.
+
+## 17. The first real daily snapshot (2026-10-08 23:14, release build)
+
+PR #1 head `50709fe` (configurable clock + one-off verification alarm) was checked on the host
+first: `pnpm typecheck`, 43 vitest, `check:dom`, `pnpm build`, 122 JVM tests and
+`assembleRelease` all pass. The APK's certificate digest is still `ef607f9d…`, so it went on the
+phone with `adb install -r` — **no uninstall**, and the session and history came through
+untouched (`result=restored`, then a live query at 22:38:49).
+
+The user-selected slot was still the default 23:00. What actually happened:
+
+```text
+23:14:57.312  stage=daily   result=armed dueInSec=85502 hour=23 minute=0 api=34
+23:14:57.317  stage=snapshot result=fired lateSec=897 start=foreground-service nextInSec=85502
+23:14:57.9xx  dxc.redirect → thirdLogin → authorize → getCode  session-established
+23:14:57.929  dxc.userInfo 200 · 23:14:57.965 ammeterBalance 200 · 23:14:58.022 waterBalance 200
+23:14:58.028  stage=history result=recorded source=daily electric=true water=true ac=false
+23:14:58.038  stage=notice  result=shown updated=23:14
+23:14:58.038  stage=daily   result=ok
+```
+
+Five things this settles:
+
+1. **The whole chain works from a locked, Dozing phone with no user action**: alarm → receiver →
+   service → `ScutRuntime` → SQLite. `start=foreground-service` was allowed precisely because
+   the notice service was already alive — §13.3's constraint, now confirmed in the positive
+   direction on a release build.
+2. **The first row is labelled `daily`, not `nightly`** — the source split is real on device, and
+   the legacy rows still parse.
+3. **No drift.** The re-arm computed `origWhen 1791558000000`, exactly 86 400 000 ms after
+   tonight's slot: tomorrow 23:00:00, not 23:14. A late delivery does not move the schedule,
+   because the schedule is a wall-clock time and not an interval.
+4. **No crash, no restart.** The same process (`pid 13891`) that started at 22:38 handled the
+   delivery at 23:14; nothing was logged in `crash`, and the system never reported
+   `has died: fg SVC`.
+5. **The chosen time is a lower bound, not an appointment.** The alarm was due at 23:00:00 and
+   was delivered at 23:14:57 — `lateSec=897`, ~15 minutes — because the device was in Doze and
+   `setAndAllowWhileIdle` waits for a maintenance window. It fired at all because the phone was
+   charging and left on; on a deeper night it can be considerably later. The UI says
+   "每天尝试查询一次，系统可能延迟", which is the honest claim.
+
+Evidence: `evidence/logcat-2026-10-08-first-daily-snapshot.txt`.
+
+Still open on this round: the 约 5 分钟后测试一次 control and the five-state UI pass (signed in /
+signed out with history / signed out without / after 退出 / after expiry) both need a tap on an
+unlocked screen, which is the user's to give.
+
+### 17.1 The one-off verification alarm, and what it proves
+
+The user tapped 约 5 分钟后测试一次 at about 09:14 the following morning. Three independent
+signals say the chain ran and landed:
+
+```bash
+adb shell dumpsys alarm | grep -c SNAPSHOT_TEST     # no pending test alarm — it was consumed
+```
+
+- the chart summary reads **本地历史 · 最近 10 条记录**, up from 7 the previous evening
+  (8 = the 22:38 restore, 9 = the 23:14 daily, 10 = this test);
+- the newest plotted point is **10/9 09:19 ¥22.38** — five minutes after the tap, so this
+  delivery was not deferred at all (the device was awake and charging);
+- the button is back to its idle label and `testPending` is false, which only happens through
+  `consumeTest()` — a call site that exists solely in the test branch of the receiver.
+
+Caveat kept honest: the `stage=snapshotTest result=fired` / `result=ok` log lines had already
+rotated out of logcat by the time the run was inspected, so the *labels* on those lines are
+verified by code path and by the consumed-pref evidence, not by a captured log. The row's
+`source=test` value is likewise not directly readable — `run-as` is refused on a non-debuggable
+build, which is the correct behaviour and the reason the redacted `result=recorded` line exists.
+
+Also visible in the same pass: the balance has fallen from ¥29.91 (16:42) to ¥28.43 (20:15) to
+¥22.38 (next morning 09:19) with no increases flagged — the first real consumption-shaped series,
+and the trend's 余额增项 list correctly staying empty on it.
+
+### 17.2 Signed out, with history: the state the restructure was for
+
+The user pressed 退出 at 13:04:01. The captured log is the whole coupling, in order:
+
+```text
+13:04:01.790  stage=notice       result=removed
+13:04:01.792  stage=daily        result=disabled
+13:04:01.793  stage=snapshotTest result=cancelled
+13:04:01.794  stage=logout       result=cleared
+```
+
+and the system agrees: `dumpsys alarm` lists **zero** pending alarms for the package,
+`BalanceNoticeService` is gone from the service list, and the notification record
+(`key=0|cn.scut.bombax|176`) is no longer posted. Nothing is left scheduled that could wake the
+app and query the school after signing out — which is the claim that made the notification →
+daily coupling one-way in the first place.
+
+What stayed on screen, from the accessibility tree rather than a screenshot (the room number is
+an identifier and does not go in the evidence):
+
+```text
+未登录
+<楼栋-房号> · 电费余额 元 21.81 · 水费 28.2 平台返回余额 · 更新 10:25:44
+显示的是 今天 10:25 的历史记录，不是实时余额
+本地历史 · 最近 11 条记录          ← the trend, open and usable while signed out
+登录并查询
+```
+
+The room is written as a placeholder here on purpose: the line above was transcribed from the
+accessibility tree, and the transcription initially carried the real identifier into the
+repository — which is exactly what §17.2's own rule forbids. The two documentation commits that
+carried it were replaced on 2026-10-09 by one commit with the **same tree** (`13eb1f91…`), so the
+identifier is unreachable from any ref on this branch now. What the rewrite does *not* do is make
+the replaced commit disappear from GitHub: fetching it by its pinned SHA still serves the old
+text, which is measured and recorded in `docs/RELEASE_ACCEPTANCE.md` §7.
+
+Three claims, each with its own evidence:
+
+- **History survives logout.** The count went 10 → 11 across the morning's own query and did not
+  drop when the session was cleared; the figures, the timestamp and the chart are all still there.
+- **The session-gated controls really disappeared.** Of 刷新 / 常驻通知 / 每日余额快照 /
+  约 5 分钟后测试一次 / 退出, none remain on screen — only 登录并查询.
+- **The caption says the right thing without being told to.** No reason parenthetical appears,
+  because nothing failed — the honest sentence for a signed-out screen is "this is a stored
+  reading, here is when it was taken", and that is what `deriveView` produces for
+  `{authenticated: false, live: false, hasHistory: true}`.
+
+Two of the five states are therefore now device-verified (signed in, and signed out with history
+— the latter reached through the real 退出 action, so it covers the "after logout" case as
+well). The remaining two are not equivalent in code but are in behaviour: *session expired*
+follows the same `authenticated: false` path with a reason string, and *no history* requires
+destroying the only real series this app has. Both stay recorded as host-tested, not
+device-verified.
+
+## 18. Where the summary lives
+
+The item-by-item verdict for Release 0.2.0 — the seven approved requirements, what each was
+graded, and the list of things still unverified with who can unblock them — is
+[`RELEASE_ACCEPTANCE.md`](RELEASE_ACCEPTANCE.md). This file stays the raw record; that one is the
+report, and it points back here rather than restating the evidence.
+
+## 19. Re-login, notice, daily alarm, and the first *early* test sample (2026-10-09 18:42–19:09)
+
+The user logged in themselves at 18:42–18:47 (one attempt, `result=ok`). Everything below is the
+same process (`pid 17538`) with no reinstall, so the session restored from the Keystore blob and
+the history database kept its rows.
+
+```text
+18:42:54.411  stage=session result=disk-ready path=noBackupFilesDir
+18:42:54.411  stage=runtime result=ready api=34 release=14 userAgent=cached
+18:45:32.855  stage=captcha … status=200 ms=181          (after three UnknownHostException retries)
+18:47:25.352  stage=login.captchaForm result=ok campus=DXC refreshToken=present
+18:47:25.937  stage=history result=recorded source=login electric=true water=true ac=false
+18:58:28.979  stage=notice  result=shown updated=18:47:25
+18:59:06.282  stage=daily   result=armed dueInSec=14453 hour=23 minute=0 api=34
+19:00:07.600  stage=snapshotTest result=armed dueInSec=300
+19:08:52.612  stage=snapshotTest result=fired lateSec=225 start=foreground-service
+19:08:53.010  stage=history result=recorded source=test electric=true water=true ac=false
+19:08:53.014  stage=notice  result=shown updated=19:08
+19:08:53.015  stage=snapshotTest result=ok
+```
+
+**`source=login` is now on the record.** §17.1 left the test row's label to inference; this time
+the log capture was running before the tap, so `fired` / `ok` / `recorded source=test` are all
+first-hand. The row count went 11 → 12 → 13, and `dumpsys alarm` shows no pending
+`SNAPSHOT_TEST` afterwards — the pending token was consumed, which only `consumeTest()` does.
+
+**The test fired *late*, and late is not failure.** Planned at +300 s, delivered at +525 s
+(`lateSec=225`) on an awake, charging device — the inexact window (`window=+3m44s998ms`) is what
+the UI means by "系统可能延迟". Two samples now exist for the one-off alarm (09:14 → 09:19 on time,
+19:00 → 19:08 late), so the honest statement is *the alarm arrives within a few minutes, not at a
+promised second*.
+
+**Re-arming after a fresh login works.** `dueInSec=14453` at 18:59:06 puts the next slot at
+23:00:00 the same evening, and `origWhen 1791558000000` in `dumpsys alarm` is that instant to the
+millisecond. The daily path is armed from a session the user created, not from a debug build.
+
+**Notification and foreground service, both confirmed:** `NotificationRecord … id=176 importance=2`
+is posted, `ServiceRecord … isForeground=true foregroundId=176`, and the MIUI shade files it under
+静音 — which is why the check is `dumpsys`, not a screenshot.
+
+**Balance semantics, one more observation.** The electric balance fell 21.81 (10:25) → 17.07
+(18:47) → and the trend panel's 余额增项 list stayed empty across the whole series. Still an
+observation, not a consumption figure: 字段语义 remains unverified (§20 of the report's follow-up A).
+
+Two strings from the accessibility tree worth keeping: the pill read `已登录`, and the daily line
+read `下次约 4 小时 1 分后` — consistent with the armed alarm, and computed by the app rather than
+by me. The room renders as `<楼栋-房号>` in every note here, per §17.2's rule and now per the
+mechanical check in `scripts/check-privacy.mjs`.
+
+### 19.1 A countdown that could display sixty minutes
+
+At 19:09 the same line read `下次约 3 小时 60 分后`. The device was right and the formatter was
+wrong: it floored the hours and **rounded the remainder separately**, so 3 h 59 min 36 s became
+"3 小时" plus `round(59.6) = 60`. Nothing else in the app is affected — the alarm itself was armed
+to `origWhen 1791558000000` — but a countdown that can print 60 is a countdown nobody trusts.
+
+Fixed by rounding the span once and splitting it afterwards (`formatCountdown` in
+`src/snapshot-time.ts`, moved there from `main.ts` so it is unit-testable), with four tests pinning
+the cases: the phone's own value now reads `4 小时 0 分`, `23:59:30` before an alarm reads
+`24 小时 0 分`, and sub-minute spans still say `1 分` rather than `0 分`. **Host-tested only** —
+53 vitest, `check:dom`, `check:privacy` and the release build pass, and the rebuilt APK is signed
+by the same key (`ef607f9d…`), but it is **not installed**: an install would clear tonight's armed
+23:00 alarm, and the second natural daily sample is worth more than an early screenshot of a
+formatter fix. It goes on the phone with the `versionCode=3` round.
+
+## 20. The user's own slot: 21:25, delivered late, and the session-stale path (2026-10-09 21:20–21:47)
+
+The user set the daily time to **21:25** themselves, which closes the "configurable slot" question
+without requiring a 23:00 window. What the log shows, in order:
+
+```text
+21:20:55.614  stage=daily result=armed dueInSec=244 hour=21 minute=25 api=34
+21:28:03.302  stage=snapshot result=fired lateSec=183 start=foreground-service nextInSec=86216
+21:28:03.547  dxc.userInfo … status=302
+21:28:03.548  stage=dxc result=session-stale detail=dxc.userInfo/302 target=…/oauth/authorize
+21:28:04.047  stage=dxc.getCode result=session-established
+21:28:04.153/.272/.356  dxc.userInfo · ammeterBalance · waterBalance 200
+21:28:04.358  stage=history result=recorded source=daily electric=true water=true ac=false
+21:28:04.362  stage=notice  result=shown updated=21:28        ← 21:28:03.300 re-armed next slot first
+21:28:04.362  stage=daily   result=ok
+```
+
+Four things this settles, none of them by inference:
+
+1. **The chosen time is honoured.** `dueInSec=244` at 21:20:55 is 21:25:00, and the re-arm written
+   at the moment of firing is `origWhen 1791638700000` = **2026-10-10 21:25:00.000** in
+   `dumpsys alarm` — the slot survived its own delivery instead of drifting to "24 h after the fire".
+2. **One alarm, not two.** `setTime` re-armed rather than added: the pending list holds a single
+   `DAILY_REFRESH`, so changing the clock cannot leave a stale 23:00 registration behind.
+3. **Late again, and still a success.** Due 21:25:00, delivered 21:28:03 — `lateSec=183` with the
+   screen on and the phone charging. Three samples now (准点 / +225 s / +183 s), which is the
+   honest basis for the UI's "系统可能延迟".
+4. **The session-stale path is real on a release build, in the background.** The DFYC session had
+   died (2 h 41 min after login, consistent with §8's tens-of-minutes measurement) and said so with
+   a **302**. The app classified it as `session-stale` instead of an outage, rebuilt the chain
+   exactly **once**, and then completed the query and wrote the row. This is the recovery rule
+   working as documented, observed without a foreground click — and the second daily row is
+   `source=daily`, so the count went 13 → 14 → 15 (15 after the 21:47 manual refresh below).
+
+One display finding worth keeping separate from the scheduling result: while the page sat open,
+the daily fire updated the **notification and the database but not the page**. The countdown still
+read `下次约 4 分后` and the trend summary `最近 13 条记录`, both of which were true at 21:21 and
+false by 21:29. A foreground refresh at 21:47:26 (`result=recorded source=manual`) re-read the
+status, and the same page then showed `下次约 23 小时 38 分后` and `最近 15 条记录`. Nothing is
+scheduled wrongly — an open WebView is simply not told. Recording it as a freshness gap, not a
+scheduling bug, and not fixing it in the middle of a verification round.
+
+Evidence: `evidence/logcat-2026-10-09-custom-slot.txt` (28 lines, scanned by the privacy guard
+before archiving: zero hits against the shape rules and the local denylist).

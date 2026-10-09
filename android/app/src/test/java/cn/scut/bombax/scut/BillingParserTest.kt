@@ -13,7 +13,7 @@ import org.junit.Test
 
 class GzicParserTest {
 
-    private fun feeItem(info: String?, room: String? = "G1-101", code: Int = 200): JSONObject {
+    private fun feeItem(info: String?, room: String? = "G1-101", code: Int = 200): JSONObject { // privacy:ignore 合成房号，非真实宿舍
         val showData = if (info == null) "{}" else """{"信息":${JSONObject.quote(info)}}"""
         val data = if (room == null) "{}" else """{"room":${JSONObject.quote(room)}}"""
         return JSONObject(
@@ -141,16 +141,21 @@ class DxcParserTest {
     fun `resultKeys reports names and never a value`() {
         // This string goes into logcat once per successful query, so the test is the guarantee:
         // a balance, a room or a student number must not be able to ride along with the names.
+        // These three are synthetic fixtures, so the privacy guard is right to notice their shape:
+        // a real dormitory or student number must never appear here, and the markers say which
+        // lines were reviewed as fake-by-construction rather than added to the denylist.
+        val roomFixture = "G9-301" // privacy:ignore 合成房号
+        val studentFixture = "202199999" // privacy:ignore 合成学号
         val json = JSONObject(
             """{"statusCode":"200","resultObject":{
-               "leftMoney":"128.50","roomName":"G9-301","studentNo":"202199999",
+               "leftMoney":"128.50","roomName":"$roomFixture","studentNo":"$studentFixture",
                "powerLeft":52.0}}"""
         )
         val keys = DxcParser.resultKeys(json)
         assertEquals("leftMoney,powerLeft,roomName,studentNo", keys)
         assertFalse(keys.contains("128.50"))
-        assertFalse(keys.contains("G9-301"))
-        assertFalse(keys.contains("202199999"))
+        assertFalse(keys.contains(roomFixture))
+        assertFalse(keys.contains(studentFixture))
     }
 
     @Test

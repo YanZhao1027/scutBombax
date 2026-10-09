@@ -388,3 +388,133 @@ input {
     animation: none !important;
   }
 }
+
+/*
+ * The electricity trend. Same vocabulary as the rest of the page: one column, no cards, no
+ * shadows, and the same divider the history caption uses. Nothing here needs a framework — the
+ * chart is one inline SVG drawn from local rows.
+ */
+.trend-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+  margin: 16px 0 26px;
+}
+
+.trend-panel h2 {
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.trend-subtitle {
+  margin-top: 23px !important;
+}
+
+.trend-ranges {
+  display: flex;
+  gap: 6px;
+  margin: 14px 0 8px;
+}
+
+.trend-ranges button {
+  flex: 1;
+  background: var(--field);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 7px 4px;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.trend-ranges button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.trend-svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Horizontal drag scrubs the readings; a vertical swipe still scrolls the page. */
+  touch-action: pan-y;
+}
+
+.trend-svg .grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+
+.trend-svg .axis-label {
+  fill: var(--dim);
+  font: 11px system-ui, sans-serif;
+}
+
+.trend-svg .line {
+  stroke: var(--accent);
+  stroke-width: 2.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  fill: none;
+}
+
+/*
+ * A balance rise is marked with a hollow ring rather than a filled dot: it is the one thing on
+ * this chart that is an inference, and it should not look more certain than the readings.
+ */
+.trend-svg .increase {
+  fill: var(--bg);
+  stroke: var(--wait);
+  stroke-width: 2;
+}
+
+.trend-svg .focus {
+  fill: var(--accent);
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
+.trend-svg .focus-guide {
+  stroke: var(--dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.trend-selected {
+  background: var(--field);
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 13px;
+  min-height: 40px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-increases {
+  padding: 0;
+  list-style: none;
+  margin: 9px 0 0;
+}
+
+.trend-increases li {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-increases li span:last-child {
+  font-weight: 600;
+}
+
+/* Native-owned daily wall-clock time, with a one-time inexact QA trigger. */
+#daily-time {
+  width: 8rem;
+  max-width: 100%;
+  flex: none;
+  padding: 6px 8px;
+  font-size: 14px;
+}
+#snapshot-test-button:disabled {
+  opacity: 0.45;
+}
