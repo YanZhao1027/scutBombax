@@ -16,7 +16,9 @@ enum class AppError(val wire: String) {
     BUSY("BUSY"),
     INVALID_INPUT("INVALID_INPUT"),
     NETWORK("NETWORK"),
-    CAMPUS_NETWORK_REQUIRED("CAMPUS_NETWORK_REQUIRED");
+    CAMPUS_NETWORK_REQUIRED("CAMPUS_NETWORK_REQUIRED"),
+    WECHAT_UNAVAILABLE("WECHAT_UNAVAILABLE"),
+    RECHARGE_OPEN_FAILED("RECHARGE_OPEN_FAILED");
 
     /**
      * The user-facing line for this code. Raw upstream text never crosses the
@@ -34,6 +36,8 @@ enum class AppError(val wire: String) {
         INVALID_INPUT -> "账号或密码填写不完整"
         NETWORK -> "网络请求失败"
         CAMPUS_NETWORK_REQUIRED -> "当前网络无法访问一卡通服务，请连接校园网或使用学校 SSLVPN 后重试"
+        WECHAT_UNAVAILABLE -> "未安装微信或微信无法接收分享"
+        RECHARGE_OPEN_FAILED -> "无法打开官方充值入口"
     }
 }
 

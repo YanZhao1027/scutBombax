@@ -14,6 +14,7 @@ import './styles.css';
 import { drawElectricTrend } from './trend';
 import { deriveView, historyCaption } from './view';
 import { dueLabel, shouldAdoptStoredReading } from './local-sync';
+import { rechargeAvailable } from './recharge';
 import { formatBeijingClock, parseBeijingClock } from './snapshot-time';
 
 /**
@@ -81,7 +82,11 @@ const els = {
   refreshTokenBtn: $<HTMLButtonElement>('refresh-token-btn'),
   healthBtn: $<HTMLButtonElement>('health-btn'),
   clearBtn: $<HTMLButtonElement>('clear-btn'),
-  clearHistoryBtn: $<HTMLButtonElement>('clear-history-btn')
+  clearHistoryBtn: $<HTMLButtonElement>('clear-history-btn'),
+  rechargeWechat: $<HTMLButtonElement>('recharge-wechat'),
+  rechargeBrowser: $<HTMLButtonElement>('recharge-browser'),
+  rechargeHint: $<HTMLElement>('recharge-hint'),
+  rechargeStatus: $<HTMLElement>('recharge-status')
 };
 
 const state = {
@@ -207,6 +212,16 @@ const applyView = (): void => {
   }
 };
 
+/** A static, DXC-only link, unrelated to login, cookies, balance, or payment status. */
+const renderRecharge = (): void => {
+  const allowed = rechargeAvailable(state.session?.authenticated ? state.session.campus : null, campus());
+  els.rechargeWechat.disabled = !allowed;
+  els.rechargeBrowser.disabled = !allowed;
+  els.rechargeHint.textContent = allowed
+    ? '大学城校区 · 分享至微信聊天后，点链接进入官方充值页。'
+    : '广州国际校区充值入口尚未验证。';
+};
+
 const renderSession = (session: SessionInfo | null): void => {
   state.session = session;
   const authed = Boolean(session?.authenticated);
@@ -219,6 +234,7 @@ const renderSession = (session: SessionInfo | null): void => {
   // The picker must not disagree with the session it belongs to: a restored DXC session with
   // GZIC showing would make the next login query the wrong campus.
   if (authed && session?.campus) els.campus.value = session.campus;
+  renderRecharge();
   els.sessionState.textContent = authed
     ? `会话：${session?.campus ?? '?'} · ${session?.name || '未命名'} · token 剩余 ${
         session && session.expiresIn >= 0 ? `${session.expiresIn}s` : '未知'
@@ -629,6 +645,43 @@ const clearSession = async (notify: boolean): Promise<void> => {
 };
 
 const wire = (): void => {
+  els.campus.addEventListener('change', renderRecharge);
+
+  let rechargeBusy = false;
+  const runRecharge = async (target: 'wechat' | 'browser'): Promise<void> => {
+    if (rechargeBusy || !rechargeAvailable(
+      state.session?.authenticated ? state.session.campus : null,
+      campus()
+    )) return;
+    rechargeBusy = true;
+    els.rechargeWechat.disabled = true;
+    els.rechargeBrowser.disabled = true;
+    setStatus(els.rechargeStatus, '', 'idle');
+    try {
+      if (target === 'wechat') {
+        await api.shareRechargeToWeChat();
+        setStatus(els.rechargeStatus, '请在微信里选择聊天，再点开充值链接。', 'ok');
+      } else {
+        await api.openRechargeInBrowser();
+        setStatus(els.rechargeStatus, '已交给浏览器，可能需要学校统一认证。', 'idle');
+      }
+    } catch (error) {
+      // No automatic non-WeChat fallback: it could silently defeat WeChat-only authentication.
+      setStatus(
+        els.rechargeStatus,
+        isBridgeError(error) && error.code === 'WECHAT_UNAVAILABLE'
+          ? '这台手机没有可用的微信分享入口。可改用浏览器打开。'
+          : describeError(error),
+        'error'
+      );
+    } finally {
+      rechargeBusy = false;
+      renderRecharge();
+    }
+  };
+  els.rechargeWechat.addEventListener('click', () => void runRecharge('wechat'));
+  els.rechargeBrowser.addEventListener('click', () => void runRecharge('browser'));
+
   els.trendToggle.addEventListener('click', () => {
     const opening = els.trendPanel.hidden;
     els.trendPanel.hidden = !opening;

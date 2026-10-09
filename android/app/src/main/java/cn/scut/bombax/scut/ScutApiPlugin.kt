@@ -1,6 +1,9 @@
 package cn.scut.bombax.scut
 
 import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -55,7 +58,7 @@ class ScutApiPlugin : Plugin() {
 
     companion object {
         /** Version of the JS-facing surface, bumped when a method is added. */
-        const val BRIDGE_VERSION = "5"
+        const val BRIDGE_VERSION = "6"
     }
 
     /** Capacitor exposes a nullable context; the activity is always there once the bridge is up. */
@@ -97,7 +100,7 @@ class ScutApiPlugin : Plugin() {
             val versionName = runCatching {
                 val context = getContext()
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName
-            }.getOrNull() ?: "1.0.0"
+            }.getOrNull() ?: "1.0.1"
             JSObject().apply {
                 put("ok", true)
                 put("platform", "android")
@@ -108,6 +111,55 @@ class ScutApiPlugin : Plugin() {
                 put("deviceModel", Build.MODEL)
                 put("tlsValidation", "default")
                 put("session", sessionJson(runtime.session.public(System.currentTimeMillis())))
+            }
+        }
+    }
+
+    /**
+     * Transfers only the public school URL to WeChat's normal share flow.
+     * Android cannot force arbitrary HTTPS destinations into WeChat's internal WebView.
+     * WeChat must be installed; user chooses a chat and taps the link inside WeChat.
+     * No user credentials, Cookies or payment details are ever handed to WeChat by Bombax.
+     */
+    @PluginMethod
+    fun shareRechargeToWeChat(call: PluginCall) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, RechargeDestination.URL)
+            setPackage(RechargeDestination.WECHAT_PACKAGE)
+        }
+        launchExternalRecharge(call, intent, "wechat-share")
+    }
+
+    /** The non-WeChat option is an ordinary Android ACTION_VIEW to the same official URL. */
+    @PluginMethod
+    fun openRechargeInBrowser(call: PluginCall) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(RechargeDestination.URL)).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+        }
+        launchExternalRecharge(call, intent, "browser")
+    }
+
+    private fun launchExternalRecharge(call: PluginCall, intent: Intent, handoff: String) {
+        // Activity operations belong on the UI thread, never on ScutRuntime's school IO queue.
+        bridge.activity.runOnUiThread {
+            try {
+                bridge.activity.startActivity(intent)
+                call.resolve(JSObject().apply { put("handoff", handoff) })
+            } catch (_: ActivityNotFoundException) {
+                reject(
+                    call,
+                    if (handoff == "wechat-share") AppError.WECHAT_UNAVAILABLE
+                    else AppError.RECHARGE_OPEN_FAILED,
+                    if (handoff == "wechat-share") "未安装微信或无法打开微信分享入口"
+                    else "无法打开官方充值网页",
+                    "recharge/no-handler"
+                )
+            } catch (_: SecurityException) {
+                reject(call, AppError.RECHARGE_OPEN_FAILED, "系统拒绝打开外部应用", "recharge/denied")
+            } catch (failure: Exception) {
+                // Do not log an exception message: external handlers may include private values.
+                reject(call, AppError.RECHARGE_OPEN_FAILED, "无法打开充值入口", failure.javaClass.simpleName)
             }
         }
     }
