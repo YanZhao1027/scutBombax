@@ -147,11 +147,12 @@ adb shell dumpsys package cn.scut.bombax | grep -E "versionCode|versionName|flag
   抄进了 `DEVICE_VERIFICATION.md`，随那两个文档提交推到了远端。处置分两步：先把文件里
   那处换成 `<楼栋-房号>`，再按用户决定把携带它的两个文档提交整理成一个（`89cd718`），整理前后
   **整棵树 SHA 相同**（`13eb1f91…`）——过程见 §7。仓库是公开的，所以这不是形式问题。
-- **强推不等于内容消失，这一点是实测而非推测。** 整理后按固定 SHA 取旧提交
-  （`raw.githubusercontent.com/…/<旧 SHA>/docs/DEVICE_VERIFICATION.md`）仍能取到含房间号的旧文本；
-  取新 HEAD 只有占位符。要让旧对象也失效，得向 GitHub Support 申请清理 PR 引用与缓存，
-  受理与否由 GitHub 判断。旧提交同时被记录在 `refs/pull/1/merge` 这类 GitHub 自建引用里，
-  下一次推送会由 GitHub 用新 HEAD 重新生成它。
+- **强推不等于内容消失，这一点是实测而非推测。** 整理后用 `curl` 逐个引用取同一份文件比对：
+  被替换提交按其**固定 SHA** 请求仍返回 HTTP 200 且含那处房间号（1 命中）；分支头、整理后的提交、
+  `refs/pull/1/merge`、`main` 取到的都是占位符版本。也就是说 PR 的可见引用已经不含该内容，
+  残留只剩两条路："按旧 SHA 直接取"和 GitHub 缓存 / 别人已有的克隆。要让前者也失效，需要向
+  GitHub Support 申请清理，受理与否由 GitHub 判断。（仓库是公开的这一点由用户指出：公开仓库的
+  历史提交等于无需认证就能取到的页面，所以同一条规则的分量比私有仓库重一个量级。）
 - 密码不进任何存储（`hint` 里也这样对用户写着）；token 只进 Keystore 背书的 AES-256-GCM
   不可导出密钥加密的 `noBackupFilesDir/scut-session.bin`，`allowBackup=false`。
 - 本轮验收中，助手侧从未输入过任何凭据，两次登录都由用户亲手完成。
@@ -245,9 +246,23 @@ git push --force-with-lease=refs/heads/feat/electric-trend-v3:<旧 HEAD> \
 `2ccc3ed…`，`alpha` / `v0.1.0` / `v0.1-classic-ui` / `v0.2.0` / `v0.2.1` 五个标签对象
 逐字未变，没有执行任何 `--mirror` 推送。
 
-边界写清楚，别把"整理过了"说成"清除了"：旧提交仍可按固定 SHA 取到（§4 已实测）；本地
-`backups/` 里那份 bundle 仍含未脱敏文本，它是恢复路径，也是同一份风险；GitHub 侧缓存与
-PR 引用需要 Support 处理。
+残留暴露不是猜测，是逐个引用取同一份文件量出来的（`curl` 取
+`https://raw.githubusercontent.com/<owner>/<repo>/<ref>/docs/DEVICE_VERIFICATION.md`，
+只统计字节数与命中数，不回显内容）：
+
+| 取哪个引用 | HTTP | 字节 | 含旧房间号 | 含 `<楼栋-房号>` |
+| --- | --- | --- | --- | --- |
+| 被替换的旧提交（固定 SHA） | 200 | 75,776 | **1 处** | 否 |
+| 整理后的提交 `89cd718` | 200 | 76,586 | 0 | 是 |
+| 当前分支头 `5548a26` | 200 | 76,807 | 0 | 是 |
+| `refs/pull/1/merge`（GitHub 自建测试合并） | 200 | 76,586 | 0 | 是 |
+| 泄露之前的提交 `1caf532` | 200 | 73,337 | 0 | 否 |
+| `refs/heads/main` | 200 | 66,489 | 0 | 否（这一节还没进 main） |
+
+边界写清楚，别把"整理过了"说成"清除了"：**PR 的所有可见引用都取到干净版本，旧文本只在"按被替换
+提交的固定 SHA 直接请求"这条路上还活着**，加上 GitHub 缓存与别人已克隆走的副本。本地
+`backups/` 里那份 bundle 同样仍含未脱敏文本——它是恢复路径，也是同一份风险，所以目录 0700、
+文件 0600，且不属于仓库内容。
 
 ---
 
