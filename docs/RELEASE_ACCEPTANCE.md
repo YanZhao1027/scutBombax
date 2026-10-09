@@ -356,6 +356,18 @@ typecheck 干净、43 vitest 通过（闸门加入后是 55，见 §7.3）、`ch
   "永不记录用户名/学号"仍由 `Diag` 的去标识化路径和两条 JVM 测试保证；它也不管"上传"，因为
   本项目没有后端、没有任何出站上传，那条路由 AGENTS.md 的禁令和本检查的 git 覆盖面共同保证。
 
+**闸门本身在本轮被加强了两次**，两处都不是我做的，是用户在 20:26 直接推上来的提交 `8fb7e05`：
+
+- `pnpm build` 现在**先跑隐私检查**（`node scripts/check-privacy.mjs && tsc --noEmit && vite build`），
+  于是"忘了跑 check"不再是泄露路径——构建本身就会拦。
+- 逐行 `privacy:ignore` **只豁免启发式规则，不再能豁免 denylist**：精确值永远优先。
+  我原来的写法留了一个洞——只要给一行加了豁免，那一行连已知敏感值都不报了。这条修法是
+  对的，也补了测试（"never lets a fixture exemption bypass exact-value protection"）。
+
+顺带记一件与验收判据有关的事：本轮最后一次推送被 `--force-with-lease` **拒绝**，因为远端在我
+工作期间前进了（就是 `8fb7e05`）。处理方式是把本轮文档提交 rebase 到远端 head 上再普通推送，
+**没有**改写别人已经推上去的历史。上一轮定的"先确认没有别人在推"这条前提，这次是真的用上了。
+
 门禁现状（含本轮改动，Kotlin 测试夹具改用命名常量并注明合成数据）：typecheck 干净、**55 条 vitest**
 （43 + 6 守卫 + 4 倒计时 + 2 门禁）、122 条 JVM 测试、`check:dom` 无缺失 id、`assembleRelease` 通过，
 新 APK `de8f5584…` 签名证书仍是 `ef607f9d…`。**未安装**，理由见 §3。

@@ -106,7 +106,7 @@ Verified build loop (Java 21 must be a full JDK; see `docs/UBUNTU24.md` §9):
 
 ```bash
 pnpm install
-pnpm build          # tsc --noEmit && vite build
+pnpm build          # privacy guard, then tsc --noEmit && vite build
 pnpm test           # vitest: refresh state, view gating, trend, snapshot time, privacy guard
 pnpm check:dom      # ids and CSP, so a template edit cannot silently drop a control
 pnpm check:privacy  # no identifier or credential-shaped value in anything tracked
