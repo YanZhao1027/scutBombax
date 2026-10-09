@@ -36,6 +36,13 @@ describe('privacy guard', () => {
     );
   });
 
+  it('never lets a fixture exemption bypass exact-value protection', () => {
+    const knownValue = ['R', '8', '-', '2', '0', '1'].join('');
+    const hits = findMatches(`sample ${knownValue} // privacy:ignore synthetic fixture`, [knownValue]);
+    expect(hits.map((hit) => hit.rule)).toContain('denylist');
+    expect(hits.every((hit) => !hit.masked.includes(knownValue))).toBe(true);
+  });
+
   it('masks without reproducing the value', () => {
     expect(mask('C12-3456')).toBe('C1***8'); // privacy:ignore 合成房号，用于验证打码
     expect(mask('ab')).toBe('*');

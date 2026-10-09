@@ -104,8 +104,11 @@ export function findMatches(text, denylist = []) {
   const hits = [];
   const lines = text.split(/\r?\n/);
   lines.forEach((line, index) => {
-    if (/\bprivacy:ignore\b/.test(line)) return; // explicit, per-line, reviewable opt-out
+    // A documented fixture exemption may silence heuristic false positives, but must never
+    // silence a known sensitive value from the local denylist. An exact match always wins.
+    const ignoreHeuristics = /\bprivacy:ignore\b/.test(line);
     for (const rule of RULES) {
+      if (ignoreHeuristics) continue;
       if (rule.onlyWith && !rule.onlyWith.test(line)) continue;
       rule.re.lastIndex = 0;
       let match;
