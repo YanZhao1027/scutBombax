@@ -17,6 +17,7 @@ Re-check the archive:
 ```bash
 cd /home/zyubuntu/scutbombax/evidence && sha256sum -c sha256-2026-10-05T0208.txt
 cd /home/zyubuntu/scutbombax/evidence && sha256sum -c sha256-2026-10-08.txt   # 10-07 + 10-08
+cd /home/zyubuntu/scutbombax/evidence && sha256sum -c sha256-2026-10-09.txt   # release 0.2.0 acceptance
 ```
 
 ## Pushing from this workstation, and the offline backup
@@ -78,6 +79,20 @@ Refresh it with:
 cd /home/zyubuntu/scutbombax/scutBombax && git bundle create ../evidence/scutBombax-main-full.bundle --branches --tags
 ```
 
+## 2026-10-09 — Release 0.2.0 acceptance
+
+| SHA256 | Artifact | What it establishes |
+| --- | --- | --- |
+| `899aaccca1866d80f27cca7fa6b8b814532a2f9614177ed98d7bbbe58e959e79` | `app-release-2026-10-08T2236-pr1-50709fe.apk` (3,727,900 B) | the release build **actually running on the phone**: PR #1 head `50709fe`, `versionCode=2` / `versionName=0.2.0`, certificate SHA-256 `ef607f9d…`. The archive name carries the build time, not the capture time. The device copy hashes identically (`adb shell sha256sum …/base.apk`), which is what makes "what is installed" a measured fact rather than an inference from `lastUpdateTime` |
+| `0f7d719e97ec91433febdc3c84492d7fea56781742ccc6d1a901e96c3870ecf6` | `logcat-2026-10-09-signout.txt` (4 lines, 252 B) | §17.2: the whole logout coupling in order — `notice=removed`, `daily=disabled`, `snapshotTest=cancelled`, `logout=cleared`. Checked for room number, password, bearer/cookie headers, token shapes and UUIDs before archiving; zero hits |
+
+Manifest: `sha256-2026-10-09.txt`.
+
+The screenshot that would have shown the signed-out screen was **not** taken. The room number is
+an identifier, and `uiautomator`'s accessibility tree gives the same text without putting that
+identifier into a file. The five strings read out of it are transcribed in
+`docs/DEVICE_VERIFICATION.md` §17.2.
+
 ## 2026-10-08
 
 | SHA256 | Artifact | What it establishes |
@@ -89,7 +104,7 @@ cd /home/zyubuntu/scutbombax/scutBombax && git bundle create ../evidence/scutBom
 | `1a0b09c13d3b55a6483240ab836a021c0f109df1d283e3daa8df5ed2a0d06d0f` | `app-release-2026-10-08-v0.2.0.apk` (3,720,256 B) | release-signed 0.2.0; certificate SHA-256 `ef607f9d…`, identical to the first release build, so the same key still owns the update path. Not installed |
 | `d1e9043ed5f1d7d54ceab77426960a3480a43c9fd2de8278b44f322c511a0a18` | `history-2026-10-08-first-rows.txt` | the first two rows read out of the device database — values, timestamps and `source` only, no room number and no grouping key |
 | `0e07e0c76aec2dd4ff9743c240a0edf2a70f1cbf5ad7a6e08d5bb0b4ba604266` | `app-release-2026-10-08-v0.2.0-signed.apk` (3,720,556 B) | the release build actually installed on the phone: same key `ef607f9d…`, plus the permission-callback crash fix and the redacted history log line (§15.3) |
-| `1e414d152442bfd4bc8a27bcd0d21084ca2dd12002a2ffef373149d9dce8553a` | `logcat-2026-10-08-release-acceptance.txt`
+| `1e414d152442bfd4bc8a27bcd0d21084ca2dd12002a2ffef373149d9dce8553a` | `logcat-2026-10-08-release-acceptance.txt` | the first `result=recorded` rows on a non-debuggable build, the alarm at 23:00:00, the offline `ConnectException`, and the notice re-posting cached figures |
 | `0bf21f6ea1902641b5959e39993dab4ab0bbbc50b80643a4f9a347848714bcbc` | `logcat-2026-10-08-first-daily-snapshot.txt` | §17: the first unattended daily sample on the release build — `lateSec=897`, `start=foreground-service`, `source=daily`, `result=ok`, and a re-arm exactly 86 400 000 ms out |
 | `0aa57d55c73e0afedc5bb49caddb688077bd2bf842f8a9086843efb1ef12e929` | `release-swap-2026-10-08.txt` | the state immediately before the debug→release swap: commit, APK hash, signature verification, the two pre-swap history rows and the host test totals. A record, not a restore path | | the first `result=recorded` rows on a non-debuggable build, the alarm at 23:00:00, the offline `ConnectException`, and the notice re-posting cached figures |
 | `2586beae04572d536872afd495e1404a9d072ef9533d28251fe493316ec991dc` | `app-debug-2026-10-08-v02a.apk` (4,859,288 B) | the installed build: local history store, the 23:00 Beijing slot, the offline last-known reading, and the removal of the unsafe `startService` fallback (§14.2) |

@@ -1280,3 +1280,62 @@ build, which is the correct behaviour and the reason the redacted `result=record
 Also visible in the same pass: the balance has fallen from ¥29.91 (16:42) to ¥28.43 (20:15) to
 ¥22.38 (next morning 09:19) with no increases flagged — the first real consumption-shaped series,
 and the trend's 余额增项 list correctly staying empty on it.
+
+### 17.2 Signed out, with history: the state the restructure was for
+
+The user pressed 退出 at 13:04:01. The captured log is the whole coupling, in order:
+
+```text
+13:04:01.790  stage=notice       result=removed
+13:04:01.792  stage=daily        result=disabled
+13:04:01.793  stage=snapshotTest result=cancelled
+13:04:01.794  stage=logout       result=cleared
+```
+
+and the system agrees: `dumpsys alarm` lists **zero** pending alarms for the package,
+`BalanceNoticeService` is gone from the service list, and the notification record
+(`key=0|cn.scut.bombax|176`) is no longer posted. Nothing is left scheduled that could wake the
+app and query the school after signing out — which is the claim that made the notification →
+daily coupling one-way in the first place.
+
+What stayed on screen, from the accessibility tree rather than a screenshot (the room number is
+an identifier and does not go in the evidence):
+
+```text
+未登录
+<楼栋-房号> · 电费余额 元 21.81 · 水费 28.2 平台返回余额 · 更新 10:25:44
+显示的是 今天 10:25 的历史记录，不是实时余额
+本地历史 · 最近 11 条记录          ← the trend, open and usable while signed out
+登录并查询
+```
+
+The room is written as a placeholder here on purpose: the line above was transcribed from the
+accessibility tree, and the transcription initially carried the real identifier into the
+repository — which is exactly what §17.2's own rule forbids. Redacted in this commit; the value
+remains in the pushed history of `d98ac86`, so if this repository is ever opened to other people
+that commit needs filtering, not just the file.
+
+Three claims, each with its own evidence:
+
+- **History survives logout.** The count went 10 → 11 across the morning's own query and did not
+  drop when the session was cleared; the figures, the timestamp and the chart are all still there.
+- **The session-gated controls really disappeared.** Of 刷新 / 常驻通知 / 每日余额快照 /
+  约 5 分钟后测试一次 / 退出, none remain on screen — only 登录并查询.
+- **The caption says the right thing without being told to.** No reason parenthetical appears,
+  because nothing failed — the honest sentence for a signed-out screen is "this is a stored
+  reading, here is when it was taken", and that is what `deriveView` produces for
+  `{authenticated: false, live: false, hasHistory: true}`.
+
+Two of the five states are therefore now device-verified (signed in, and signed out with history
+— the latter reached through the real 退出 action, so it covers the "after logout" case as
+well). The remaining two are not equivalent in code but are in behaviour: *session expired*
+follows the same `authenticated: false` path with a reason string, and *no history* requires
+destroying the only real series this app has. Both stay recorded as host-tested, not
+device-verified.
+
+## 18. Where the summary lives
+
+The item-by-item verdict for Release 0.2.0 — the seven approved requirements, what each was
+graded, and the list of things still unverified with who can unblock them — is
+[`RELEASE_ACCEPTANCE.md`](RELEASE_ACCEPTANCE.md). This file stays the raw record; that one is the
+report, and it points back here rather than restating the evidence.

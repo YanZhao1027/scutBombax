@@ -90,6 +90,11 @@ Read:
 8. [docs/TECHNICAL_CHALLENGES.md](docs/TECHNICAL_CHALLENGES.md) — every hard problem in this
    project in one place: symptom, why it misled, how it was pinned down, the fix, and the
    evidence — including the honest list of what is still unverified
+9. [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md) — the product requirement draft
+   and the decisions taken against it (§15); Chinese
+10. [docs/RELEASE_ACCEPTANCE.md](docs/RELEASE_ACCEPTANCE.md) — the Release 0.2.0 on-device
+   acceptance report, item by item against what was approved, with verified and unverified kept
+   in separate tables; Chinese
 
 Environment sanity check:
 
