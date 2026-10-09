@@ -4,11 +4,14 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import cn.scut.bombax.scut.notice.BalanceNoticeService
 import cn.scut.bombax.scut.notice.DailyRefresh
 import cn.scut.bombax.scut.notice.DailySchedule
+import cn.scut.bombax.scut.notice.LocalSnapshotSignals
 import cn.scut.bombax.scut.auth.CaptchaService
 import cn.scut.bombax.scut.auth.Campus
 import cn.scut.bombax.scut.auth.LoginInput
@@ -52,7 +55,7 @@ class ScutApiPlugin : Plugin() {
 
     companion object {
         /** Version of the JS-facing surface, bumped when a method is added. */
-        const val BRIDGE_VERSION = "4"
+        const val BRIDGE_VERSION = "5"
     }
 
     /** Capacitor exposes a nullable context; the activity is always there once the bridge is up. */
@@ -63,9 +66,20 @@ class ScutApiPlugin : Plugin() {
     private val runtime: ScutRuntime
         get() = ScutRuntime.get(appCtx)
 
+    @Volatile private var listeningForLocalUpdates = false
+
+    /** A signal, not data: JS must read the local SQLite-backed bridge for actual values. */
+    private val onLocalSnapshotChanged: () -> Unit = {
+        Handler(Looper.getMainLooper()).post {
+            if (listeningForLocalUpdates) notifyListeners("localSnapshotChanged", JSObject())
+        }
+    }
+
     /** App-local plugin registration happens in MainActivity before the bridge loads. */
     override fun load() {
         super.load()
+        listeningForLocalUpdates = true
+        LocalSnapshotSignals.subscribe(onLocalSnapshotChanged)
         // The WebView's own UA is the identity every protocol fact in docs/PROTOCOL.md was
         // verified with; the daily alarm can start this process with no WebView, so the runtime
         // keeps a copy.
@@ -83,7 +97,7 @@ class ScutApiPlugin : Plugin() {
             val versionName = runCatching {
                 val context = getContext()
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName
-            }.getOrNull() ?: "0.2.0"
+            }.getOrNull() ?: "1.0.0"
             JSObject().apply {
                 put("ok", true)
                 put("platform", "android")
@@ -406,6 +420,8 @@ class ScutApiPlugin : Plugin() {
             put("dailyEnabled", DailyRefresh.isEnabled(context))
             // -1 while the switch is off; seconds until the next planned wake otherwise.
             put("nextDueIn", if (nextDue == 0L) -1L else DailySchedule.secondsUntil(now, nextDue))
+            put("nextDueAt", nextDue)
+            put("testDueAt", testDue)
             put("dailyHour", hour)
             put("dailyMinute", minute)
             put("testPending", testDue > 0L)
@@ -442,6 +458,8 @@ class ScutApiPlugin : Plugin() {
     }
 
     override fun handleOnDestroy() {
+        listeningForLocalUpdates = false
+        LocalSnapshotSignals.unsubscribe(onLocalSnapshotChanged)
         // Memory only: the stored copy is what makes the next start stay signed in. The shared
         // queue deliberately outlives the Activity — the notification service owns it too.
         runtime.onActivityDestroyed()

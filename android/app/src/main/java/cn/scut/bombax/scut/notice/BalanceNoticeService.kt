@@ -135,6 +135,9 @@ class BalanceNoticeService : Service() {
                 }
                     .onSuccess { reading ->
                         show(NoticeData.from(reading))
+                        // The database write precedes fetchBills return; tell an open WebView to
+                        // re-read locally. Empty signal: never shuttle identifiers through events.
+                        LocalSnapshotSignals.publish()
                         Diag.event("stage=$stage result=ok")
                     }
                     .onFailure { failure ->

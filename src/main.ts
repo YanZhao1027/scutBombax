@@ -13,7 +13,8 @@ import {
 import './styles.css';
 import { drawElectricTrend } from './trend';
 import { deriveView, historyCaption } from './view';
-import { formatBeijingClock, formatCountdown, parseBeijingClock } from './snapshot-time';
+import { dueLabel, shouldAdoptStoredReading } from './local-sync';
+import { formatBeijingClock, parseBeijingClock } from './snapshot-time';
 
 /**
  * Look up an element by id, and fail loudly at module load if it is not there.
@@ -266,7 +267,33 @@ const syncNotice = (): void => {
  * keeping a second copy in localStorage — a second copy is how a switch ends up looking on while
  * the alarm behind it is gone.
  */
+let clockStatus: NoticeState | null = null;
+let clockTimer: number | null = null;
+
+/** Render using the actual native alarm epoch, and advance locally without school requests. */
+const paintClock = (): void => {
+  const status = clockStatus;
+  if (!status) return;
+  els.dailyDue.textContent = status.dailyEnabled
+    ? dueLabel(Date.now(), status.nextDueAt, 'daily')
+    : '未开启';
+  els.snapshotTestState.textContent = status.testPending
+    ? dueLabel(Date.now(), status.testDueAt, 'test')
+    : '单次测试，不改变每日设置';
+};
+
+const startClock = (): void => {
+  if (clockTimer === null) clockTimer = window.setInterval(paintClock, 15_000);
+  paintClock();
+};
+
+const stopClock = (): void => {
+  if (clockTimer !== null) window.clearInterval(clockTimer);
+  clockTimer = null;
+};
+
 const renderDaily = (status: NoticeState): void => {
+  clockStatus = status;
   els.dailyToggle.checked = status.dailyEnabled;
   // Enabled whenever the notification is live, armed, or simply switched on by the user. The last
   // clause is the fix for a race seen on 2026-10-08: dismissing the permission prompt fires a
@@ -275,19 +302,12 @@ const renderDaily = (status: NoticeState): void => {
   // had earned it.
   els.dailyToggle.disabled = !(status.running || status.dailyEnabled || els.noticeToggle.checked);
   els.dailyTime.value = formatBeijingClock(status.dailyHour, status.dailyMinute);
-  els.dailyDue.textContent = status.dailyEnabled
-    ? `下次约 ${formatCountdown(status.nextDueIn)}后`
-    : '未开启';
   els.snapshotTestButton.disabled = !status.running || !state.session?.authenticated;
   els.snapshotTestButton.dataset.pending = String(status.testPending);
   els.snapshotTestButton.textContent = status.testPending
     ? '取消本次测试'
     : '约 5 分钟后测试一次';
-  els.snapshotTestState.textContent = status.testPending
-    ? status.testDueIn > 0
-      ? `预计 ${formatCountdown(status.testDueIn)}后（可能延迟）`
-      : '等待系统投递'
-    : '单次测试，不改变每日设置';
+  paintClock();
 };
 
 /**
@@ -349,6 +369,44 @@ const refreshTrend = async (): Promise<void> => {
   } catch {
     if (request === trendRequest) els.trendSummary.textContent = '本地历史暂不可用';
   }
+};
+
+/**
+ * Native service committed the history row before signaling.
+ * Also used on foreground entry because a previously inactive WebView may miss the event.
+ * Repeated signals during an in-flight read trigger one more local pass.
+ */
+let localSyncRunning = false;
+let localSyncDirty = false;
+const syncLocalState = (): void => {
+  localSyncDirty = true;
+  if (localSyncRunning) return;
+  localSyncRunning = true;
+  void (async () => {
+    try {
+      do {
+        localSyncDirty = false;
+        const [stored, notice] = await Promise.allSettled([
+          api.lastSnapshot(),
+          api.noticeStatus()
+        ]);
+        if (notice.status === 'fulfilled') renderDaily(notice.value);
+        let painted = false;
+        if (stored.status === 'fulfilled' && stored.value) {
+          const snapshot = stored.value;
+          if (shouldAdoptStoredReading(snapshot.updatedAt, state.storedAt)) {
+            state.storedReason = null;
+            renderBills(snapshot, false);
+            painted = true;
+          }
+        }
+        // Even a deduplicated or equal-value sample may affect the local history series.
+        if (!painted && !els.trendPanel.hidden) void refreshTrend();
+      } while (localSyncDirty);
+    } finally {
+      localSyncRunning = false;
+    }
+  })();
 };
 
 const loadCaptcha = async (): Promise<void> => {
@@ -776,10 +834,12 @@ const wire = (): void => {
   // second query on top of the scheduled one.
   const applyVisibility = (visible: boolean): void => {
     refresher.setVisible(visible);
-    // The next-wake hint is a fact about the alarm, not about this page, and the alarm can fire
-    // while nobody is looking. Re-read it on the way back in so the row cannot keep claiming
-    // "下次约 1 分后" a day later.
-    if (visible) void api.noticeStatus().then(renderDaily).catch(() => undefined);
+    if (visible) {
+      startClock();
+      syncLocalState();
+    } else {
+      stopClock();
+    }
   };
 
   document.addEventListener('visibilitychange', () => {
@@ -794,6 +854,11 @@ const wire = (): void => {
 
   void App.addListener('pause', () => applyVisibility(false)).catch(() => {});
   void App.addListener('resume', () => applyVisibility(true)).catch(() => {});
+
+  // Carries no identifiers or balances. Only the SQLite-backed native bridge returns data.
+  // Resume/visibility reconciliation covers listener loss across process recreation.
+  void api.onLocalSnapshotChanged(() => syncLocalState()).catch(() => undefined);
+  applyVisibility(document.visibilityState === 'visible');
 };
 
 const boot = async (): Promise<void> => {

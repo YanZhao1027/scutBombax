@@ -1,4 +1,4 @@
-import { registerPlugin } from '@capacitor/core';
+import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import type {
   Bills,
   NoticePayload,
@@ -22,6 +22,7 @@ import { BridgeError as BridgeErrorClass } from './types';
  * host; the WebView is blocked by CORS there by design.
  */
 interface ScutApiNativePlugin {
+  addListener(eventName: 'localSnapshotChanged', listener: () => void): Promise<PluginListenerHandle>;
   health(): Promise<HealthResult>;
   getCaptcha(): Promise<CaptchaChallenge>;
   login(input: LoginInput): Promise<SessionInfo>;
@@ -97,6 +98,10 @@ const call = async <T>(fn: () => Promise<T>): Promise<T> => {
     throw normalize(cause);
   }
 };
+
+/** No payload, only a signal to refresh native-owned local state. Never queries SCUT. */
+export const onLocalSnapshotChanged = (listener: () => void): Promise<PluginListenerHandle> =>
+  ScutApi.addListener('localSnapshotChanged', listener);
 
 export const health = (): Promise<HealthResult> => call(() => ScutApi.health());
 

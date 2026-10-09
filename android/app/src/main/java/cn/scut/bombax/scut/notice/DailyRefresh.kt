@@ -59,6 +59,7 @@ object DailyRefresh {
     const val KEY_HOUR = "dailyHour"
     const val KEY_MINUTE = "dailyMinute"
     private const val KEY_TEST_DUE = "snapshotTestDueAt"
+    private const val KEY_DAILY_DUE = "snapshotDailyDueAt"
 
     private const val DAILY_REQUEST_CODE = 0xD41
     private const val TEST_REQUEST_CODE = 0xD42
@@ -119,6 +120,10 @@ object DailyRefresh {
 
     fun nextDue(context: Context, now: Long): Long {
         if (!isEnabled(context)) return 0L
+        // A delayed, inexact alarm can still be pending AFTER its nominal slot.
+        // Keep reporting that original due time until the receiver actually re-arms.
+        val armedAt = prefs(context).getLong(KEY_DAILY_DUE, 0L)
+        if (armedAt > 0L) return armedAt
         val (hour, minute) = selectedTime(context)
         return DailySchedule.nextSnapshotAt(now, hour, minute)
     }
@@ -134,6 +139,7 @@ object DailyRefresh {
         return runCatching {
             manager.cancel(pending)
             manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pending)
+            prefs(context).edit().putLong(KEY_DAILY_DUE, next).apply()
             Diag.event(
                 "stage=daily result=armed dueInSec=${DailySchedule.secondsUntil(now, next)} " +
                     "hour=$hour minute=$minute api=${Build.VERSION.SDK_INT}"
@@ -146,6 +152,7 @@ object DailyRefresh {
     }
 
     private fun cancelDaily(context: Context) {
+        prefs(context).edit().remove(KEY_DAILY_DUE).apply()
         runCatching { alarmManager(context)?.cancel(pendingIntent(context, ACTION_DAILY, DAILY_REQUEST_CODE, 0L)) }
     }
 

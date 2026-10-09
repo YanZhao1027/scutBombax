@@ -102,6 +102,9 @@ export interface NoticeState {
   dailyEnabled: boolean;
   /** Seconds until the next planned wake; -1 when the daily switch is off. */
   nextDueIn: number;
+  /** Native owned scheduled epoch millis (may be in the past while Android delays delivery). */
+  nextDueAt: number;
+  testDueAt: number;
   /** User-selected Beijing wall-clock time, stored natively. */
   dailyHour: number;
   dailyMinute: number;
