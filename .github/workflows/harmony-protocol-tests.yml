@@ -1,0 +1,36 @@
+name: HarmonyOS protocol tests
+
+on:
+  push:
+    branches:
+      - feat/harmony-native
+    paths:
+      - 'harmony/**'
+      - '.github/workflows/harmony-protocol-tests.yml'
+  pull_request:
+    paths:
+      - 'harmony/**'
+      - '.github/workflows/harmony-protocol-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-protocol-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install existing project dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test checked-in ArkTS using synthetic school responses
+        run: node --test harmony/tests/*.test.cjs
+      - name: Privacy audit
+        run: node scripts/check-privacy.mjs

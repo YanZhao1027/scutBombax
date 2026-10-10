@@ -1,0 +1,25 @@
+# Local compiler output
+.hvigor/
+oh_modules/
+**/build/
+**/.preview/
+**/.cache/
+*.hap
+*.hsp
+*.app
+*.aot
+*.log
+# No device signing materials
+*.p12
+*.jks
+*.keystore
+*.csr
+*.cer
+*.p7b
+*.pem
+*.sign
+*.profile
+signing/
+signatures/
+signature/
+local.properties
