@@ -21,6 +21,24 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO build
+      - name: Verify SideStore-compatible App ID metadata
+        run: |
+          python3 - <<'PY'
+          import os
+          import plistlib
+          import re
+          from pathlib import Path
+
+          path = Path(os.environ["RUNNER_TEMP"]) / "DerivedData/Build/Products/Release-iphoneos/HuaGongMuMianProbe.app/Info.plist"
+          data = plistlib.loads(path.read_bytes())
+          identifier = data.get("CFBundleIdentifier", "")
+          display = data.get("CFBundleDisplayName", "")
+          assert identifier == "xyz.huagongmumian.probe", identifier
+          assert re.fullmatch(r"[A-Za-z][A-Za-z0-9.\-]*", identifier), "Invalid CFBundleIdentifier"
+          assert display == "HuaGongMuMian", "SideStore appIdName must be ASCII"
+          assert data.get("CFBundleShortVersionString") == "0.1.1"
+          print(f"Verified: CFBundleIdentifier={identifier}, CFBundleDisplayName={display}")
+          PY
       - name: Package IPA for SideStore to re-sign
         run: |
           set -eu

@@ -11,3 +11,7 @@ This branch generates an **unsigned IPA** through GitHub Actions. SideStore can 
 **Privacy:** user passwords are not stored; tokens and session cookies exist in an ephemeral URLSession in RAM, and requests go directly to the school's HTTPS hosts. Balance history is stored in local UserDefaults with room name. Logout clears live session; Clear History deletes saved balances. SideStore's own signing and pairing process is separate from the app's school login.
 
 **Limitations:** DXC only. GZIC not implemented. No local scheduled notifications, trend chart, background fetch, recharge, or export. SSO and login are ported from Android's verified protocol but **have not yet been verified on an iPhone**. Password retries are never automated; if school rejects login, stop and inspect rather than guessing multiple passwords.
+
+## SideStore Chinese-name compatibility (2026-10-10)
+
+SideStore issue [#1489](https://github.com/SideStore/SideStore/issues/1489) documents Apple's developer-registration error when SideStore passes a Chinese display name as `appIdName`. The v0.1.1 IPA uses ASCII `CFBundleDisplayName=HuaGongMuMian` while keeping the Chinese in-app UI text. `CFBundleIdentifier=xyz.huagongmumian.probe` stays unchanged. Always download the artifact from the latest successful build; older v0.1.0 artifacts cannot sign with affected SideStore versions.
