@@ -18,6 +18,7 @@ def guid(value: str) -> str:
 sources = (
     "HuaGongMuMianProbeApp.swift",
     "ContentView.swift",
+    "SchoolAPI.swift",
     "ProbeInspector.swift",
     "ProbeNetwork.swift",
     "ProbeViewModel.swift",
@@ -178,7 +179,7 @@ app_settings = {
     "CURRENT_PROJECT_VERSION": "1",
     "ENABLE_PREVIEWS": "YES",
     "GENERATE_INFOPLIST_FILE": "YES",
-    "INFOPLIST_KEY_CFBundleDisplayName": "\"花工木棉实验\"",
+    "INFOPLIST_KEY_CFBundleDisplayName": "\"花工木棉\"",
     "INFOPLIST_KEY_UIApplicationSceneManifest_Generation": "YES",
     "INFOPLIST_KEY_UILaunchScreen_Generation": "YES",
     "IPHONEOS_DEPLOYMENT_TARGET": "16.0",

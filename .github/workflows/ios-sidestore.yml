@@ -1,0 +1,38 @@
+name: iOS SideStore IPA
+
+on:
+  push:
+    branches: [feat/ios-sidestore]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unsigned-ipa:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile unsigned iOS device app
+        run: |
+          xcodebuild -project ios-native/HuaGongMuMianProbe/HuaGongMuMianProbe.xcodeproj \
+            -scheme HuaGongMuMianProbe -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO build
+      - name: Package IPA for SideStore to re-sign
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos/HuaGongMuMianProbe.app" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          zip -qry "$GITHUB_WORKSPACE/HuaGongMuMian-SideStore-unsigned.ipa" Payload
+          unzip -l "$GITHUB_WORKSPACE/HuaGongMuMian-SideStore-unsigned.ipa" | grep 'Payload/HuaGongMuMianProbe.app/Info.plist'
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HuaGongMuMian-SideStore-unsigned-IPA
+          path: HuaGongMuMian-SideStore-unsigned.ipa
+          retention-days: 14
+          if-no-files-found: error
