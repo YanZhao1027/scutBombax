@@ -32,6 +32,8 @@
 
 在 DevEco Studio 6.x 选择 Open，打开仓库中的 harmony 子目录（不要直接打开 Android 项目）。按顺序完成：
 
+**签名包名已修正：`cn.scut.bombax.hmapp`。** 之前的 `cn.scut.bombax.harmony` 使用了华为保留字段 `harmony`，会导致自动签名拒绝。请先拉取最新 `feat/harmony-native` 提交并在 DevEco Studio 中重新同步工程；若此前的签名配置绑定旧包名，则在 Signing Configs 中重新生成自动签名，切勿继续使用旧包名的签名信息。
+
 1. 在 DevEco Studio 中安装 HarmonyOS SDK 5.1 或更高版本，并同步工程。
 2. 把手机从 Ubuntu 拔下接到 Mac，解锁并在手机端授权 USB 调试。
 3. 进入 File → Project Structure → Project → Signing Configs；勾选 Automatically generate signature。未登录时用本人华为开发者账号登录。内部调试选择未关联注册应用的自动签名即可。

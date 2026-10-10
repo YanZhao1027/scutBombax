@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "cn.scut.bombax.harmony",
+    "bundleName": "cn.scut.bombax.hmapp",
     "vendor": "scutBombax",
     "versionCode": 1,
     "versionName": "0.1.0",
