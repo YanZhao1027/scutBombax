@@ -1,5 +1,6 @@
 # Node / web
 node_modules/
+node_modules
 dist/
 .vite/
 *.log
@@ -37,3 +38,6 @@ tmp/
 
 # The privacy guard's local exact-value list: never committed, never uploaded.
 privacy-denylist.local.txt
+
+# iOS PWA generated worker assets
+ios-pwa/dist/

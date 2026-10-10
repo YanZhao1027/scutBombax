@@ -1,0 +1,16 @@
+{
+  "name": "花工木棉 · 本机余额",
+  "short_name": "花工木棉",
+  "description": "华工水电本机余额记录与趋势，支持 iOS/iPadOS 主屏幕和离线查看。",
+  "lang": "zh-CN",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f8fc",
+  "theme_color": "#087cea",
+  "icons": [
+    {"src":"/icons/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"/icons/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}
