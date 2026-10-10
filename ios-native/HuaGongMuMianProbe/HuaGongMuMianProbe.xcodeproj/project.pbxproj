@@ -1,0 +1,212 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+		/* Begin PBXBuildFile section */
+		1295004BB52A373413A12683 /* HuaGongMuMianProbeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CAF6B24BAD78681755B0448 /* HuaGongMuMianProbeApp.swift */; };
+		B4BF69ADC9EC939AD77C8E9A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00ACB99C30CD3827546CD86D /* ContentView.swift */; };
+		EEA6A6CEA48B4DDF94DAD752 /* SchoolAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1880C15577F00533B0812863 /* SchoolAPI.swift */; };
+		A9C227DC06304E6436187C01 /* ProbeInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC1634ABC62CC380CEC40CE /* ProbeInspector.swift */; };
+		3AA317D79F444629BCA16018 /* ProbeNetwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = B749EB9D895F9CBBCD45D6AF /* ProbeNetwork.swift */; };
+		F8801274AF9A2FFA166D9CCC /* ProbeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D928D6353B3A4DD08CE2C06 /* ProbeViewModel.swift */; };
+		74E92352D682649E78C4CD26 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3A4E073B9DFA637413841B22 /* Assets.xcassets */; };
+		/* End PBXBuildFile section */
+
+		/* Begin PBXFileReference section */
+		ADD38016386653ED0601B2F1 /* HuaGongMuMianProbe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HuaGongMuMianProbe.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8CAF6B24BAD78681755B0448 /* HuaGongMuMianProbeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HuaGongMuMianProbeApp.swift; sourceTree = "<group>"; };
+		00ACB99C30CD3827546CD86D /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		1880C15577F00533B0812863 /* SchoolAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchoolAPI.swift; sourceTree = "<group>"; };
+		8DC1634ABC62CC380CEC40CE /* ProbeInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProbeInspector.swift; sourceTree = "<group>"; };
+		B749EB9D895F9CBBCD45D6AF /* ProbeNetwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProbeNetwork.swift; sourceTree = "<group>"; };
+		7D928D6353B3A4DD08CE2C06 /* ProbeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProbeViewModel.swift; sourceTree = "<group>"; };
+		3A4E073B9DFA637413841B22 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		/* End PBXFileReference section */
+
+		/* Begin PBXFrameworksBuildPhase section */
+		F4C069FDF27B3A5C19FF9BE8 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		/* End PBXFrameworksBuildPhase section */
+
+		/* Begin PBXGroup section */
+		CC372A6FB1FBC89A4365BCB9 = {isa = PBXGroup; children = (
+			71234194F59617343C2681C6 /* HuaGongMuMianProbe */,
+			DFA9F0EA6BA7EFB0885D5A16 /* Products */,
+		); sourceTree = "<group>"; };
+		71234194F59617343C2681C6 /* HuaGongMuMianProbe */ = {isa = PBXGroup; children = (
+			8CAF6B24BAD78681755B0448 /* HuaGongMuMianProbeApp.swift */,
+			00ACB99C30CD3827546CD86D /* ContentView.swift */,
+			1880C15577F00533B0812863 /* SchoolAPI.swift */,
+			8DC1634ABC62CC380CEC40CE /* ProbeInspector.swift */,
+			B749EB9D895F9CBBCD45D6AF /* ProbeNetwork.swift */,
+			7D928D6353B3A4DD08CE2C06 /* ProbeViewModel.swift */,
+			3A4E073B9DFA637413841B22 /* Assets.xcassets */,
+		); path = HuaGongMuMianProbe; sourceTree = "<group>"; };
+		DFA9F0EA6BA7EFB0885D5A16 /* Products */ = {isa = PBXGroup; children = (
+			ADD38016386653ED0601B2F1 /* HuaGongMuMianProbe.app */,
+		); name = Products; sourceTree = "<group>"; };
+		/* End PBXGroup section */
+
+		/* Begin PBXNativeTarget section */
+		37A51ADFFED3F53F9D1FBC9F /* HuaGongMuMianProbe */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4AE507B884947C0F2888E8BB /* Build configuration list for PBXNativeTarget "HuaGongMuMianProbe" */;
+			buildPhases = (
+				57D3D2E7A28672E7132842D4 /* Sources */,
+				F4C069FDF27B3A5C19FF9BE8 /* Frameworks */,
+				F4FD1F62A8897A16850DF60B /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = HuaGongMuMianProbe;
+			productName = HuaGongMuMianProbe;
+			productReference = ADD38016386653ED0601B2F1 /* HuaGongMuMianProbe.app */;
+			productType = "com.apple.product-type.application";
+		};
+		/* End PBXNativeTarget section */
+
+		/* Begin PBXProject section */
+		17E7496401E378AF6E63DCDF /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					37A51ADFFED3F53F9D1FBC9F = {CreatedOnToolsVersion = 16.0; ProvisioningStyle = Automatic; };
+				};
+			};
+			buildConfigurationList = 7459B7310D5C4E0E0184A539 /* Build configuration list for PBXProject "HuaGongMuMianProbe" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = zh_CN;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base, "zh-Hans");
+			mainGroup = CC372A6FB1FBC89A4365BCB9;
+			productRefGroup = DFA9F0EA6BA7EFB0885D5A16 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				37A51ADFFED3F53F9D1FBC9F /* HuaGongMuMianProbe */,
+			);
+		};
+		/* End PBXProject section */
+
+		/* Begin PBXResourcesBuildPhase section */
+		F4FD1F62A8897A16850DF60B /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (
+			74E92352D682649E78C4CD26 /* Assets.xcassets in Resources */,
+		); runOnlyForDeploymentPostprocessing = 0; };
+		/* End PBXResourcesBuildPhase section */
+
+		/* Begin PBXSourcesBuildPhase section */
+		57D3D2E7A28672E7132842D4 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+			1295004BB52A373413A12683 /* HuaGongMuMianProbeApp.swift in Sources */,
+			B4BF69ADC9EC939AD77C8E9A /* ContentView.swift in Sources */,
+			EEA6A6CEA48B4DDF94DAD752 /* SchoolAPI.swift in Sources */,
+			A9C227DC06304E6436187C01 /* ProbeInspector.swift in Sources */,
+			3AA317D79F444629BCA16018 /* ProbeNetwork.swift in Sources */,
+			F8801274AF9A2FFA166D9CCC /* ProbeViewModel.swift in Sources */,
+		); runOnlyForDeploymentPostprocessing = 0; };
+		/* End PBXSourcesBuildPhase section */
+
+		/* Begin XCBuildConfiguration section */
+		0666E25360CD4BEF6B6C08DA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		887F9FB8EE73F7904DDF51BB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		863217900D1A9441B72ADCAA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "HuaGongMuMian";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 0.1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = xyz.huagongmumian.probe;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F25B1580ECB0694470EFF095 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "HuaGongMuMian";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 0.1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = xyz.huagongmumian.probe;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		/* End XCBuildConfiguration section */
+
+		/* Begin XCConfigurationList section */
+		7459B7310D5C4E0E0184A539 /* Build configuration list for PBXProject "HuaGongMuMianProbe" */ = {isa = XCConfigurationList; buildConfigurations = (
+			0666E25360CD4BEF6B6C08DA /* Debug */,
+			887F9FB8EE73F7904DDF51BB /* Release */,
+		); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		4AE507B884947C0F2888E8BB /* Build configuration list for PBXNativeTarget "HuaGongMuMianProbe" */ = {isa = XCConfigurationList; buildConfigurations = (
+			863217900D1A9441B72ADCAA /* Debug */,
+			F25B1580ECB0694470EFF095 /* Release */,
+		); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		/* End XCConfigurationList section */
+	};
+	rootObject = 17E7496401E378AF6E63DCDF /* Project object */;
+}

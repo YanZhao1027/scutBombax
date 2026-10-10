@@ -1,0 +1,38 @@
+name: iOS native protocol probe
+
+on:
+  push:
+    branches:
+      - feat/ios-native-probe
+    paths:
+      - "ios-native/**"
+      - ".github/workflows/ios-native-probe.yml"
+  pull_request:
+    paths:
+      - "ios-native/**"
+      - ".github/workflows/ios-native-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios-simulator:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Xcode version
+        run: xcodebuild -version
+
+      - name: Build unsigned for iOS Simulator
+        run: |
+          xcodebuild \
+            -project ios-native/HuaGongMuMianProbe/HuaGongMuMianProbe.xcodeproj \
+            -scheme HuaGongMuMianProbe \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
