@@ -281,3 +281,13 @@ the number actually changing on its own is not.
 Keep the phone on campus Wi-Fi or the school SSL VPN, use the **card query password**
 (校园卡查询密码, letters and digits, not the 6-digit payment PIN), stop after two `8000`
 attempts, and work through `docs/DEVICE_VERIFICATION.md` §2.1 before trying a third.
+
+## iOS / iPadOS 轻量 PWA
+
+**地址：** https://pwa.10273055.xyz/ （单独部署在 Cloudflare Workers）。
+
+Safari 可添加到主屏幕，离线查看本机手动记录、电费趋势和官方充值入口。
+**此版本不支持自动登录或查学校余额：** Cloudflare 到一卡通接口仍受 403 限制，
+Safari 则受学校 CORS 限制。不会以无法成功的登录表单要求用户输入密码。
+
+[实现与验收说明](ios-pwa/README.md)

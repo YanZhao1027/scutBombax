@@ -21,7 +21,9 @@
     "apk": "cd android && ../scripts/with-jdk.sh ./gradlew assembleDebug",
     "apk:release": "pnpm android && cd android && ../scripts/with-jdk.sh ./gradlew assembleRelease",
     "native:test": "cd android && ../scripts/with-jdk.sh ./gradlew testDebugUnitTest",
-    "install:device": "${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools/adb install -r android/app/build/outputs/apk/debug/app-debug.apk"
+    "install:device": "${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools/adb install -r android/app/build/outputs/apk/debug/app-debug.apk",
+    "build:ios-pwa": "node scripts/check-privacy.mjs && tsc --noEmit --project ios-pwa/tsconfig.json && vite build --config ios-pwa/vite.config.ts",
+    "dev:ios-pwa": "vite --config ios-pwa/vite.config.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
