@@ -51,7 +51,7 @@ import SwiftUI
                 try await fetchInner()
             } catch {
                 status = error.localizedDescription
-                if !loggedIn { image = nil; key = nil; code = "" }
+                if !loggedIn { image = nil; self.key = nil; code = "" }
             }
         }
     }
