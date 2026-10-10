@@ -19,3 +19,17 @@ test('Huawei signable app bundle ID avoids platform-reserved segments', () => {
     'bundle ID must not use system-reserved names'
   );
 });
+
+test('default product explicitly binds Huawei DevEco signing config', () => {
+  const profile = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '../build-profile.json5'), 'utf8'
+  ));
+  const selected = profile.app.products.find(product => product.name === 'default');
+  assert.ok(selected, 'default product is required');
+  assert.equal(
+    selected.signingConfig, 'default',
+    'missing signingConfig silently produces an unsigned HAP (9568320)'
+  );
+  // In git this array is intentionally empty. DevEco Studio fills signingConfigs
+  // with developer-specific local material after the owner enables auto signing.
+});

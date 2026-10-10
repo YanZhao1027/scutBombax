@@ -36,8 +36,10 @@
 
 1. 在 DevEco Studio 中安装 HarmonyOS SDK 5.1 或更高版本，并同步工程。
 2. 把手机从 Ubuntu 拔下接到 Mac，解锁并在手机端授权 USB 调试。
-3. 进入 File → Project Structure → Project → Signing Configs；勾选 Automatically generate signature。未登录时用本人华为开发者账号登录。内部调试选择未关联注册应用的自动签名即可。
-4. 选择已经连接的真机作为运行设备，点 Run。不要把自动生成的 .p12、.cer、.p7b、签名密码或签名后的 build-profile.json5 变化提交到公开仓库。
+3. 进入 File → Project Structure → Project → Signing Configs；选择 `default` 产品，勾选 Automatically generate signature。未登录时用本人华为开发者账号登录，等待出现已生成的 Debug Certificate / Provisioning Profile，再按 Apply / OK。内部调试可选择自动签名。
+4. 确认工程级 `build-profile.json5`：`app.products` 下 `name: "default"` 的产品必须有 `signingConfig: "default"`；并且 `app.signingConfigs` 中已由 DevEco 自动产生同名 `default` 项及本机签名材料。若数组仍是 `[]`，说明**并未完成实际签名**，安装将报 `9568320 no signature file`。仓库中的空数组只是公开源码模板。
+5. 如果此前修改过包名或出现无签名错误，先清理签名旧记录 / 重新执行自动签名，然后 Build → Clean Project、Build → Build Hap(s)，最后使用顶部 `entry` / `default` 运行配置，点击 Run，不要手动安装或选择 `entry-default-unsigned.hap`。
+6. 选择已经连接的真机作为运行设备运行。**不要把自动生成的 .p12、.cer、.p7b、签名密码或带签名材料的 build-profile.json5 变化提交到公开仓库，也不要将其全部内容粘到聊天中。**
 5. 在 App 中先按“检查接口”；成功后按“刷新验证码”，选择正确校区/登录类型，输入自己的**一卡通查询密码**及验证码，本机登录后点击“查询水电余额”。
 
 任何 AGC / 开发者认证 / 签名授权都应由手机持有人在 DevEco GUI 完成；**不要向协作者发送 Huawei ID 密码或私钥。**
