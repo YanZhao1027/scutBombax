@@ -1,5 +1,6 @@
 {
-  // TEST CONFIG TEMPLATE. Replace resources after creating isolated D1/R2.
+  // TEST CONFIG TEMPLATE. Replace resources and rate-limit namespace IDs after creating isolated D1/R2.
+  // Namespace IDs must be unique to this account, not shared with audition or other Workers.
   // Do not modify the audition.10273055.xyz resources.
   "name": "scut-bombax-activity-stage",
   "main": "./cloudflare-live/worker.mjs",
@@ -25,7 +26,7 @@
     "bucket_name": "scut-bombax-activity-stage-private"
   }],
   "ratelimits": [
-    {"name":"AUTH_RATE_LIMIT","namespace_id":"1011","simple":{"limit":8,"period":60}},
-    {"name":"AI_RATE_LIMIT","namespace_id":"1012","simple":{"limit":5,"period":60}}
+    {"name":"AUTH_RATE_LIMIT","namespace_id":"REPLACE_WITH_UNIQUE_INTEGER_NAMESPACE_1","simple":{"limit":8,"period":60}},
+    {"name":"AI_RATE_LIMIT","namespace_id":"REPLACE_WITH_UNIQUE_INTEGER_NAMESPACE_2","simple":{"limit":5,"period":60}}
   ]
 }
