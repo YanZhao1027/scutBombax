@@ -20,6 +20,19 @@ const label=(name,control)=>el('label',{},name,control);
 const inp=(name,type='text',value='')=>el('input',{name,type,value,required:'required'});
 const card=(heading,...children)=>el('section',{class:'card'},el('h2',{text:heading}),...children);
 const stamp=n=>new Date(n).toLocaleString('zh-CN',{hour12:false});
+function localInputTime(timestamp){
+  const d=new Date(timestamp),pad=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+function validateEventInputs(x){
+  const radius=Number(x.radiusM),starts=new Date(x.startsAt).getTime(),ends=new Date(x.endsAt).getTime();
+  if(!Number.isInteger(radius)||radius<50||radius>1000)throw new Error('定位半径须为 50–1000 米的整数；建议测试用 150 米');
+  if(!Number.isFinite(starts)||!Number.isFinite(ends))throw new Error('时间格式不正确，请重新选择开始和结束时间');
+  if(ends<=starts)throw new Error('结束时间必须晚于开始时间');
+  if(ends-starts>7*86400000)throw new Error('活动跨度不能超过 7 天');
+  if(ends<=Date.now())throw new Error('结束时间已经过去，请设置为未来时间（请核对手机日期和时区）');
+  return {radius,starts,ends};
+}
 function notice(s,type=''){const n=$('notice');n.className='notice '+type;n.textContent=s;}
 async function safe(fn){try{await fn();}catch(e){notice(e.message||'请求失败','error');}}
 async function request(path,{method='GET',data,raw,headers={}}={}){
@@ -93,13 +106,14 @@ function home(){
       label('审核要求（例如集赞数量）',el('textarea',{name:'guidelines',maxlength:'1000'})),
       label('WGS84 纬度',el('input',{name:'latitude',type:'number',step:'any',required:'required'})),
       label('WGS84 经度',el('input',{name:'longitude',type:'number',step:'any',required:'required'})),
-      label('定位半径（米）',el('input',{name:'radiusM',type:'number',value:150,required:'required'})),
-      label('签到开始',el('input',{name:'startsAt',type:'datetime-local',required:'required'})),
-      label('签到结束',el('input',{name:'endsAt',type:'datetime-local',required:'required'}))
+      label('定位半径（米，50–1000）',el('input',{name:'radiusM',type:'number',min:50,max:1000,step:1,value:150,required:'required'})),
+      label('开始时间（按设备本地时间）',el('input',{name:'startsAt',type:'datetime-local',value:localInputTime(Date.now()-5*60000),required:'required'})),
+      label('结束时间（按设备本地时间）',el('input',{name:'endsAt',type:'datetime-local',value:localInputTime(Date.now()+90*60000),required:'required'}))
     ],'创建活动',async x=>{
+      const valid=validateEventInputs(x);
       await request('/api/events',{method:'POST',data:{
         title:x.title,guidelines:x.guidelines,latitude:Number(x.latitude),longitude:Number(x.longitude),
-        radiusM:Number(x.radiusM),startsAt:new Date(x.startsAt).getTime(),endsAt:new Date(x.endsAt).getTime(),requirePhoto:true
+        radiusM:valid.radius,startsAt:valid.starts,endsAt:valid.ends,requirePhoto:true
       }});
       notice('活动创建成功','success');await start();
     });
@@ -110,7 +124,18 @@ function home(){
       create.elements.longitude.value=pos.coords.longitude.toFixed(7);
       notice('已根据 GPS 填入测试活动中心。手机需在此区域才能领取签到码。','success');
     },'secondary');
-    root.append(card('主办方：创建活动',text('建议在实际试验位置点击 GPS 按钮。晚到学生仍可补传材料。'),el('details',{},el('summary',{text:'展开创建表单'}),useGps,create)));
+    const fillTrialTime=button('一键设置：开始前 5 分钟，结束后 90 分钟',async()=>{
+      create.elements.namedItem('startsAt').value=localInputTime(Date.now()-5*60000);
+      create.elements.namedItem('endsAt').value=localInputTime(Date.now()+90*60000);
+      create.elements.namedItem('radiusM').value='150';
+      notice('已填入合法的演练时间和 150 米半径（以本设备时间为准）。','success');
+    },'secondary');
+    root.append(card('主办方：创建活动',
+      text('请在现场点击 GPS 获取活动中心。半径 50–1000 米；开始须早于结束；活动不超过 7 天；结束时间必须在未来。'),
+      el('details',{},el('summary',{text:'展开创建表单'}),
+        el('div',{class:'row'},useGps,fillTrialTime),
+        text('当前设备时区：'+(Intl.DateTimeFormat().resolvedOptions().timeZone||'本地')+'。时间已预填，可直接创建 90 分钟模拟活动。'),
+        create)));
   }
   const list=card('活动列表');
   if(!app.events.length)list.append(text('暂时还没有活动。'));
