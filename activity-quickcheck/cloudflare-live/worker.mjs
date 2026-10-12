@@ -14,10 +14,12 @@ const json=(body,status=200,headers={})=>new Response(JSON.stringify(body),{stat
 const csvCell=x=>{let v=String(x??'');if(/^[\s\uFEFF]*[=+\-@]/u.test(v))v="'"+v;return '"'+v.replaceAll('"','""')+'"';};
 const csv=rows=>'\uFEFF'+rows.map(row=>row.map(csvCell).join(',')).join('\r\n')+'\r\n';
 async function sha(s){return hex(new Uint8Array(await crypto.subtle.digest('SHA-256',utf8(s))));}
-async function passwordHash(pass,saltHex){
+const STAGE_PBKDF2_ITERATIONS=100000;
+async function passwordHash(pass,saltHex,iterations=STAGE_PBKDF2_ITERATIONS){
   need(typeof pass==='string'&&pass.length>=12&&pass.length<=256,400,'密码至少 12 字符');
+  need(Number.isInteger(iterations)&&iterations>=1&&iterations<=100000,503,'该密码散列版本不兼容此 Worker，请联系管理员迁移');
   const key=await crypto.subtle.importKey('raw',utf8(pass),'PBKDF2',false,['deriveBits']);
-  const material=await crypto.subtle.deriveBits({name:'PBKDF2',salt:Uint8Array.from(saltHex.match(/../g).map(x=>parseInt(x,16))),iterations:240000,hash:'SHA-256'},key,256);
+  const material=await crypto.subtle.deriveBits({name:'PBKDF2',salt:Uint8Array.from(saltHex.match(/../g).map(x=>parseInt(x,16))),iterations,hash:'SHA-256'},key,256);
   return hex(new Uint8Array(material));
 }
 function safeUser(u){if(!u)return null;return {id:u.id,displayName:u.display_name,username:u.username,role:u.role,studentNumber:u.student_number,identityStatus:u.role==='student'?'self_declared':undefined};}
@@ -150,16 +152,18 @@ async function api(req,env,url){
     if(env.SYNTHETIC_ONLY==='true'){
       need(username.startsWith('demo_')&&studentNumber.startsWith('TEST-')&&name.startsWith('测试'),403,'演练环境仅允许虚构资料：用户名 demo_ 开头、学号 TEST- 开头、姓名 测试 开头');
     }
-    const salt=hex(bytes(16)),digest=await passwordHash(x.password,salt),id=uuid();
-    await db.prepare('INSERT INTO activity_users(id,username,password_salt,password_digest,role,student_number,display_name,created_at) VALUES (?,?,?,?,?,?,?,?)')
-      .bind(id,username,salt,digest,'student',studentNumber,name,epoch()).run();
+    need(env.SYNTHETIC_ONLY==='true',503,'真实学生认证尚未启用，不允许用演练密码规则注册');
+    const salt=hex(bytes(16)),digest=await passwordHash(x.password,salt,STAGE_PBKDF2_ITERATIONS),id=uuid();
+    await db.prepare('INSERT INTO activity_users(id,username,password_salt,password_digest,password_iterations,role,student_number,display_name,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .bind(id,username,salt,digest,STAGE_PBKDF2_ITERATIONS,'student',studentNumber,name,epoch()).run();
     return json({ok:true,identityStatus:'self_declared'},201);
   }
   if(method==='POST'&&p==='/api/login'){
     const x=await body(req),username=str(x.username,32);
     const u=await db.prepare('SELECT * FROM activity_users WHERE username=?').bind(username).first();
     need(u&&typeof x.password==='string',401,'账号或密码错误');
-    const digest=await passwordHash(x.password,u.password_salt);
+    need(env.SYNTHETIC_ONLY==='true',503,'正式身份认证提供方尚未配置');
+    const digest=await passwordHash(x.password,u.password_salt,Number(u.password_iterations));
     need(digest===u.password_digest,401,'账号或密码错误');
     const token=hex(bytes(32));
     await db.prepare('INSERT INTO activity_sessions(digest,user_id,expires_at) VALUES (?,?,?)').bind(await sha(token),u.id,epoch()+SESSION_MS).run();

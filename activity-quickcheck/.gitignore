@@ -7,3 +7,4 @@ var/
 .DS_Store
 cloudflare-live/public/zxing.js
 wrangler.stage.jsonc
+wrangler.local.jsonc

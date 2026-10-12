@@ -7,7 +7,11 @@ if(!/^[A-Za-z0-9_]{3,32}$/.test(username||'')||typeof name!=='string'||name.trim
   throw new Error('Usage: node provision-organizer.mjs <username> <display-name>, password from stdin');
 const pass=readFileSync(0,'utf8').replace(/\r?\n$/,'');
 if(pass.length<12||pass.length>256)throw new Error('Password must be 12-256 characters');
-const salt=randomBytes(16).toString('hex'),digest=pbkdf2Sync(pass,Buffer.from(salt,'hex'),240000,32,'sha256').toString('hex');
+// Synthetic-only trial uses the highest PBKDF2 iteration count currently accepted
+// by Workers Web Crypto. Do not use synthetic-stage credentials for real students.
+const iterations=Number(process.env.BOMBAX_PBKDF2_ITERATIONS||240000);
+if(![100000,240000].includes(iterations))throw new Error('Unsupported PBKDF2 iteration count');
+const salt=randomBytes(16).toString('hex'),digest=pbkdf2Sync(pass,Buffer.from(salt,'hex'),iterations,32,'sha256').toString('hex');
 const sqlQuote=s=>"'"+String(s).replaceAll("'","''")+"'";
-process.stdout.write('INSERT INTO activity_users (id,username,password_salt,password_digest,role,student_number,display_name,created_at) VALUES ('+
-  [randomUUID(),username,salt,digest,'organizer',null,name,Date.now()].map(x=>x===null?'NULL':typeof x==='number'?x:sqlQuote(x)).join(',')+');\n');
+process.stdout.write('INSERT INTO activity_users (id,username,password_salt,password_digest,password_iterations,role,student_number,display_name,created_at) VALUES ('+
+  [randomUUID(),username,salt,digest,iterations,'organizer',null,name,Date.now()].map(x=>x===null?'NULL':typeof x==='number'?x:sqlQuote(x)).join(',')+');\n');

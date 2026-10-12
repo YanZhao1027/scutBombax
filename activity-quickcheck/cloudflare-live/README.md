@@ -55,3 +55,39 @@ This stage accepts fictional data ONLY: student usernames start demo_, student n
 Each issued ticket is 32 bytes of cryptographically secure randomness, hex encoded with the bqx_ prefix. The token does not contain the student's name, number or identity. D1 stores only its SHA-256 digest, plus a binding to the exact registration, event, and 45-second expiration. Server-side activity permissions and registration approval are checked at redemption. The attendance table has a unique registration_id constraint; thus multiple scanning devices cannot both create attendance records. Refreshing the QR invalidates the old digest. This is a short-lived opaque bearer capability, not encrypted identity data. Its main limitation is that a photographed live QR can be redeemed by whoever reaches an authorized scanner first; neither GPS nor QR encryption proves personal identity.
 
 DeepSeek AI is not yet configured in the stage environment. Manual review works without it. This stage is not approved for real student documents: privacy notices, retention/deletion, abuse protection and physical camera testing remain ahead.
+
+
+## Synthetic stage login compatibility fix (2026-10-12)
+
+Cloudflare Workers Web Crypto rejects PBKDF2 iteration counts above 100,000.
+The original four fictional organizer accounts used 240,000 iterations, causing
+HTTP 500 even on correct logins. A real Cloudflare synthetic-only probe confirmed
+the limit; local tests alone did not reproduce it.
+
+A non-destructive schema migration (0002_password_iterations.sql) adds
+password_iterations. Synthetic-only Workers now use PBKDF2-SHA256 with 100,000
+iterations and require a matching version. Outside SYNTHETIC_ONLY=true, account
+registration and login are deliberately disabled pending production-grade
+authentication. The 100,000-iteration mode must NOT process real student accounts.
+
+The one-time admin password migration is prepared on the Ubuntu machine but
+requires the owner's confirmation. On the Ubuntu terminal:
+
+    cd /home/zyubuntu/scutbombax/scutBombax-activity-live/activity-quickcheck
+    bash cloudflare-live/scripts/finish-stage-login-migration.sh
+
+At the prompt type MIGRATE-TEST to migrate only demo_owner, demo_review,
+demo_scan, demo_manual in the isolated staging D1. A randomly generated
+replacement testing password is held only in the local Ubuntu file
+/tmp/bombax-stage-new-password (file mode 0600). To retrieve it locally after
+the migration:
+
+    cat /tmp/bombax-stage-new-password
+
+Do not share the password via chat, screenshots, or GitHub. The old public
+test password is retired after migration. The migration SQL contains only salted
+hashes, not the plaintext password, and is deleted after execution.
+
+Regression tests now cover valid versioned login and the legacy-account
+migration-needed error. Temporary public hashing diagnostic endpoints were
+removed before the fixed Worker deployment.
