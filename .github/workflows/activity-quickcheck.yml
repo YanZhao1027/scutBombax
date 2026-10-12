@@ -1,0 +1,37 @@
+name: Activity QuickCheck MVP
+on:
+  push:
+    branches:
+      - feat/activity-quickcheck-mvp
+    paths:
+      - 'activity-quickcheck/**'
+      - '.github/workflows/activity-quickcheck.yml'
+  pull_request:
+    paths:
+      - 'activity-quickcheck/**'
+      - '.github/workflows/activity-quickcheck.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: activity-quickcheck/package-lock.json
+      - name: Install
+        working-directory: activity-quickcheck
+        run: npm ci --no-audit --no-fund
+      - name: Syntax check
+        working-directory: activity-quickcheck
+        run: |
+          node --check db.mjs
+          node --check server.mjs
+          node --check public/app.js
+      - name: Run integration tests
+        working-directory: activity-quickcheck
+        run: npm test
