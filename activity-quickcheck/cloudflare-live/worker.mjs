@@ -180,8 +180,12 @@ async function api(req,env,url){
   if(method==='POST'&&p==='/api/events'){
     need(user?.role==='organizer',403,'无活动创建权限');
     const x=await body(req),lat=x.latitude,lon=x.longitude,radius=x.radiusM,starts=x.startsAt,ends=x.endsAt;
-    need([lat,lon,radius,starts,ends].every(Number.isFinite)&&Math.abs(lat)<=90&&Math.abs(lon)<=180,400,'活动地点不合法');
-    need(radius>=50&&radius<=1000&&ends>starts&&ends-starts<=7*86400000&&ends>epoch(),400,'活动时间或半径不合法');
+    need([lat,lon].every(Number.isFinite)&&Math.abs(lat)<=90&&Math.abs(lon)<=180,400,'经纬度无效：请点击 GPS 定位按钮重新获取活动中心');
+    need(Number.isInteger(radius)&&radius>=50&&radius<=1000,400,'定位半径必须是 50–1000 米的整数');
+    need(Number.isFinite(starts)&&Number.isFinite(ends),400,'时间无效：请在开始和结束时间框中选择有效日期');
+    need(ends>starts,400,'活动结束时间必须晚于开始时间');
+    need(ends-starts<=7*86400000,400,'活动时间跨度不能超过 7 天');
+    need(ends>epoch(),400,'活动结束时间已过去；请设置为将来的时间，并检查设备时钟及所在时区');
     const id=uuid();
     await db.prepare('INSERT INTO activity_events(id,owner_id,title,guidelines,lat,lon,radius_m,starts_at,ends_at,require_photo,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
       .bind(id,user.id,str(x.title,100),String(x.guidelines||'').slice(0,1000),lat,lon,radius,starts,ends,x.requirePhoto===false?0:1,epoch()).run();
