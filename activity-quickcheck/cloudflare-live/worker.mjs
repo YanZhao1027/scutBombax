@@ -1,3 +1,4 @@
+import QRCode from 'qrcode';
 // Cloudflare Workers + D1 + R2 backend for Activity QuickCheck.
 // NOT deployed by the public showcase. ENABLE_LIVE must be enabled only after review.
 const te=new TextEncoder();
@@ -130,6 +131,17 @@ async function api(req,env,url){
     const key=user?.id||'anonymous';
     const rate=await env.AI_RATE_LIMIT.limit({key:'ai:'+key});
     need(rate.success,429,'AI 审核频率超限，请稍后再试');
+  }
+  if(method==='POST'&&p==='/api/qr'){
+    need(user?.role==='student',403,'只有学生能生成自己的二维码');
+    const x=await body(req),token=str(x.token,70);
+    need(/^bqx_[a-f0-9]{64}$/.test(token),400,'动态码格式无效');
+    const row=await db.prepare("SELECT r.user_id,r.state,t.expires_at,a.registration_id AS checked FROM activity_tickets t JOIN activity_registrations r ON r.id=t.registration_id LEFT JOIN activity_attendance a ON a.registration_id=t.registration_id WHERE t.digest=?").bind(await sha(token)).first();
+    need(row?.user_id===user.id&&row.state==='approved'&&!row.checked&&row.expires_at>epoch(),403,'二维码已失效');
+    const svg=await QRCode.toString(token,{type:'svg',width:320,margin:2,errorCorrectionLevel:'M'});
+    return new Response(svg,{headers:{'Content-Type':'image/svg+xml; charset=utf-8',
+      'Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      'X-Content-Type-Options':'nosniff'}});
   }
   if(method==='POST'&&p==='/api/register'){
     const x=await body(req),username=str(x.username,32),name=str(x.displayName,40),studentNumber=str(x.studentNumber,32);
