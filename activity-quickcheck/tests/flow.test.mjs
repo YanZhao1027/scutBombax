@@ -67,8 +67,9 @@ test('Full flow: owner staff, private attachments, geo, single-use scan, scoped 
   const create=await api('/api/activities',{method:'POST',as:'org',data:campusEvent()});
   assert.equal(create.status,201);const id=create.value.id;
   assert.equal((await api('/api/activities/'+id+'/registrations',{as:'staff'})).status,403);
-  assert.equal((await api('/api/activities/'+id+'/staff',{method:'POST',as:'org',data:{username:'staff_test'}})).status,200);
+  assert.equal((await api('/api/activities/'+id+'/staff',{method:'POST',as:'org',data:{username:'staff_test',duty:'scanner'}})).status,200);
   assert.equal((await api('/api/activities/'+id+'/registrations',{as:'staff'})).status,200);
+  assert.equal((await api('/api/activities/'+id+'/export',{as:'staff'})).status,403);
   assert.equal((await api('/api/activities/'+id+'/join',{method:'POST',as:'a',data:{note:'please review'}})).status,201);
   assert.equal((await api('/api/activities/'+id+'/join',{method:'POST',as:'a',data:{note:'repeat'}})).status,409);
   const all=await api('/api/activities/'+id+'/registrations',{as:'org'});
@@ -100,7 +101,7 @@ test('Full flow: owner staff, private attachments, geo, single-use scan, scoped 
   assert.equal(exportFile.status,200);
   assert.match(exportFile.value,/TEST-ALPHA/);
   assert.equal((await api('/api/activities/'+id+'/export',{as:'b'})).status,403);
-  assert.equal((await api('/api/activities/'+id+'/export',{as:'staff'})).status,200);
+  assert.equal((await api('/api/activities/'+id+'/export',{as:'staff'})).status,403);
   assert.equal((await api('/api/activities/'+id+'/review',{method:'POST',as:'org',data:{registrationId:reg,state:'rejected'}})).status,409);
 });
 test('Reject CSRF-like POST without same-origin action header',async t=>{

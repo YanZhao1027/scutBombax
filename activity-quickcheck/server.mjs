@@ -54,26 +54,29 @@ function auth(db,req){
   return user||null;
 }
 function requireRole(user,role){assert(user,401,'请先登录');assert(user.role===role,403,'没有权限');}
-function activityAccess(db,user,id){
+function activityAccess(db,user,id,allowed=['owner','scanner','reviewer','manual']){
   assert(user,401,'请先登录');
   const a=db.prepare('SELECT * FROM activities WHERE id=?').get(id);
   assert(a,404,'活动不存在');
-  assert(user.role==='organizer' &&
-   (a.owner_id===user.id || Boolean(db.prepare('SELECT 1 FROM staff WHERE activity_id=? AND user_id=?').get(id,user.id))),403,'无该活动管理权限');
-  return a;
+  assert(user.role==='organizer',403,'没有该活动管理权限');
+  const duty=a.owner_id===user.id ? 'owner' :
+    db.prepare('SELECT duty FROM staff WHERE activity_id=? AND user_id=?').get(id,user.id)?.duty;
+  assert(duty && allowed.includes(duty),403,'没有此岗位的操作权限');
+  return {...a,duty};
 }
 function registration(db,user,aid){
   assert(user,401,'请先登录');
   return db.prepare('SELECT * FROM registrations WHERE activity_id=? AND user_id=?').get(aid,user.id);
 }
 function joinRows(db,aid){
-  return db.prepare("SELECT r.id,r.user_id,r.note,r.state,r.review_note,r.created_at,r.reviewed_at,u.display_name,u.student_id,c.checked_at,(SELECT COUNT(*) FROM attachments at WHERE at.registration_id=r.id) AS attachment_count FROM registrations r JOIN users u ON u.id=r.user_id LEFT JOIN checkins c ON c.registration_id=r.id WHERE r.activity_id=? ORDER BY r.created_at").all(aid);
+  // Prioritize students already physically witnessed who are still awaiting materials.
+  return db.prepare("SELECT r.id,r.user_id,r.note,r.state,r.review_note,r.created_at,r.updated_at,r.reviewed_at,u.display_name,u.student_id,c.checked_at,c.channel,c.reason,(SELECT COUNT(*) FROM attachments at WHERE at.registration_id=r.id) AS attachment_count FROM registrations r JOIN users u ON u.id=r.user_id LEFT JOIN checkins c ON c.registration_id=r.id WHERE r.activity_id=? ORDER BY CASE WHEN r.state='pending' AND c.channel='manual' THEN 0 WHEN r.state='pending' THEN 1 ELSE 2 END, r.updated_at DESC").all(aid);
 }
 function fileAuthorized(db,user,attachmentId){
   assert(user,401,'请先登录');
   const at=db.prepare('SELECT at.*,r.user_id,r.activity_id FROM attachments at JOIN registrations r ON r.id=at.registration_id WHERE at.id=?').get(attachmentId);
   assert(at,404,'附件不存在');
-  if(at.user_id!==user.id)activityAccess(db,user,at.activity_id);
+  if(at.user_id!==user.id)activityAccess(db,user,at.activity_id,['owner','reviewer']);
   return at;
 }
 function geoAccept(activity,obj) {
@@ -144,8 +147,8 @@ export function createApp({dbPath=path.join(root,'var/activity.sqlite'),uploadDi
       const data=bodyJSON(await readBody(req));
       const token=parseToken(data.token);
       assert(token,400,'签到码格式无效');
-      const row=db.prepare('SELECT r.user_id,t.expires_at FROM tickets t JOIN registrations r ON r.id=t.registration_id WHERE t.token_hash=?').get(hashToken(token));
-      assert(row&&row.user_id===user.id&&row.expires_at>=now(),403,'二维码已失效');
+      const row=db.prepare("SELECT r.user_id,r.state,t.expires_at,c.id AS checked FROM tickets t JOIN registrations r ON r.id=t.registration_id LEFT JOIN checkins c ON c.registration_id=r.id WHERE t.token_hash=?").get(hashToken(token));
+      assert(row&&row.user_id===user.id&&row.state==='approved'&&!row.checked&&row.expires_at>=now(),403,'二维码已失效');
       const png=await QRCode.toBuffer(token,{type:'png',width:350,errorCorrectionLevel:'M',margin:2});
       res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','Content-Length':png.length});
       return res.end(png);
@@ -174,9 +177,10 @@ export function createApp({dbPath=path.join(root,'var/activity.sqlite'),uploadDi
       assert(event,404,'活动不存在');
       if(method==='GET'&&action===''){
         const mine=user?.role==='student'?registration(db,user,aid):null;
-        const checkin=mine?db.prepare('SELECT checked_at FROM checkins WHERE registration_id=?').get(mine.id):null;
+        const checkin=mine?db.prepare('SELECT checked_at,channel FROM checkins WHERE registration_id=?').get(mine.id):null;
         return setJSON(res,200,{activity:activityPlain(event),
-          registration:mine?{state:mine.state,reviewNote:mine.review_note,note:mine.note,checkedAt:checkin?.checked_at||null}:null});
+          registration:mine?{state:mine.state,reviewNote:mine.review_note,note:mine.note,
+            checkedAt:checkin?.checked_at||null,checkinChannel:checkin?.channel||null}:null});
       }
       if(method==='POST'&&action==='join'){
         requireRole(user,'student');
@@ -184,8 +188,8 @@ export function createApp({dbPath=path.join(root,'var/activity.sqlite'),uploadDi
         const data=bodyJSON(await readBody(req));
         assert(!registration(db,user,aid),409,'已报名该活动');
         const id=newId();
-        db.prepare('INSERT INTO registrations (id,activity_id,user_id,note,state,created_at) VALUES (?,?,?,?,?,?)')
-          .run(id,aid,user.id,String(data.note||'').slice(0,500),'pending',now());
+        db.prepare('INSERT INTO registrations (id,activity_id,user_id,note,state,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+          .run(id,aid,user.id,String(data.note||'').slice(0,500),'pending',now(),now());
         return setJSON(res,201,{id,state:'pending'});
       }
       if(method==='POST'&&action==='upload'){
@@ -193,7 +197,7 @@ export function createApp({dbPath=path.join(root,'var/activity.sqlite'),uploadDi
         const reg=registration(db,user,aid);
         assert(reg,403,'请先报名');
         assert(now()<event.end_at,409,'活动已结束');
-        assert(!db.prepare('SELECT 1 FROM checkins WHERE registration_id=?').get(reg.id),409,'已核销');
+        assert(!db.prepare("SELECT 1 FROM checkins WHERE registration_id=? AND channel='scan'").get(reg.id),409,'二维码签到已核销，不允许再补材料');
         const count=db.prepare('SELECT COUNT(*) AS n FROM attachments WHERE registration_id=?').get(reg.id).n;
         assert(count<3,409,'每次报名最多三个附件');
         const name=text(decodeURIComponent(req.headers['x-bombax-filename']||'附件'),100);
@@ -204,9 +208,12 @@ export function createApp({dbPath=path.join(root,'var/activity.sqlite'),uploadDi
         fs.writeFileSync(destination,bytes,{flag:'wx',mode:0o600});
         try{
           db.exec('BEGIN IMMEDIATE');
+          assert(!db.prepare("SELECT 1 FROM checkins WHERE registration_id=? AND channel='scan'").get(reg.id),409,'二维码签到已核销');
+          assert(db.prepare('SELECT COUNT(*) AS n FROM attachments WHERE registration_id=?').get(reg.id).n<3,409,'每人最多三份附件');
           db.prepare('INSERT INTO attachments (id,registration_id,filename,mime,bytes,created_at) VALUES (?,?,?,?,?,?)')
             .run(id,reg.id,name,mime,bytes.length,now());
-          db.prepare("UPDATE registrations SET state='pending',review_note='',reviewed_by=NULL,reviewed_at=NULL WHERE id=?").run(reg.id);
+          db.prepare("UPDATE registrations SET state='pending',review_note='',reviewed_by=NULL,reviewed_at=NULL,updated_at=MAX(updated_at+1,?) WHERE id=?")
+            .run(now(),reg.id);
           db.exec('COMMIT');
         }catch(e){db.exec('ROLLBACK');fs.rmSync(destination,{force:true});throw e;}
         return setJSON(res,201,{id,mime,bytes:bytes.length});
@@ -231,34 +238,64 @@ export function createApp({dbPath=path.join(root,'var/activity.sqlite'),uploadDi
         return setJSON(res,200,{token,expiresAt:issued+TICKET_MS});
       }
       if(method==='POST'&&action==='staff'){
-        const a=activityAccess(db,user,aid);assert(a.owner_id===user.id,403,'只有活动创建者可添加核验员');
+        const a=activityAccess(db,user,aid,['owner']);
         const data=bodyJSON(await readBody(req));
+        assert(['scanner','reviewer','manual'].includes(data.duty),400,'必须指定扫码、审核或人工通道岗位');
         const target=db.prepare('SELECT * FROM users WHERE username=? AND role=?').get(text(data.username,32),'organizer');
         assert(target,404,'仅可添加已创建的主办方账号');
-        db.prepare('INSERT OR IGNORE INTO staff (activity_id,user_id) VALUES (?,?)').run(aid,target.id);
-        return setJSON(res,200,{ok:true});
+        db.prepare('INSERT INTO staff (activity_id,user_id,duty) VALUES (?,?,?) ON CONFLICT(activity_id,user_id) DO UPDATE SET duty=excluded.duty').run(aid,target.id,data.duty);
+        return setJSON(res,200,{ok:true,duty:data.duty});
       }
       if(method==='GET'&&action==='registrations'){
-        activityAccess(db,user,aid);
-        return setJSON(res,200,{registrations:joinRows(db,aid)});
+        const access=activityAccess(db,user,aid);
+        const rows=joinRows(db,aid);
+        const visible=access.duty==='scanner' ? rows.map(row=>({
+          id:row.id,state:row.state,checked_at:row.checked_at,channel:row.channel
+        })) : access.duty==='manual' ? rows.map(row=>({
+          id:row.id,display_name:row.display_name,student_id:row.student_id,
+          state:row.state,checked_at:row.checked_at,channel:row.channel
+        })) : rows;
+        return setJSON(res,200,{duty:access.duty,registrations:visible});
       }
       if(method==='POST'&&action==='review'){
-        activityAccess(db,user,aid);
+        activityAccess(db,user,aid,['owner','reviewer']);
         const data=bodyJSON(await readBody(req));
         assert(['approved','rejected'].includes(data.state),400,'审核状态不正确');
         const reg=db.prepare('SELECT * FROM registrations WHERE id=? AND activity_id=?').get(text(data.registrationId,40),aid);
         assert(reg,404,'报名记录不存在');
-        assert(!db.prepare('SELECT 1 FROM checkins WHERE registration_id=?').get(reg.id),409,'已签到，不可更改状态');
+        assert(!db.prepare("SELECT 1 FROM checkins WHERE registration_id=? AND channel='scan'").get(reg.id),409,'已完成快速扫码核销，不能更改审核状态');
         if(data.state==='approved'&&event.require_attachment){
           assert(db.prepare('SELECT 1 FROM attachments WHERE registration_id=?').get(reg.id),409,'必须先上传附件');
         }
         const note=String(data.note||'').slice(0,300);
-        db.prepare('UPDATE registrations SET state=?,review_note=?,reviewed_by=?,reviewed_at=? WHERE id=?')
-          .run(data.state,note,user.id,now(),reg.id);
+        db.prepare('UPDATE registrations SET state=?,review_note=?,reviewed_by=?,reviewed_at=?,updated_at=MAX(updated_at+1,?) WHERE id=?')
+          .run(data.state,note,user.id,now(),now(),reg.id);
+        db.prepare('DELETE FROM tickets WHERE registration_id=?').run(reg.id);
         return setJSON(res,200,{ok:true});
       }
+      if(method==='POST'&&action==='manual-checkin'){
+        activityAccess(db,user,aid,['owner','manual']);
+        const data=bodyJSON(await readBody(req));
+        const regId=text(data.registrationId,40);
+        const reason=text(data.reason,250);
+        assert(data.identityChecked===true,400,'必须明确确认现场已核对身份');
+        const timestamp=now();
+        assert(timestamp>=event.start_at&&timestamp<=event.end_at,409,'不在现场核验时间内');
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          const reg=db.prepare('SELECT * FROM registrations WHERE id=? AND activity_id=?').get(regId,aid);
+          assert(reg,404,'该活动报名不存在');
+          assert(!db.prepare('SELECT 1 FROM checkins WHERE registration_id=?').get(regId),409,'该学生已经登记到场');
+          // Manual lane records verified physical presence, not approval of uploaded materials.
+          db.prepare("INSERT INTO checkins (id,registration_id,activity_id,staff_id,checked_at,channel,reason,identity_check) VALUES (?,?,?,?,?,'manual',?,'checked')")
+            .run(newId(),regId,aid,user.id,timestamp,reason);
+          db.prepare('DELETE FROM tickets WHERE registration_id=?').run(regId);
+          db.exec('COMMIT');
+          return setJSON(res,200,{ok:true,checkedAt:timestamp,channel:'manual',reviewPending:reg.state!=='approved'});
+        } catch(e){db.exec('ROLLBACK');throw e;}
+      }
       if(method==='POST'&&action==='redeem'){
-        activityAccess(db,user,aid);
+        activityAccess(db,user,aid,['owner','scanner']);
         const data=bodyJSON(await readBody(req));
         const token=parseToken(data.token);
         assert(token,400,'签到码格式错误');
@@ -268,9 +305,10 @@ export function createApp({dbPath=path.join(root,'var/activity.sqlite'),uploadDi
         try {
           const row=db.prepare('SELECT t.*,r.activity_id,r.state FROM tickets t JOIN registrations r ON r.id=t.registration_id WHERE t.token_hash=?').get(hashToken(token));
           assert(row&&row.activity_id===aid&&row.state==='approved',409,'签到码无效或不属于该活动');
+          assert(start>=event.start_at&&start<=event.end_at,409,'不在现场签到时间内');
           assert(row.expires_at>=start,409,'签到码已过期，请学生刷新');
           assert(!db.prepare('SELECT 1 FROM checkins WHERE registration_id=?').get(row.registration_id),409,'该学生已签到');
-          db.prepare('INSERT INTO checkins (id,registration_id,activity_id,staff_id,checked_at) VALUES (?,?,?,?,?)')
+          db.prepare("INSERT INTO checkins (id,registration_id,activity_id,staff_id,checked_at,channel) VALUES (?,?,?,?,?,'scan')")
             .run(newId(),row.registration_id,aid,user.id,start);
           db.prepare('DELETE FROM tickets WHERE registration_id=?').run(row.registration_id);
           db.exec('COMMIT');
@@ -278,10 +316,10 @@ export function createApp({dbPath=path.join(root,'var/activity.sqlite'),uploadDi
         }catch(e){db.exec('ROLLBACK');throw e;}
       }
       if(method==='GET'&&action==='export'){
-        activityAccess(db,user,aid);
-        const rows=db.prepare("SELECT u.display_name,u.student_id,r.state,c.checked_at,r.reviewed_at FROM registrations r JOIN users u ON u.id=r.user_id JOIN checkins c ON c.registration_id=r.id WHERE r.activity_id=? AND r.state='approved' ORDER BY c.checked_at").all(aid);
-        const data=makeCsv([['姓名','学号','资料审核','现场核销时间','资料审核时间'],...rows.map(r=>
-          [r.display_name,r.student_id,'通过',new Date(r.checked_at).toISOString(),r.reviewed_at?new Date(r.reviewed_at).toISOString():''])]);
+        activityAccess(db,user,aid,['owner','reviewer']);
+        const rows=db.prepare("SELECT u.display_name,u.student_id,r.state,c.checked_at,c.channel,c.identity_check,c.reason,r.reviewed_at FROM registrations r JOIN users u ON u.id=r.user_id JOIN checkins c ON c.registration_id=r.id WHERE r.activity_id=? AND r.state='approved' ORDER BY c.checked_at").all(aid);
+        const data=makeCsv([['姓名','学号','资料审核','现场核销时间','到场核验方式','人工身份核对','人工核验原因','资料审核时间'],...rows.map(r=>
+          [r.display_name,r.student_id,'通过',new Date(r.checked_at).toISOString(),r.channel==='manual'?'人工通道':'快速扫码',r.identity_check||'',r.reason||'',r.reviewed_at?new Date(r.reviewed_at).toISOString():''])]);
         res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="activity-checkins.csv"','Cache-Control':'no-store'});
         return res.end(data);
       }
@@ -298,7 +336,7 @@ export function createApp({dbPath=path.join(root,'var/activity.sqlite'),uploadDi
     if(method==='GET'&&inspect){
       const reg=db.prepare('SELECT * FROM registrations WHERE id=?').get(inspect[1]);
       assert(reg,404,'报名记录不存在');
-      activityAccess(db,user,reg.activity_id);
+      activityAccess(db,user,reg.activity_id,['owner','reviewer']);
       return setJSON(res,200,{attachments:db.prepare('SELECT id,filename,mime,bytes FROM attachments WHERE registration_id=?').all(reg.id)});
     }
     return error(404,'未找到接口');

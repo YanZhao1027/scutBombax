@@ -74,7 +74,7 @@ function renderAccount(){
     el('div',{class:'grid'},el('div',{},el('h3',{text:'登录'}),login),el('div',{},el('h3',{text:'学生注册'}),register)));
 }
 function renderMain(){
-  stopScanner();clearQR();
+  stopScanner();clearOrganizerPoll();clearQR();
   const root=$('main-content');root.replaceChildren();
   if(me.user?.role==='organizer')root.append(renderCreator());
   const list=section('活动列表');
@@ -108,6 +108,7 @@ function renderActivityCard(a){
   return article;
 }
 async function studentActivity(a){
+  stopScanner();clearOrganizerPoll();
   const current=await call('/api/activities/'+a.id);
   const root=$('main-content');root.replaceChildren();
   const panel=section(a.title,
@@ -123,7 +124,9 @@ async function studentActivity(a){
   const reg=current.registration;
   panel.append(el('div',{class:'tally'},'审核状态：',el('strong',{text:reg.state==='pending'?'待审核':reg.state==='approved'?'已通过':'未通过'})),
     reg.reviewNote?el('div',{class:'muted',text:'审核意见：'+reg.reviewNote}):null);
-  if(reg.checkedAt){panel.append(el('div',{class:'tag green',text:'签到已完成：'+localDate(reg.checkedAt)}));return;}
+  if(reg.checkedAt){panel.append(el('div',{class:'tag green',text:'已完成现场'+(reg.checkinChannel==='manual'?'人工确认':'扫码核销')+'：'+localDate(reg.checkedAt)}),
+    el('p',{class:'muted',text:reg.state==='approved'?'资料已审核通过，已达到申报候选名单条件。':'请继续补充所需材料并等待审核；仅确认到场还不能进入活动票申报名单。'}));
+    if(reg.state==='approved')return;}
   const at=(await call('/api/activities/'+a.id+'/my-attachments')).attachments;
   const docs=el('div',{},el('h3',{text:'证明附件'}));
   if(!at.length)docs.append(el('p',{class:'muted',text:'还没有附件'}));
@@ -141,7 +144,7 @@ async function studentActivity(a){
       announce('附件上传成功；审核状态已重置为待审核','success');await studentActivity(a);
     }));
   panel.append(docs);
-  if(reg.state!=='approved')return;
+  if(reg.state!=='approved'||reg.checkedAt)return;
   panel.append(el('hr'),el('h3',{text:'到场定位 + 出示签到码'}),
     el('p',{class:'muted',text:'在活动时间内到达指定区域，点击下面按钮。浏览器会请求位置权限；现场二维码有效期仅 45 秒。'}));
   const qrArea=el('div',{class:'spaced'});
@@ -165,74 +168,169 @@ function geolocation(){
     {enableHighAccuracy:true,timeout:13000,maximumAge:0}));
 }
 async function organizerActivity(a){
+  stopScanner();clearOrganizerPoll();
   const root=$('main-content');root.replaceChildren();
   const pane=section(a.title,btn('← 返回活动列表',async()=>renderMain(),'secondary'),
-    el('p',{class:'muted',text:'现场三通道可同时使用独立主办方账号扫码；同一报名只允许核销一次。'}));
+    el('p',{class:'muted',text:'活动当天实行后台持续审核、3–4 个扫码窗口，以及一条线下人工认证通道。'}));
   root.append(pane);
-  const area=el('div',{class:'card'});root.append(area);
-  const info=await call('/api/activities/'+a.id+'/registrations');
-  const all=info.registrations;
-  const accepted=all.filter(x=>x.state==='approved'),checked=all.filter(x=>x.checked_at);
-  pane.append(el('div',{class:'tally'},el('strong',{text:'报名 '+all.length+' · 审核通过 '+accepted.length+' · 已签到 '+checked.length})),
-    el('div',{class:'row'},btn('刷新统计',()=>organizerActivity(a),'secondary'),
-      btn('导出已审核且已签到名单',async()=>{
-        const r=await call('/api/activities/'+a.id+'/export');
-        const blob=await r.blob(),href=URL.createObjectURL(blob);
-        const link=el('a',{href,download:'花工木棉-活动签到名单.csv'});
-        document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(href),1500);
-        announce('仅已审核且已签到的数据已导出；提交学校前请核对官方模板。','success');
-      })));
-  const staffForm=formFieldsSubmit([field('添加现有主办方账号作为核验员','username')],'授权核验员',async data=>{
-    await call('/api/activities/'+a.id+'/staff',{method:'POST',data});announce('核验员已授权','success');
-  });
-  const members=el('details',{},el('summary',{text:'添加扫码核验员（仅活动创建者）'}),staffForm);
-  pane.append(members);
-  const scanBox=el('div',{},el('h3',{text:'快速扫码窗口'}),
-    el('p',{class:'muted',text:'扫码只核销花工木棉生成的本次活动码；不要扫描学校校园码或支付二维码。'}));
-  const video=el('video',{id:'scanner-video',autoplay:'autoplay',muted:'muted',playsinline:'playsinline'});
-  const scanResult=el('div',{class:'scan-result',role:'status',text:'等待扫码…'});
-  const manual=el('input',{placeholder:'手动输入签到码（摄像头不可用时）',type:'text',autocomplete:'off'});
-  let working=false;
-  async function redeem(token){
-    if(working)return;
-    working=true;
-    try{
-      await call('/api/activities/'+a.id+'/redeem',{method:'POST',data:{token}});
-      scanResult.textContent='✓ 核销成功，下一位';scanResult.style.color='#16884e';
-      manual.value='';announce('该活动签到核销成功','success');
-    }catch(e){scanResult.textContent='核销失败：'+e.message;scanResult.style.color='#ac5517';}
-    finally{setTimeout(()=>{working=false;},350);}
-  }
-  scanBox.append(el('div',{class:'row'},btn('开启摄像头扫描',async()=>{
-    if(!window.ZXingBrowser)throw new Error('扫码库尚未加载');
-    stopScanner();
-    scanBox.append(video);
-    const reader=new window.ZXingBrowser.BrowserQRCodeReader();
-    me.scanner=reader;
-    me.scanControls=await reader.decodeFromVideoDevice(undefined,video,(result)=>{
-      if(result?.getText)action(()=>redeem(result.getText()));
+  const {duty}=await call('/api/activities/'+a.id+'/registrations');
+  const dutyLabels={owner:'活动负责人',reviewer:'后台材料审核员',scanner:'扫码核验员',manual:'人工身份核验员'};
+  pane.append(el('div',{class:'tag',text:'当前岗位：'+(dutyLabels[duty]||duty)}));
+  const counters=el('div',{class:'tally'});pane.append(counters);
+  if(duty==='owner'){
+    const staffForm=formFieldsSubmit([
+      field('工作人员账号','username'),
+      el('label',{},'现场岗位',el('select',{name:'duty'},
+        el('option',{value:'reviewer',text:'后台审核'}),
+        el('option',{value:'scanner',text:'快速扫码'}),
+        el('option',{value:'manual',text:'线下人工认证'})))
+    ],'设置岗位',async data=>{
+      await call('/api/activities/'+a.id+'/staff',{method:'POST',data});
+      announce('工作人员岗位已更新','success');
     });
-  }),btn('停止扫描',async()=>stopScanner(),'secondary')),
-    scanResult,el('div',{class:'spaced row'},manual,btn('手动核销',()=>redeem(manual.value))),el('hr'));
-  area.append(scanBox,el('h3',{text:'报名与材料审核'}));
-  if(!all.length)area.append(el('p',{class:'muted',text:'暂时没有报名。'}));
-  for(const r of all){
-    const item=el('div',{class:'item'},
-      el('div',{class:'row between'},el('strong',{text:r.display_name}),el('span',{class:'tag',text:r.state==='approved'?'通过':r.state==='rejected'?'驳回':'待审核'})),
-      el('p',{class:'muted',text:'学号（自填/未校方认证）：'+r.student_id+' · 附件 '+r.attachment_count+' 份'+(r.checked_at?' · 签到 '+localDate(r.checked_at):'')}),
-      el('p',{class:'muted',text:'报名备注：'+(r.note||'无')}));
-    const list=el('div',{class:'spaced'});
-    item.append(btn('查看附件',async()=>{
-      const {attachments}=await call('/api/registrations/'+r.id+'/attachments');
-      list.replaceChildren(...attachments.map(file=>el('div',{},el('a',{href:'/api/attachments/'+file.id,target:'_blank',rel:'noopener noreferrer',text:file.filename}))));
-    },'secondary'),list);
-    if(!r.checked_at){
-      const note=el('input',{placeholder:'审核意见（可选）',maxlength:'300'});
-      item.append(el('div',{class:'row spaced'},note,
-        btn('审核通过',async()=>{await call('/api/activities/'+a.id+'/review',{method:'POST',data:{registrationId:r.id,state:'approved',note:note.value}});await organizerActivity(a);},''),
-        btn('驳回 / 补充',async()=>{await call('/api/activities/'+a.id+'/review',{method:'POST',data:{registrationId:r.id,state:'rejected',note:note.value}});await organizerActivity(a);},'danger')));
-    }
-    area.append(item);
+    pane.append(el('details',{},el('summary',{text:'为工作人员授权 / 调整岗位'}),staffForm));
+  }
+  if(['owner','reviewer'].includes(duty)){
+    pane.append(btn('导出审核通过且已到场名单',async()=>{
+      const response=await call('/api/activities/'+a.id+'/export');
+      const blob=await response.blob(),href=URL.createObjectURL(blob);
+      const link=el('a',{href,download:'花工木棉-活动签到名单.csv'});
+      document.body.append(link);link.click();link.remove();
+      setTimeout(()=>URL.revokeObjectURL(href),1500);
+      announce('已导出审核通过且现场到场的学生；请按校方模板核实后再提交。','success');
+    }));
+  }
+  const area=section(duty==='manual'?'线下人工核验':duty==='scanner'?'扫码快速窗口':'实时材料审核队列');
+  root.append(area);
+  let refreshing=false;
+  let renderCount=0;
+  let noFresh=false;
+  async function load(initial=false){
+    if(refreshing)return;
+    refreshing=true;
+    try {
+      const {registrations,duty:liveDuty}=await call('/api/activities/'+a.id+'/registrations');
+      if(liveDuty!==duty){noFresh=true;stopScanner();clearOrganizerPoll();announce('岗位权限已更改，请重新打开活动页面','error');return;}
+      const approved=registrations.filter(x=>x.state==='approved').length;
+      const checked=registrations.filter(x=>x.checked_at).length;
+      const wait=registrations.filter(x=>x.state==='pending').length;
+      counters.textContent='报名 '+registrations.length+' 人 · 审核通过 '+approved+' · 待审核 '+wait+' · 已到场 '+checked+' · 待补审到场 '+registrations.filter(x=>x.checked_at&&x.state!=='approved').length;
+      if(duty==='scanner'){
+        if(initial)setupScanner(area,a);
+        return;
+      }
+      const active=document.activeElement;
+      if(!initial&&active&&area.contains(active)&&['INPUT','TEXTAREA'].includes(active.tagName))return;
+      renderCount++;
+      area.replaceChildren(el('h3',{text:duty==='manual'?'现场身份人工确认': '报名材料持续审核 · 自动刷新'}));
+      const last=el('p',{class:'muted',text:'最近更新：'+new Date().toLocaleTimeString('zh-CN',{hour12:false})+' · 每 5 秒刷新'});area.append(last);
+      if(duty==='manual')renderManualQueue(area,registrations,a,load);
+      else renderReviewQueue(area,registrations,a,load);
+    }catch(err){if(initial)throw err;announce('刷新失败：'+err.message,'error');}
+    finally{refreshing=false;}
+  }
+  await load(true);
+  if(duty!=='scanner')me.organizerPoll=setInterval(()=>{if(!noFresh&&document.visibilityState==='visible'&&root.isConnected)load();},5000);
+}
+function clearOrganizerPoll(){if(me.organizerPoll){clearInterval(me.organizerPoll);me.organizerPoll=null;}}
+function renderReviewQueue(area,rows,a,refresh){
+  const pending=rows.filter(r=>r.state==='pending');
+  const attendedPending=pending.filter(r=>r.channel==='manual');
+  const normalPending=pending.filter(r=>r.channel!=='manual');
+  area.append(el('div',{class:'row'},
+    el('span',{class:'tag orange',text:'待审核 '+pending.length}),
+    el('span',{class:'tag',text:'人工已到场待补审 '+attendedPending.length}),
+    btn('立即刷新',()=>refresh(true),'secondary')));
+  if(!pending.length)area.append(el('p',{class:'muted',text:'目前没有待审核的申请。审核员可以继续等待现场新报名或新附件。'}));
+  for(const r of [...attendedPending,...normalPending])area.append(reviewCard(r,a,refresh));
+  const resolved=rows.filter(r=>r.state!=='pending');
+  if(resolved.length){
+    const details=el('details',{},el('summary',{text:'查看已处理申请（'+resolved.length+'）'}));
+    for(const r of resolved)details.append(reviewCard(r,a,refresh));
+    area.append(details);
   }
 }
+function reviewCard(r,a,refresh){
+  const item=el('div',{class:'item'},
+    el('div',{class:'row between'},el('strong',{text:r.display_name||'学生'}),el('span',{class:'tag',text:r.state==='approved'?'已通过':r.state==='rejected'?'已驳回':'待审核'})),
+    el('p',{class:'muted',text:'自填学号（非官方认证）：'+(r.student_id||'未知')+' · 附件 '+r.attachment_count+' 份 · 最新提交 '+localDate(r.updated_at||r.created_at)}),
+    el('p',{class:'muted',text:'备注：'+(r.note||'无')}));
+  if(r.channel==='manual')item.append(el('p',{class:'tag green',text:'已人工核验到场；待审核通过后进入申报名单'}));
+  else if(r.checked_at)item.append(el('p',{class:'tag green',text:'已完成快速扫码核销'}));
+  const links=el('div',{class:'spaced'});
+  item.append(btn('查看证明附件',async()=>{
+    const {attachments}=await call('/api/registrations/'+r.id+'/attachments');
+    links.replaceChildren(...attachments.map(f=>el('div',{},el('a',{href:'/api/attachments/'+f.id,target:'_blank',rel:'noopener noreferrer',text:f.filename}))));
+    if(!attachments.length)links.append(el('p',{class:'muted',text:'该报名尚无证明材料'}));
+  },'secondary'),links);
+  if(r.channel!=='scan'){
+    const note=el('input',{placeholder:'审核备注 / 补充材料要求（可选）',maxlength:'300'});
+    item.append(el('div',{class:'row spaced'},note,
+      btn('审核通过',async()=>{
+        await call('/api/activities/'+a.id+'/review',{method:'POST',data:{registrationId:r.id,state:'approved',note:note.value}});
+        await refresh(true);
+      }),
+      btn('驳回或要求补充',async()=>{
+        await call('/api/activities/'+a.id+'/review',{method:'POST',data:{registrationId:r.id,state:'rejected',note:note.value}});
+        await refresh(true);
+      },'danger')));
+  }
+  return item;
+}
+function renderManualQueue(area,rows,a,refresh){
+  area.append(el('p',{class:'muted',text:'仅登记已当面出示身份凭据、由工作人员亲眼确认到场的报名学生。人工通道不代替集赞资料审核，也不需要扫描学校支付/校园码。'}));
+  area.append(btn('立即刷新候选列表',()=>refresh(true),'secondary'));
+  const outstanding=rows.filter(r=>!r.checked_at);
+  const search=el('input',{placeholder:'按姓名或自填学号筛选现场学生',autocomplete:'off'});
+  const list=el('div');area.append(search,list);
+  function draw(){
+    list.replaceChildren();
+    const term=search.value.trim().toLowerCase();
+    const found=outstanding.filter(r=>(r.display_name||'').toLowerCase().includes(term)||(r.student_id||'').toLowerCase().includes(term)).slice(0,80);
+    if(!found.length)list.append(el('p',{class:'muted',text:'没有匹配且尚未确认到场的报名记录。学生需要先完成报名。'}));
+    for(const r of found){
+      const item=el('div',{class:'item'},
+        el('strong',{text:r.display_name||'学生'}),
+        el('p',{class:'muted',text:'自填学号：'+r.student_id+' · 材料 '+(r.state==='approved'?'已通过':r.state==='pending'?'待审核':'需补充')}));
+      const reason=el('input',{placeholder:'例：室内定位漂移 / 现场补审（必填）',maxlength:'250'});
+      const confirm=el('input',{type:'checkbox'});
+      const label=el('label',{},confirm,'我已在现场当面核对参与者身份（未经学校官方校验）');
+      item.append(reason,label,btn('记录人工到场',async()=>{
+        if(!confirm.checked)throw new Error('请先确认已现场核对身份');
+        if(!reason.value.trim())throw new Error('需要填写人工通道原因');
+        await call('/api/activities/'+a.id+'/manual-checkin',{method:'POST',
+          data:{registrationId:r.id,reason:reason.value.trim(),identityChecked:true}});
+        announce('人工到场记录成功。未审核的材料仍须后台审核才能纳入最终名单。','success');
+        await refresh(true);
+      }));
+      list.append(item);
+    }
+  }
+  search.addEventListener('input',draw);draw();
+}
+function setupScanner(area,a){
+  area.append(el('p',{class:'muted',text:'只接受花工木棉短时动态码；请勿扫描学校的支付二维码。审核员和人工通道会独立处理晚到报名。'}));
+  const video=el('video',{autoplay:'autoplay',muted:'muted',playsinline:'playsinline'});
+  const result=el('div',{class:'scan-result',role:'status',text:'等待扫码…'});
+  const manual=el('input',{placeholder:'摄像头不可用时输入花工木棉签到码',autocomplete:'off'});
+  let busy=false;
+  async function redeem(token){
+    if(busy)return;
+    busy=true;
+    try{
+      await call('/api/activities/'+a.id+'/redeem',{method:'POST',data:{token}});
+      result.textContent='✓ 核销成功，请下一位';result.style.color='#16884e';manual.value='';
+    }catch(e){result.textContent='核销失败：'+e.message;result.style.color='#ae4b16';}
+    finally{setTimeout(()=>{busy=false;},500);}
+  }
+  area.append(row(btn('开启摄像头',async()=>{
+    if(!window.ZXingBrowser)throw new Error('扫码依赖尚未加载');
+    stopScanner();
+    area.append(video);
+    const reader=new window.ZXingBrowser.BrowserQRCodeReader();
+    me.scanner=reader;
+    me.scanControls=await reader.decodeFromVideoDevice(undefined,video,x=>{if(x?.getText)action(()=>redeem(x.getText()));});
+  }),btn('停止扫描',async()=>stopScanner(),'secondary')),result,row(manual,btn('手动核销动态码',()=>redeem(manual.value))));
+}
+
 refresh().catch(error=>announce('初始化失败：'+error.message,'error'));

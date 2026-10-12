@@ -28,15 +28,23 @@ export function openDB(dbPath) {
     'CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN (\'student\',\'organizer\')), student_id TEXT UNIQUE, display_name TEXT NOT NULL, created_at INTEGER NOT NULL)',
     'CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL)',
     'CREATE TABLE IF NOT EXISTS activities (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, description TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, radius_m INTEGER NOT NULL, start_at INTEGER NOT NULL, end_at INTEGER NOT NULL, require_attachment INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL)',
-    'CREATE TABLE IF NOT EXISTS staff (activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY(activity_id,user_id))',
-    'CREATE TABLE IF NOT EXISTS registrations (id TEXT PRIMARY KEY, activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id), note TEXT NOT NULL DEFAULT \'\', state TEXT NOT NULL CHECK(state IN (\'pending\',\'approved\',\'rejected\')), review_note TEXT NOT NULL DEFAULT \'\', reviewed_by TEXT REFERENCES users(id), reviewed_at INTEGER, created_at INTEGER NOT NULL, UNIQUE(activity_id,user_id))',
+    'CREATE TABLE IF NOT EXISTS staff (activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, duty TEXT NOT NULL DEFAULT \'scanner\' CHECK(duty IN (\'scanner\',\'reviewer\',\'manual\')), PRIMARY KEY(activity_id,user_id))',
+    'CREATE TABLE IF NOT EXISTS registrations (id TEXT PRIMARY KEY, activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id), note TEXT NOT NULL DEFAULT \'\', state TEXT NOT NULL CHECK(state IN (\'pending\',\'approved\',\'rejected\')), review_note TEXT NOT NULL DEFAULT \'\', reviewed_by TEXT REFERENCES users(id), reviewed_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0, UNIQUE(activity_id,user_id))',
     'CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, registration_id TEXT NOT NULL REFERENCES registrations(id) ON DELETE CASCADE, filename TEXT NOT NULL, mime TEXT NOT NULL, bytes INTEGER NOT NULL, created_at INTEGER NOT NULL)',
     'CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, registration_id TEXT NOT NULL REFERENCES registrations(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, expires_at INTEGER NOT NULL, issued_at INTEGER NOT NULL, UNIQUE(registration_id))',
-    'CREATE TABLE IF NOT EXISTS checkins (id TEXT PRIMARY KEY, registration_id TEXT NOT NULL UNIQUE REFERENCES registrations(id), activity_id TEXT NOT NULL REFERENCES activities(id), staff_id TEXT NOT NULL REFERENCES users(id), checked_at INTEGER NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS checkins (id TEXT PRIMARY KEY, registration_id TEXT NOT NULL UNIQUE REFERENCES registrations(id), activity_id TEXT NOT NULL REFERENCES activities(id), staff_id TEXT NOT NULL REFERENCES users(id), checked_at INTEGER NOT NULL, channel TEXT NOT NULL DEFAULT \'scan\' CHECK(channel IN (\'scan\',\'manual\')), reason TEXT, identity_check TEXT)',
     'CREATE INDEX IF NOT EXISTS idx_registrations_activity ON registrations(activity_id,state)',
     'CREATE INDEX IF NOT EXISTS idx_staff_user ON staff(user_id)',
     'CREATE INDEX IF NOT EXISTS idx_checkins_activity ON checkins(activity_id)'
   ].join(';\n')+';');
+  // Non-destructive migration from the first local-only database schema.
+  const columns = table => new Set(db.prepare('PRAGMA table_info('+table+')').all().map(row=>row.name));
+  if(!columns('staff').has('duty')) db.exec("ALTER TABLE staff ADD COLUMN duty TEXT NOT NULL DEFAULT 'scanner'");
+  if(!columns('registrations').has('updated_at')) db.exec('ALTER TABLE registrations ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0');
+  if(!columns('checkins').has('channel')) db.exec("ALTER TABLE checkins ADD COLUMN channel TEXT NOT NULL DEFAULT 'scan'");
+  if(!columns('checkins').has('reason')) db.exec('ALTER TABLE checkins ADD COLUMN reason TEXT');
+  if(!columns('checkins').has('identity_check')) db.exec('ALTER TABLE checkins ADD COLUMN identity_check TEXT');
+  db.exec('UPDATE registrations SET updated_at=created_at WHERE updated_at=0');
   return db;
 }
 export function safeUser(user) {
