@@ -222,7 +222,7 @@ async function organizerView(event,root){
     if(document.visibilityState!=='visible'||app.active!==event.id)return;
     const focused=document.activeElement;
     if(focused&&['INPUT','TEXTAREA'].includes(focused.tagName))return;
-    if(duty==='owner')return;
+    if(duty==='owner'||duty==='scanner')return; // Keep the camera stream mounted during scanning.
     await safe(()=>renderDuty(event,root,duty,false));
   },5000);
 }
