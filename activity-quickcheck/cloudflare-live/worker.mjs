@@ -114,7 +114,7 @@ async function vision(env,images,guideline){
 }
 async function api(req,env,url){
   const db=env.DB,method=req.method,p=url.pathname,user=await current(db,req);
-  if(method==='GET'&&p==='/api/health')return json({ok:true,product:'Activity QuickCheck Cloudflare',ready:env.ENABLE_LIVE==='true'});
+  if(method==='GET'&&p==='/api/health')return json({ok:true,product:'Activity QuickCheck Cloudflare',ready:env.ENABLE_LIVE==='true',syntheticOnly:env.SYNTHETIC_ONLY==='true'});
   if(method==='GET'&&p==='/api/me')return json({user:safeUser(user)});
   // Deployment readiness is explicit. The public demo must not route here.
   need(env.ENABLE_LIVE==='true',503,'生产后台暂未开放，公网页面只提供无数据演示');
@@ -147,6 +147,9 @@ async function api(req,env,url){
     const x=await body(req),username=str(x.username,32),name=str(x.displayName,40),studentNumber=str(x.studentNumber,32);
     need(/^[A-Za-z0-9_]{3,32}$/.test(username)&&/^[A-Za-z0-9-]{4,32}$/.test(studentNumber),400,'账号或学号格式不合法');
     need(x.privacyAcknowledged===true,400,'须先阅读个人信息处理说明');
+    if(env.SYNTHETIC_ONLY==='true'){
+      need(username.startsWith('demo_')&&studentNumber.startsWith('TEST-')&&name.startsWith('测试'),403,'演练环境仅允许虚构资料：用户名 demo_ 开头、学号 TEST- 开头、姓名 测试 开头');
+    }
     const salt=hex(bytes(16)),digest=await passwordHash(x.password,salt),id=uuid();
     await db.prepare('INSERT INTO activity_users(id,username,password_salt,password_digest,role,student_number,display_name,created_at) VALUES (?,?,?,?,?,?,?,?)')
       .bind(id,username,salt,digest,'student',studentNumber,name,epoch()).run();
@@ -217,6 +220,10 @@ async function api(req,env,url){
       const array=await readBounded(req,MAX_IMAGE);
       need(array.byteLength>=16&&array.byteLength<=MAX_IMAGE,413,'材料过大或无效');
       need(mime==='image/png'?pngValid(array):jpegValid(array),415,'图片格式和内容不匹配');
+      if(env.SYNTHETIC_ONLY==='true'){
+        const digest=hex(new Uint8Array(await crypto.subtle.digest('SHA-256',array)));
+        need(mime==='image/png'&&digest===env.SYNTHETIC_IMAGE_SHA256,403,'演练站只允许上传内置模拟截图；不得上传真实个人资料');
+      }
       const id=uuid(),key='evidence/'+eid+'/'+r.id+'/'+id;
       await env.MATERIALS.put(key,array,{httpMetadata:{contentType:mime}});
       try{
@@ -359,7 +366,7 @@ async function api(req,env,url){
     const blob=await env.MATERIALS.get(file.object_key);
     need(blob,404,'材料未找到');
     return new Response(blob.body,{headers:{'Content-Type':file.mime,'Cache-Control':'private, no-store',
-      'Content-Disposition':'attachment; filename="evidence"','X-Content-Type-Options':'nosniff'}});
+      'Content-Disposition':'inline; filename="evidence"','X-Content-Type-Options':'nosniff'}});
   }
   err(404,'接口不存在');
 }

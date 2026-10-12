@@ -32,3 +32,26 @@
 ## 测试
 
 在 activity-quickcheck 执行 npm test。单元测试仅使用模拟截图字节和伪造 DeepSeek JSON，不会实际收费、不上传个人资料。后续上线前须额外实施独立安全和人工验收。
+
+
+## Synthetic-only stage trial (2026-10-12)
+
+Test URL: https://activity-stage.10273055.xyz/ . The Stage Worker uses isolated Cloudflare D1 and private R2; audition and the campus HTTPS nginx site remain unchanged.
+
+This stage accepts fictional data ONLY: student usernames start demo_, student numbers start TEST-, and names start with 测试. The server also checks the SHA-256 of every upload against the hash of the built-in demo-proof.png image. No real social-media screenshots are permitted in stage mode. Accepted bytes are really uploaded to private R2 and review / attendance records really persist in D1.
+
+### Physical multi-device walkthrough
+
+1. Sign in as a synthetic organizer, create a test activity with start time in the past and end time in the near future, then choose the button to fill the event center from current GPS position.
+2. Give three other synthetic organizer accounts the reviewer, scanner and manual permissions under the event.
+3. On a separate phone or private browser window, register a demo_... student with TEST-... student number and a 测试... display name, then join.
+4. Click the built-in fake screenshot upload button. The reviewer reads it from private R2 and approves manually.
+5. The student refreshes their review status, physically stands inside the event radius, grants location permission, and requests the 45-second QR.
+6. A scanner account on a different device scans the QR. It must succeed once, fail on replay, and appear in the CSV export.
+7. For the alternative lane, manually mark a newly joined fictional student as physically present, then upload their evidence and approve it later. No second scan should be necessary.
+
+### QR cryptography and replay prevention
+
+Each issued ticket is 32 bytes of cryptographically secure randomness, hex encoded with the bqx_ prefix. The token does not contain the student's name, number or identity. D1 stores only its SHA-256 digest, plus a binding to the exact registration, event, and 45-second expiration. Server-side activity permissions and registration approval are checked at redemption. The attendance table has a unique registration_id constraint; thus multiple scanning devices cannot both create attendance records. Refreshing the QR invalidates the old digest. This is a short-lived opaque bearer capability, not encrypted identity data. Its main limitation is that a photographed live QR can be redeemed by whoever reaches an authorized scanner first; neither GPS nor QR encryption proves personal identity.
+
+DeepSeek AI is not yet configured in the stage environment. Manual review works without it. This stage is not approved for real student documents: privacy notices, retention/deletion, abuse protection and physical camera testing remain ahead.

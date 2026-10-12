@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const app={me:null,events:[],active:null,poll:null,scanner:null,qr:null};
+const app={me:null,events:[],active:null,poll:null,scanner:null,qr:null,syntheticOnly:false};
 function el(tag,props={},...children){
   const n=document.createElement(tag);
   for(const [k,v] of Object.entries(props)){
@@ -46,7 +46,7 @@ function clean(){
 }
 async function start(){
   const me=await request('/api/me');app.me=me.user;
-  const ready=await request('/api/health');
+  const ready=await request('/api/health');app.syntheticOnly=Boolean(ready.syntheticOnly);
   if(!ready.ready){notice('生产 API 尚未开放。请使用公开演示站；不要填写真实学生资料。','error');$('account').replaceChildren();$('content').replaceChildren(
     card('正在安全验收',text('此环境目前禁用真实报名、附件和 DeepSeek 处理。'),
       el('a',{href:'https://activity-demo.10273055.xyz/',text:'打开无个人信息的交互演示'})));
@@ -103,7 +103,14 @@ function home(){
       }});
       notice('活动创建成功','success');await start();
     });
-    root.append(card('主办方：创建活动',text('在活动过程中仍可持续接受报名和材料。'),el('details',{},el('summary',{text:'展开创建表单'}),create)));
+    const useGps=button('用当前 GPS 作为活动地点',async()=>{
+      if(!navigator.geolocation)throw new Error('浏览器不能定位');
+      const pos=await new Promise((ok,no)=>navigator.geolocation.getCurrentPosition(ok,()=>no(new Error('定位失败')),{enableHighAccuracy:true,timeout:15000,maximumAge:0}));
+      create.elements.latitude.value=pos.coords.latitude.toFixed(7);
+      create.elements.longitude.value=pos.coords.longitude.toFixed(7);
+      notice('已根据 GPS 填入测试活动中心。手机需在此区域才能领取签到码。','success');
+    },'secondary');
+    root.append(card('主办方：创建活动',text('建议在实际试验位置点击 GPS 按钮。晚到学生仍可补传材料。'),el('details',{},el('summary',{text:'展开创建表单'}),useGps,create)));
   }
   const list=card('活动列表');
   if(!app.events.length)list.append(text('暂时还没有活动。'));
@@ -152,14 +159,25 @@ async function studentView(event,root){
   for(const f of files.materials)box.append(el('div',{class:'item'},
     text('已上传 '+f.mime+' · '+Math.ceil(f.length/1024)+' KB')));
   if(!attendance||attendance.channel==='manual'){
-    const fileInput=el('input',{type:'file',accept:'image/png,image/jpeg'});
-    box.append(el('h3',{text:'补充证明截图'}),text('每场活动最多三张，每张最多 3MB；禁止上传无关学生证件或他人私人资料。'),fileInput,
-      button('上传截图',async()=>{
+    box.append(el('h3',{text:'证明截图上传'}),
+      text(app.syntheticOnly?'只允许使用本站内置的虚构图片。Worker 会校验文件 SHA-256；真实图片会被拒绝。':'最多三张 PNG/JPEG，每张不超过 3MB。'));
+    if(app.syntheticOnly)box.append(el('img',{class:'qr',src:'/demo-proof.png',alt:'系统内置、标注 TEST ONLY 的虚构点赞截图'}));
+    box.append(button('真正上传内置模拟截图至私有 R2',async()=>{
+      const source=await fetch('/demo-proof.png',{credentials:'same-origin'});
+      if(!source.ok)throw new Error('无法获取内置测试图片');
+      const blob=await source.blob();
+      await request('/api/events/'+event.id+'/upload',{method:'POST',raw:blob,headers:{'Content-Type':'image/png'}});
+      notice('图片已上传到私有 R2，等待审核员处理。','success');await studentViewReload(event);
+    },'secondary'));
+    if(!app.syntheticOnly){
+      const fileInput=el('input',{type:'file',accept:'image/png,image/jpeg'});
+      box.append(fileInput,button('上传选中的真实证明材料',async()=>{
         const f=fileInput.files?.[0];if(!f)throw new Error('请选择截图');
-        if(f.size>3*1024*1024)throw new Error('截图超过 3MB');
+        if(f.size>3*1024*1024)throw new Error('文件超过 3MB');
         await request('/api/events/'+event.id+'/upload',{method:'POST',raw:f,headers:{'Content-Type':f.type}});
-        notice('截图已提交，后台会重新审核。','success');await studentViewReload(event);
+        notice('证明材料已提交。','success');await studentViewReload(event);
       }));
+    }
   }
   if(!attendance){
     const qrArea=el('div');
