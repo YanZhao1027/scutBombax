@@ -102,6 +102,19 @@ async function api(req,env,url){
   // Deployment readiness is explicit. The public demo must not route here.
   need(env.ENABLE_LIVE==='true',503,'生产后台暂未开放，公网页面只提供无数据演示');
   if(method!=='GET')mutation(req,env);
+  if(method==='POST'&&(p==='/api/register'||p==='/api/login')){
+    need(env.AUTH_RATE_LIMIT?.limit,503,'认证安全限流尚未配置，暂不能接收真实报名');
+    const key=req.headers.get('CF-Connecting-IP');
+    need(key,403,'请求来源未通过 Cloudflare 验证');
+    const rate=await env.AUTH_RATE_LIMIT.limit({key:'auth:'+key});
+    need(rate.success,429,'认证请求过于频繁，请稍后再试');
+  }
+  if(method==='POST'&&p.endsWith('/ai-review')){
+    need(env.AI_RATE_LIMIT?.limit,503,'AI 费用保护限流尚未配置');
+    const key=user?.id||'anonymous';
+    const rate=await env.AI_RATE_LIMIT.limit({key:'ai:'+key});
+    need(rate.success,429,'AI 审核频率超限，请稍后再试');
+  }
   if(method==='POST'&&p==='/api/register'){
     const x=await body(req),username=str(x.username,32),name=str(x.displayName,40),studentNumber=str(x.studentNumber,32);
     need(/^[A-Za-z0-9_]{3,32}$/.test(username)&&/^[A-Za-z0-9-]{4,32}$/.test(studentNumber),400,'账号或学号格式不合法');
