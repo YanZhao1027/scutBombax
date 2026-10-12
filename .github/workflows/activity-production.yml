@@ -26,6 +26,7 @@ jobs:
           node --check deepseek-review.mjs
           node --check cloudflare-live/worker.mjs
           node --check cloudflare-live/scripts/provision-organizer.mjs
+          node --check cloudflare-live/public/app.js
           node --check public/app.js
           npm test
         working-directory: activity-quickcheck
