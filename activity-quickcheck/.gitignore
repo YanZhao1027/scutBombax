@@ -5,3 +5,4 @@ var/
 .env
 *.log
 .DS_Store
+cloudflare-live/public/zxing.js
