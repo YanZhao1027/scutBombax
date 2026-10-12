@@ -19,7 +19,7 @@
 5. scripts/provision-organizer.mjs 可从 stdin 接收管理密码，生成一次性建主办方账号 SQL；在目标 D1 执行并安全删除，公开的学生注册流程不能创建主办方。
 6. 继续保持 ENABLE_LIVE=false。完成独立前端、真实多设备验证、资料保护与同意界面后，才能审核是否改为 true。
 
-注意：当前这个目录还没有完整可发布的生产前端。Node 本地 MVP 的 /api/activities 与 Cloudflare 新后台的 /api/events 并不一致，不应直接混用。Cloudflare Stage 所有业务写入接口在 ENABLE_LIVE=false 时返回 503。
+现在已加入独立 /api/events 前端界面，包括学生报名/图片上传、审核队列、人工到场、扫码核销与导出。部署之前必须先在 activity-quickcheck 执行 npm ci，然后运行 node scripts/stage-live-assets.mjs，把 ZXing 摄像头识码库复制为静态资源；否则现场扫二维码不可用。Cloudflare Stage 在 ENABLE_LIVE=false 时仍拒绝业务写入。正式发布之前还需要用户数据删除/保留机制和手机实测。
 
 ## DeepSeek 权限与用户告知
 
