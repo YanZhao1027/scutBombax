@@ -13,7 +13,7 @@
 ## Ubuntu 进一步部署步骤（先不使用真实学生数据）
 
 1. 使用你已有的 Wrangler 登录，**另建专用** D1 数据库和 R2 私有 bucket，不能复用 audition 项目的任何数据、Token 或资源。
-2. 复制 wrangler.stage.example.jsonc 为本地 wrangler.stage.jsonc，写入新建数据库 ID 及桶名称。只绑定 activity-stage.10273055.xyz。
+2. 在 activity-quickcheck 根目录执行 cp cloudflare-live/wrangler.stage.example.jsonc wrangler.stage.jsonc，写入新建数据库 ID 及桶名称。只绑定 activity-stage.10273055.xyz。
 3. 在确认数据库 ID 后，对独立的测试 D1 执行 migrations/0001_init.sql。
 4. 在 Ubuntu 本机通过 wrangler secret put DEEPSEEK_API_KEY 保存 DeepSeek API Key，禁止发到聊天或提交 Git。
 5. scripts/provision-organizer.mjs 可从 stdin 接收管理密码，生成一次性建主办方账号 SQL；在目标 D1 执行并安全删除，公开的学生注册流程不能创建主办方。
