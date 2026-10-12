@@ -30,6 +30,9 @@ jobs:
           node --check public/app.js
           npm test
         working-directory: activity-quickcheck
+      - name: Prepare self-hosted camera scanner
+        working-directory: activity-quickcheck
+        run: node scripts/stage-live-assets.mjs
       - name: Bundle Worker without deploying
         working-directory: activity-quickcheck
         run: npx --yes wrangler@4.131.1 deploy --config wrangler.live.build.jsonc --dry-run --outdir /tmp/activity-cf-bundle
