@@ -52,3 +52,20 @@
 ## 接受标准
 
 npm test 通过只证明自动化 HTTP 场景，不表示已完成真机测试、生产环境验收或实时三秒核销验证。三通道 500 人 8 分 20 秒仅是理论值；下一阶段须 50 人现场试点和真实并发性能测试。
+
+
+## Cloudflare 公开交互演示（与真实报名系统隔离）
+
+访问：**https://activity-demo.10273055.xyz/**
+
+这是公开可访问的纯虚构数据展示，不是已上线的真实活动报名服务。学生端和主办方端可体验报名、附件提交、资料审核、模拟定位、模拟核销、CSV 下载。演示数据仅保留在当前页面内存中，不跨设备同步、不读取真实定位和摄像头，也不接收任何真实个人信息。Cloudflare Worker 拒绝所有写入及 API 请求。
+
+复用已授权 Ubuntu 上的 Wrangler 认证（与 audition.10273055.xyz 同一个 Cloudflare 账户；不修改 audition 或 pwa）：
+
+    cd activity-quickcheck
+    wrangler deploy --config wrangler.demo.json --dry-run
+    wrangler deploy --config wrangler.demo.json
+
+测试地址独立绑定 activity-demo.10273055.xyz。生产 API 仍仅监听 Ubuntu 的 127.0.0.1:3317。必须完成身份/安全/隐私和真实 HTTPS 测试后，才能考虑公开真实报名与跨设备核销。
+
+**Cloudflare Access / Turnstile / 其他验证方案当前尚未决定。** 此演示站没有在业务层套登录认证，因此不能据此推断生产系统允许匿名上传个人信息。

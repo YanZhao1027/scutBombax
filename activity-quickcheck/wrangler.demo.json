@@ -1,0 +1,16 @@
+{
+  "name": "scut-bombax-activity-demo",
+  "main": "./cloudflare-demo/worker.mjs",
+  "compatibility_date": "2026-09-24",
+  "routes": [
+    {
+      "pattern": "activity-demo.10273055.xyz",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "./cloudflare-demo/public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  }
+}
