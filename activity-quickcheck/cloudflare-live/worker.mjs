@@ -34,10 +34,26 @@ function mutation(req,env){
   need(url.origin===env.PUBLIC_ORIGIN,403,'域名配置不匹配');
   need(req.headers.get('X-Bombax-Action')==='1',403,'缺少同源操作标记');
 }
+async function readBounded(req,max){
+  const declared=req.headers.get('Content-Length');
+  if(declared!==null)need(/^\d+$/.test(declared)&&Number(declared)<=max,413,'请求过大');
+  if(!req.body)return new Uint8Array(0);
+  const reader=req.body.getReader(),chunks=[];let n=0;
+  try{
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      n+=value.byteLength;
+      if(n>max){await reader.cancel();err(413,'请求过大');}
+      chunks.push(value);
+    }
+  }finally{reader.releaseLock();}
+  const result=new Uint8Array(n);let at=0;
+  for(const chunk of chunks){result.set(chunk,at);at+=chunk.byteLength;}
+  return result;
+}
 async function body(req,max=32768){
-  need(Number(req.headers.get('content-length')||0)<=max,413,'请求过大');
-  const buf=await req.arrayBuffer();
-  need(buf.byteLength<=max,413,'请求过大');
+  const buf=await readBounded(req,max);
   try{return JSON.parse(new TextDecoder().decode(buf));}catch{err(400,'JSON 格式不正确');}
 }
 async function access(db,user,eid,roles=['owner','reviewer','scanner','manual']){
@@ -186,7 +202,7 @@ async function api(req,env,url){
       const mime=req.headers.get('Content-Type');
       need(['image/png','image/jpeg'].includes(mime),415,'仅允许 PNG/JPEG');
       need(Number(req.headers.get('Content-Length'))<=MAX_IMAGE,413,'图片过大');
-      const array=new Uint8Array(await req.arrayBuffer());
+      const array=await readBounded(req,MAX_IMAGE);
       need(array.byteLength>=16&&array.byteLength<=MAX_IMAGE,413,'材料过大或无效');
       need(mime==='image/png'?pngValid(array):jpegValid(array),415,'图片格式和内容不匹配');
       const id=uuid(),key='evidence/'+eid+'/'+r.id+'/'+id;
