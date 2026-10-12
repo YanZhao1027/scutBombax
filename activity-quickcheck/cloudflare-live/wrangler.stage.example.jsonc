@@ -4,6 +4,7 @@
   "name": "scut-bombax-activity-stage",
   "main": "./cloudflare-live/worker.mjs",
   "compatibility_date": "2026-10-12",
+  "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "PUBLIC_ORIGIN": "https://activity-stage.10273055.xyz",
     "ENABLE_LIVE": "false"
