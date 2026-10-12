@@ -1,0 +1,32 @@
+name: Activity Production Integration Checks
+on:
+  push:
+    branches:
+      - feat/activity-production-ai-review
+  pull_request:
+    paths:
+      - 'activity-quickcheck/**'
+      - '.github/workflows/activity-production.yml'
+permissions:
+  contents: read
+jobs:
+  validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: activity-quickcheck/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: activity-quickcheck
+      - run: |
+          node --check deepseek-review.mjs
+          node --check cloudflare-live/worker.mjs
+          node --check cloudflare-live/scripts/provision-organizer.mjs
+          node --check public/app.js
+          npm test
+        working-directory: activity-quickcheck
+      - run: node scripts/check-privacy.mjs
