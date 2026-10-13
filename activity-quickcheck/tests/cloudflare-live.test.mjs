@@ -24,7 +24,7 @@ test('Cloudflare live backend only responds with readiness until explicitly enab
 import {pbkdf2Sync} from 'node:crypto';
 
 function authFixture(iterations=100000){
-  const password='Synthetic-Local-Only-Password-2026';
+  const password='12341234';
   const salt='00112233445566778899aabbccddeeff';
   const user={
     id:'synthetic-organizer-1',username:'demo_localtest',display_name:'Synthetic Test Organizer',

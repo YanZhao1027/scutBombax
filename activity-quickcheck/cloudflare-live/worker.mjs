@@ -15,8 +15,9 @@ const csvCell=x=>{let v=String(x??'');if(/^[\s\uFEFF]*[=+\-@]/u.test(v))v="'"+v;
 const csv=rows=>'\uFEFF'+rows.map(row=>row.map(csvCell).join(',')).join('\r\n')+'\r\n';
 async function sha(s){return hex(new Uint8Array(await crypto.subtle.digest('SHA-256',utf8(s))));}
 const STAGE_PBKDF2_ITERATIONS=100000;
-async function passwordHash(pass,saltHex,iterations=STAGE_PBKDF2_ITERATIONS){
-  need(typeof pass==='string'&&pass.length>=12&&pass.length<=256,400,'密码至少 12 字符');
+const STAGE_SHARED_TEST_PASSWORD='12341234'; // Intentionally public, synthetic-only; never for real users.
+async function passwordHash(pass,saltHex,iterations=STAGE_PBKDF2_ITERATIONS,synthetic=false){
+  need(typeof pass==='string'&&((pass.length>=12&&pass.length<=256)||(synthetic&&pass===STAGE_SHARED_TEST_PASSWORD)),400,'密码长度不符合要求');
   need(Number.isInteger(iterations)&&iterations>=1&&iterations<=100000,503,'该密码散列版本不兼容此 Worker，请联系管理员迁移');
   const key=await crypto.subtle.importKey('raw',utf8(pass),'PBKDF2',false,['deriveBits']);
   const material=await crypto.subtle.deriveBits({name:'PBKDF2',salt:Uint8Array.from(saltHex.match(/../g).map(x=>parseInt(x,16))),iterations,hash:'SHA-256'},key,256);
@@ -129,6 +130,8 @@ async function api(req,env,url){
     need(rate.success,429,'认证请求过于频繁，请稍后再试');
   }
   if(method==='POST'&&p.endsWith('/ai-review')){
+    need(env.SYNTHETIC_ONLY!=='true',503,'公开共用密码的演练站不开放计费 AI，请使用人工审核');
+    need(env.SYNTHETIC_ONLY!=='true',503,'公开共用密码的演练站不开放计费 AI，请使用人工审核');
     need(env.AI_RATE_LIMIT?.limit,503,'AI 费用保护限流尚未配置');
     const key=user?.id||'anonymous';
     const rate=await env.AI_RATE_LIMIT.limit({key:'ai:'+key});
@@ -153,7 +156,8 @@ async function api(req,env,url){
       need(username.startsWith('demo_')&&studentNumber.startsWith('TEST-')&&name.startsWith('测试'),403,'演练环境仅允许虚构资料：用户名 demo_ 开头、学号 TEST- 开头、姓名 测试 开头');
     }
     need(env.SYNTHETIC_ONLY==='true',503,'真实学生认证尚未启用，不允许用演练密码规则注册');
-    const salt=hex(bytes(16)),digest=await passwordHash(x.password,salt,STAGE_PBKDF2_ITERATIONS),id=uuid();
+    need(x.password===STAGE_SHARED_TEST_PASSWORD,400,'此虚构数据测试站统一使用密码 12341234');
+    const salt=hex(bytes(16)),digest=await passwordHash(x.password,salt,STAGE_PBKDF2_ITERATIONS,true),id=uuid();
     await db.prepare('INSERT INTO activity_users(id,username,password_salt,password_digest,password_iterations,role,student_number,display_name,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
       .bind(id,username,salt,digest,STAGE_PBKDF2_ITERATIONS,'student',studentNumber,name,epoch()).run();
     return json({ok:true,identityStatus:'self_declared'},201);
@@ -163,7 +167,7 @@ async function api(req,env,url){
     const u=await db.prepare('SELECT * FROM activity_users WHERE username=?').bind(username).first();
     need(u&&typeof x.password==='string',401,'账号或密码错误');
     need(env.SYNTHETIC_ONLY==='true',503,'正式身份认证提供方尚未配置');
-    const digest=await passwordHash(x.password,u.password_salt,Number(u.password_iterations));
+    const digest=await passwordHash(x.password,u.password_salt,Number(u.password_iterations),true);
     need(digest===u.password_digest,401,'账号或密码错误');
     const token=hex(bytes(32));
     await db.prepare('INSERT INTO activity_sessions(digest,user_id,expires_at) VALUES (?,?,?)').bind(await sha(token),u.id,epoch()+SESSION_MS).run();

@@ -20,6 +20,26 @@ const label=(name,control)=>el('label',{},name,control);
 const inp=(name,type='text',value='')=>el('input',{name,type,value,required:'required'});
 const card=(heading,...children)=>el('section',{class:'card'},el('h2',{text:heading}),...children);
 const stamp=n=>new Date(n).toLocaleString('zh-CN',{hour12:false});
+function locationHelp(error,forCheckin=false){
+  const fallback=forCheckin
+    ? '请转人工身份核验窗口，工作人员确认到场后仍可继续资料审核。'
+    : '可改用经过核实的 WGS84 经纬度手动创建活动，或到室外重试。';
+  if(error?.code===1)
+    return '位置权限被拒绝。请在系统设置 → Via 浏览器 → 位置信息中允许定位，再检查浏览器的网站权限。'+fallback;
+  if(error?.code===2)
+    return '设备当前无法取得位置（可能没有室内 GPS 信号或网络定位不可用）。'+fallback;
+  if(error?.code===3)
+    return '定位超时，请到开阔处并等待定位服务获取坐标。'+fallback;
+  return '手机未能获取有效位置。'+fallback;
+}
+async function requestPhoneLocation(forCheckin=false){
+  if(!navigator.geolocation)throw new Error('当前浏览器未提供定位接口。请使用支持地理定位的浏览器，或改用人工通道。');
+  return await new Promise((resolve,reject)=>{
+    navigator.geolocation.getCurrentPosition(resolve,
+      error=>reject(new Error(locationHelp(error,forCheckin))),
+      {enableHighAccuracy:true,timeout:15000,maximumAge:0});
+  });
+}
 function localInputTime(timestamp){
   const d=new Date(timestamp),pad=n=>String(n).padStart(2,'0');
   return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
@@ -79,21 +99,21 @@ function renderAccount(){
       },'secondary'))));
     return;
   }
-  const signIn=form([label('用户名',inp('username')),label('密码',inp('password','password'))],'登录',
+  const signIn=form([label('用户名',inp('username')),label('测试密码统一 12341234',inp('password','password','12341234'))],'登录',
     async x=>{await request('/api/login',{method:'POST',data:x});await start();});
   const privacy=el('input',{type:'checkbox',name:'privacyAcknowledged',value:'yes'});
   const signUp=form([
     label('注册用户名',inp('username')),
     label('姓名（目前无法独立验证）',inp('displayName')),
     label('学号（自行填写）',inp('studentNumber')),
-    label('12 位以上密码',inp('password','password')),
+    label('测试密码统一 12341234',inp('password','password','12341234')),
     el('label',{class:'check'},privacy,'我知悉活动报名会保存自填身份与证明材料，只有授权人员可以查看；正式部署前须公示数据保留及删除办法。')
   ],'注册学生账号',async x=>{
     if(!privacy.checked)throw new Error('须先确认了解个人信息处理规则');
     await request('/api/register',{method:'POST',data:{...x,privacyAcknowledged:true}});
     notice('学生账户已创建，请登录。所填学号尚未经学校认证。','success');
   });
-  root.append(card('登录与学生注册',text('不读取学校一卡通、微信 Cookie 或校园码。'),
+  root.append(card('登录与学生注册',text('此站仅使用虚构资料；所有测试账号密码均为 12341234。'),
     el('div',{class:'grid'},el('div',{},el('h3',{text:'登录'}),signIn),
       el('div',{},el('h3',{text:'学生注册'}),signUp))));
 }
@@ -118,8 +138,9 @@ function home(){
       notice('活动创建成功','success');await start();
     });
     const useGps=button('用当前 GPS 作为活动地点',async()=>{
-      if(!navigator.geolocation)throw new Error('浏览器不能定位');
-      const pos=await new Promise((ok,no)=>navigator.geolocation.getCurrentPosition(ok,()=>no(new Error('定位失败')),{enableHighAccuracy:true,timeout:15000,maximumAge:0}));
+      const pos=await requestPhoneLocation(false);
+      if(!Number.isFinite(pos.coords.accuracy)||pos.coords.accuracy>150)
+        throw new Error('当前位置精度较差（约 '+Math.round(pos.coords.accuracy||0)+' 米），不建议用作活动中心；请到开阔处或使用准确的 WGS84 坐标。');
       create.elements.latitude.value=pos.coords.latitude.toFixed(7);
       create.elements.longitude.value=pos.coords.longitude.toFixed(7);
       notice('已根据 GPS 填入测试活动中心。手机需在此区域才能领取签到码。','success');
@@ -209,8 +230,9 @@ async function studentView(event,root){
     box.append(el('hr'),el('h3',{text:'快速现场签到'}),
       text('资料通过后，抵达现场并授权定位，即可生成 45 秒有效二维码。'),
       button('现场定位并生成二维码',async()=>{
-        if(!navigator.geolocation)throw new Error('浏览器不支持定位');
-        const pos=await new Promise((yes,no)=>navigator.geolocation.getCurrentPosition(yes,()=>no(new Error('定位失败，请进入人工通道')),{enableHighAccuracy:true,timeout:12000,maximumAge:0}));
+        const pos=await requestPhoneLocation(true);
+        if(!Number.isFinite(pos.coords.accuracy)||pos.coords.accuracy>120)
+          throw new Error('当前定位精度不足（约 '+Math.round(pos.coords.accuracy||0)+' 米）。请移至开阔区域重试或走人工通道。');
         const ticket=await request('/api/events/'+event.id+'/ticket',{method:'POST',data:{
           latitude:pos.coords.latitude,longitude:pos.coords.longitude,accuracyM:pos.coords.accuracy
         }});
