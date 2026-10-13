@@ -1,0 +1,8 @@
+{
+  // Build-only. Never deploy this worker; it has no D1/R2/secrets.
+  "name": "scut-bombax-activity-buildcheck",
+  "main": "./cloudflare-live/worker.mjs",
+  "compatibility_date": "2026-10-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {"directory":"./cloudflare-live/public","binding":"ASSETS","run_worker_first":true}
+}

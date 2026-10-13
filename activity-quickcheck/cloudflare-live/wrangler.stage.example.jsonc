@@ -1,0 +1,32 @@
+{
+  // TEST CONFIG TEMPLATE. Replace resources and rate-limit namespace IDs after creating isolated D1/R2.
+  // Namespace IDs must be unique to this account, not shared with audition or other Workers.
+  // Do not modify the audition.10273055.xyz resources.
+  "name": "scut-bombax-activity-stage",
+  "main": "./cloudflare-live/worker.mjs",
+  "compatibility_date": "2026-10-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "PUBLIC_ORIGIN": "https://activity-stage.10273055.xyz",
+    "ENABLE_LIVE": "false"
+  },
+  "routes": [{"pattern":"activity-stage.10273055.xyz","custom_domain":true}],
+  "assets": {
+    "directory": "./cloudflare-live/public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "scut-bombax-activity-stage",
+    "database_id": "REPLACE_WITH_OWN_D1_DATABASE_ID"
+  }],
+  "r2_buckets": [{
+    "binding": "MATERIALS",
+    "bucket_name": "scut-bombax-activity-stage-private"
+  }],
+  "ratelimits": [
+    {"name":"AUTH_RATE_LIMIT","namespace_id":"REPLACE_WITH_UNIQUE_INTEGER_NAMESPACE_1","simple":{"limit":8,"period":60}},
+    {"name":"AI_RATE_LIMIT","namespace_id":"REPLACE_WITH_UNIQUE_INTEGER_NAMESPACE_2","simple":{"limit":5,"period":60}}
+  ]
+}
