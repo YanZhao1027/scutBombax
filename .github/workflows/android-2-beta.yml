@@ -41,6 +41,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Install Android API and build tools
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Enforce Beta metadata before publishing any APK
+        run: |
+          node -e "const p=require('./package.json');if(p.version!=='2.0.0-beta.1')process.exit(1)"
+          grep -q 'applicationId "cn.scut.bombax.beta"' android/app/build.gradle
+          grep -q 'versionName "2.0.0-beta.1"' android/app/build.gradle
       - run: pnpm install --frozen-lockfile
       - name: Verify source and business logic
         run: |
