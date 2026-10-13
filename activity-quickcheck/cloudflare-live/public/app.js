@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const app={me:null,events:[],active:null,poll:null,scanner:null,qr:null,syntheticOnly:false};
+const app={me:null,events:[],active:null,poll:null,scanner:null,scannerOverlay:null,scannerVideo:null,scannerEpoch:0,scannerHistory:false,scannerFullscreenEntered:false,scannerPreviousFocus:null,qr:null,syntheticOnly:false};
 function el(tag,props={},...children){
   const n=document.createElement(tag);
   for(const [k,v] of Object.entries(props)){
@@ -292,7 +292,7 @@ async function organizerView(event,root){
   },5000);
 }
 async function renderDuty(event,root,duty,owner){
-  const old=$('duty-body');if(old)old.remove();
+  const old=$('duty-body');if(old?.dataset.duty==='scanner')cleanScanner();if(old)old.remove();
   const slot=card(duty==='reviewer'?'待审核队列':duty==='scanner'?'扫码通道':'人工认证窗口');
   slot.id='duty-body';root.append(slot);
   const response=await request('/api/events/'+event.id+'/queue');
@@ -349,26 +349,198 @@ async function renderDuty(event,root,duty,owner){
     }
     search.addEventListener('input',draw);draw();
   }else if(duty==='scanner'){
-    slot.append(text('仅扫描花工木棉活动二维码，不扫描学校支付或校园认证码。'));
-    const video=el('video',{autoplay:'autoplay',playsinline:'playsinline',muted:'muted'}),status=el('div',{class:'status',text:'等待扫码…'});
-    const token=el('input',{placeholder:'摄像头不可用时手工输入完整签到码'});
-    let scanning=false;
-    async function redeem(value){
-      if(scanning)return;scanning=true;
-      try{await request('/api/events/'+event.id+'/redeem',{method:'POST',data:{token:value}});
-        status.textContent='✓ 核销成功，请下一位';token.value='';
-      }catch(e){status.textContent='核销失败：'+e.message;}
-      finally{setTimeout(()=>{scanning=false;},500);}
+    slot.dataset.duty='scanner';
+    slot.append(text('仅识别花工木棉活动签到二维码。点击下方按钮进入全屏扫码；学校校园认证码和支付码无效。'));
+    const status=el('div',{class:'status',role:'status','aria-live':'polite',text:'摄像头尚未开启。'});
+    const token=el('input',{type:'text',placeholder:'备用：粘贴完整 bqx_ 签到码',maxlength:68,
+      autocomplete:'off',autocapitalize:'off',spellcheck:'false','aria-label':'完整花工木棉签到码'});
+    let scanning=false,lastAccepted='',lastAttempt='',lastAttemptAt=0;
+    function report(message,kind='normal'){
+      status.textContent=message;
+      status.className='status '+(kind==='ok'?'scan-good':kind==='error'?'scan-error':'');
+      const overlay=app.scannerOverlay;
+      if(overlay){
+        const hud=overlay.querySelector('[data-scanner-result]');
+        if(hud){
+          hud.textContent=message;
+          hud.dataset.kind=kind;
+        }
+      }
     }
-    slot.append(el('div',{class:'row'},
-      button('开启摄像头',async()=>{
-        if(!window.ZXingBrowser)throw new Error('扫码模块尚未打包：请改用人工通道');
-        cleanScanner();
+    async function redeem(value){
+      const checkin=String(value||'').trim();
+      if(scanning||checkin===lastAccepted)return;
+      if(!window.BombaxScanner?.validToken(checkin)){
+        if(lastAttempt!==checkin||Date.now()-lastAttemptAt>2000)
+          report('不是花工木棉签到码；请勿扫描学校支付或认证二维码。','error');
+        lastAttempt=checkin;lastAttemptAt=Date.now();
+        return;
+      }
+      // A continuously visible already-redeemed/expired QR must not cause
+      // repeated requests against the high-throughput onsite check-in API.
+      if(checkin===lastAttempt&&Date.now()-lastAttemptAt<3000)return;
+      lastAttempt=checkin;lastAttemptAt=Date.now();
+      scanning=true;
+      try{
+        await request('/api/events/'+event.id+'/redeem',{method:'POST',data:{token:checkin}});
+        lastAccepted=checkin;
+        report('✓ 核销成功 · 请下一位','ok');
+        token.value='';
+        try{navigator.vibrate?.(75);}catch{}
+      }catch(e){
+        report('核销失败：'+e.message,'error');
+        try{navigator.vibrate?.([75,55,75]);}catch{}
+      }finally{
+        setTimeout(()=>{scanning=false;},650);
+      }
+    }
+    async function startCamera(video,overlay,epoch){
+      if(app.scannerOverlay!==overlay||app.scannerEpoch!==epoch)return;
+      report('正在启动后置摄像头…');
+      try{
         const reader=new window.ZXingBrowser.BrowserQRCodeReader();
-        app.scanner=await reader.decodeFromVideoDevice(undefined,video,code=>{if(code?.getText)safe(()=>redeem(code.getText()));});
-      }),button('停止',cleanScanner,'secondary')),video,status,
-      el('div',{class:'row'},token,button('手工核销',()=>redeem(token.value))));
+        const controls=await reader.decodeFromVideoDevice(undefined,video,code=>{
+          if(code?.getText)void redeem(code.getText());
+        });
+        if(app.scannerOverlay!==overlay||app.scannerEpoch!==epoch){
+          controls.stop();
+          try{video.srcObject?.getTracks?.().forEach(track=>track.stop());}catch{}
+          video.srcObject=null;
+          return;
+        }
+        app.scanner=controls;
+        report('摄像头已就绪 · 将二维码对准中央取景框');
+      }catch(error){
+        if(app.scannerOverlay===overlay&&app.scannerEpoch===epoch){
+          report(window.BombaxScanner.scannerProblem(error),'error');
+        }
+      }
+    }
+    function openCamera(){
+      if(!window.ZXingBrowser||!window.BombaxScanner)
+        throw new Error('扫码组件尚未加载。请刷新页面，或前往人工认证窗口。');
+      if(!window.isSecureContext)
+        throw new Error('摄像头必须通过有效 HTTPS 打开。纯 HTTP 校园网地址不可用。');
+      cleanScanner();
+      const video=el('video',{autoplay:'autoplay',playsinline:'playsinline',muted:'muted',
+        'aria-label':'实时二维码摄像头画面'});
+      const close=button('✕ 退出扫码',()=>cleanScanner(),'scanner-fullscreen-close');
+      close.setAttribute('aria-label','退出全屏扫码，关闭摄像头');
+      const hdr=el('div',{class:'scanner-fullscreen-header'},
+        el('div',{class:'scanner-fullscreen-brand'},
+          el('strong',{text:'花工木棉 · 全屏扫码'}),
+          el('span',{text:'仅限本场活动二维码'})),close);
+      const target=el('div',{class:'scanner-target','aria-hidden':'true'},
+        el('div',{class:'scanner-target-line'}));
+      const hud=el('div',{class:'scanner-fullscreen-result','data-scanner-result':'',role:'status',
+        'aria-live':'polite',text:'正在申请相机权限…'});
+      const retry=button('重新开启摄像头',()=>{
+        if(app.scannerOverlay!==overlay)return;
+        try{app.scanner?.stop();}catch{}
+        app.scanner=null;
+        try{video.srcObject?.getTracks?.().forEach(track=>track.stop());}catch{}
+        video.srcObject=null;
+        void startCamera(video,overlay,epoch);
+      },'scanner-fullscreen-retry');
+      const bottom=el('div',{class:'scanner-fullscreen-footer'},hud,
+        el('p',{text:'扫描成功后无需退出；继续对准下一位同学的动态二维码。'}),retry);
+      const overlay=el('div',{class:'bombax-scanner-fullscreen',role:'dialog','aria-modal':'true',
+        'aria-label':'全屏二维码签到扫码','tabindex':'-1'},
+        video,el('div',{class:'scanner-fullscreen-shade','aria-hidden':'true'}),
+        hdr,el('div',{class:'scanner-target-wrap'},target),bottom);
+      // Full-viewport fixed UI works on browsers without Fullscreen API.
+      // When allowed, requestFullscreen hides browser chrome as well.
+      document.body.append(overlay);
+      document.body.classList.add('scanner-modal-open');
+      app.scannerOverlay=overlay;
+      app.scannerVideo=video;
+      const epoch=++app.scannerEpoch;
+      app.scannerPreviousFocus=document.activeElement;
+      app.scannerFullscreenEntered=false;
+      if(!history.state?.__bombaxScanner){
+        try{history.pushState({__bombaxScanner:true},'',location.href);app.scannerHistory=true;}
+        catch{app.scannerHistory=false;}
+      }
+      overlay.focus();
+      if(typeof overlay.requestFullscreen==='function'){
+        try{
+          Promise.resolve(overlay.requestFullscreen({navigationUI:'hide'})).then(()=>{
+            if(app.scannerOverlay===overlay&&document.fullscreenElement===overlay)
+              app.scannerFullscreenEntered=true;
+          }).catch(()=>{/* fixed-position fallback remains usable */});
+        }catch{/* fixed-position fallback remains usable */}
+      }
+      void startCamera(video,overlay,epoch);
+    }
+    slot.append(button('开启全屏摄像头扫码',openCamera),
+      status,text('摄像头将进入全屏扫码取景界面。底部显示扫码结果；顶部退出。没有相机权限时请改走人工认证通道。'));
+    if(app.syntheticOnly){
+      const picker=el('input',{type:'file',accept:'image/png,image/jpeg,image/webp',class:'hidden',
+        'aria-label':'只在虚构数据演练站选择二维码图片'});
+      picker.addEventListener('change',()=>safe(async()=>{
+        const file=picker.files?.[0];picker.value='';
+        if(!file)return;
+        if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024)
+          throw new Error('只接受 2 MB 以内的 PNG/JPEG/WebP 二维码图片');
+        if(!window.ZXingBrowser)throw new Error('本地识码组件没有加载');
+        const blobUrl=URL.createObjectURL(file);
+        try{
+          const image=el('img',{src:blobUrl,alt:'待识别的测试二维码'});
+          await image.decode();
+          const result=await new window.ZXingBrowser.BrowserQRCodeReader().decodeFromImageElement(image);
+          if(!result?.getText)throw new Error('图片未识别出二维码');
+          await redeem(result.getText());
+        }catch(error){
+          if(!String(error.message||'').includes('核销失败'))
+            report('图片识码失败：请确认它是清晰的花工木棉测试二维码，且未过期。','error');
+        }finally{URL.revokeObjectURL(blobUrl);}
+      }));
+      slot.append(el('div',{class:'scanner-demo-panel'},
+        text('仅虚构数据演练：选择二维码截图进行本机解码，不上传图片；真实活动不开放图片代扫。'),
+        button('从图片识别测试二维码',()=>picker.click(),'secondary'),picker));
+    }
+    slot.append(el('div',{class:'scanner-fallback'},token,
+      button('备用：核销已读取的完整签到码',()=>redeem(token.value),'secondary')));
   }
 }
-function cleanScanner(){try{app.scanner?.stop();}catch{}app.scanner=null;}
+function cleanScanner(){
+  ++app.scannerEpoch;
+  try{app.scanner?.stop();}catch{}
+  app.scanner=null;
+  const video=app.scannerVideo;
+  try{video?.srcObject?.getTracks?.().forEach(track=>track.stop());}catch{}
+  if(video){try{video.pause();}catch{}video.srcObject=null;}
+  app.scannerVideo=null;
+  const overlay=app.scannerOverlay;
+  app.scannerOverlay=null;
+  app.scannerFullscreenEntered=false;
+  if(overlay){
+    if(document.fullscreenElement===overlay){
+      try{Promise.resolve(document.exitFullscreen()).catch(()=>{});}catch{}
+    }
+    overlay.remove();
+    document.body.classList.remove('scanner-modal-open');
+    if(app.scannerPreviousFocus?.isConnected){
+      try{app.scannerPreviousFocus.focus({preventScroll:true});}catch{}
+    }
+    app.scannerPreviousFocus=null;
+  }
+  if(app.scannerHistory){
+    app.scannerHistory=false;
+    if(history.state?.__bombaxScanner){
+      try{history.back();}catch{}
+    }
+  }
+}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)cleanScanner();});
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&app.scannerOverlay){event.preventDefault();cleanScanner();}
+});
+window.addEventListener('popstate',()=>{
+  if(app.scannerOverlay){app.scannerHistory=false;cleanScanner();}
+});
+document.addEventListener('fullscreenchange',()=>{
+  if(app.scannerOverlay&&app.scannerFullscreenEntered&&
+      document.fullscreenElement!==app.scannerOverlay)cleanScanner();
+});
 safe(start);

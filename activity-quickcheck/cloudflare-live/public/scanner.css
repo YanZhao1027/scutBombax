@@ -1,0 +1,278 @@
+/* Mobile staff camera mode; isolated to the activity scanner panel. */
+#duty-body[data-duty="scanner"]{
+  display:grid;
+  gap:13px;
+}
+#duty-body[data-duty="scanner"] .row{
+  gap:10px;
+}
+#duty-body[data-duty="scanner"] video{
+  width:100%;
+  max-height:clamp(220px,52vh,430px);
+  min-height:220px;
+  object-fit:cover;
+  border-radius:17px;
+  background:#122d47;
+}
+#duty-body[data-duty="scanner"] .status{
+  border-radius:13px;
+  padding:13px 15px;
+  font-size:17px;
+  font-weight:750;
+  line-height:1.5;
+  color:#1a4e77;
+  background:#eef7ff;
+}
+#duty-body[data-duty="scanner"] .status.scan-good{
+  background:#e2f8eb;
+  color:#176a3a;
+  border:1px solid #a3dbb7;
+}
+#duty-body[data-duty="scanner"] .status.scan-error{
+  background:#fff1e9;
+  color:#9c3d28;
+  border:1px solid #f6c8b2;
+  font-size:15px;
+}
+.scanner-demo-panel,
+.scanner-fallback{
+  background:#f5f9ff;
+  border:1px solid #d8e8f9;
+  border-radius:15px;
+  padding:13px;
+}
+.scanner-demo-panel p{
+  margin:0 0 9px;
+}
+.scanner-demo-panel .hidden{
+  display:none!important;
+}
+.scanner-fallback{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:10px;
+}
+.scanner-fallback input{
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size:12px;
+}
+@media(max-width:550px){
+  #duty-body[data-duty="scanner"] button{
+    flex:1 1 135px;
+    min-height:50px;
+  }
+}
+
+
+/* Full-viewport QR camera scanning: overlays the entire browser/WebView content.
+ * When fullscreen API is available it also hides browser/UI chrome.
+ */
+body.scanner-modal-open {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+.bombax-scanner-fullscreen {
+  position: fixed;
+  z-index: 2147483646;
+  inset: 0;
+  width: 100vw;
+  width: 100dvw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  isolation: isolate;
+  color: #ffffff;
+  background: #05121e;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  outline: none;
+  font-family: system-ui,-apple-system,"Noto Sans SC",sans-serif;
+}
+.bombax-scanner-fullscreen:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+}
+.bombax-scanner-fullscreen video {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+  border-radius: 0;
+  object-fit: cover;
+  background: #06111a;
+}
+.scanner-fullscreen-shade {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg,
+    rgba(0,11,24,.91) 0,
+    rgba(0,13,25,.28) 22%,
+    transparent 42%,
+    rgba(0,13,25,.11) 60%,
+    rgba(0,8,19,.84) 100%);
+}
+.scanner-fullscreen-header {
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: max(env(safe-area-inset-top),18px) max(env(safe-area-inset-right),19px) 8px max(env(safe-area-inset-left),19px);
+}
+.scanner-fullscreen-brand {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.scanner-fullscreen-brand strong {
+  font-size: clamp(18px,4.8vw,23px);
+  line-height: 1.28;
+  font-weight: 800;
+  color: white;
+  text-shadow: 0 1px 6px #0008;
+}
+.scanner-fullscreen-brand span {
+  color: #c0d1e5;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.bombax-scanner-fullscreen button.scanner-fullscreen-close {
+  color: #ffffff;
+  background: #162538d9;
+  border: 1px solid #b2c8dd77;
+  font-size: 14px;
+  font-weight: 750;
+  padding: 10px 13px;
+  border-radius: 999px;
+  min-height: 46px;
+  flex-shrink: 0;
+}
+.bombax-scanner-fullscreen button:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+}
+.scanner-target-wrap {
+  z-index: 1;
+  flex: 1 1 auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 120px;
+  padding: 6px 14px;
+  pointer-events: none;
+}
+.scanner-target {
+  position: relative;
+  width: min(78vw,54dvh,370px);
+  aspect-ratio: 1;
+  border-radius: 21px;
+  border: 2px solid #ffffff70;
+  box-shadow: 0 0 0 150vmax rgba(0,7,17,.39);
+  background: transparent;
+  overflow: hidden;
+}
+.scanner-target::before,
+.scanner-target::after {
+  content: "";
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  pointer-events: none;
+}
+.scanner-target::before {
+  top: -2px;
+  left: -2px;
+  border-top: 6px solid #7cefc5;
+  border-left: 6px solid #7cefc5;
+  border-radius: 18px 0 0;
+}
+.scanner-target::after {
+  right: -2px;
+  bottom: -2px;
+  border-right: 6px solid #7cefc5;
+  border-bottom: 6px solid #7cefc5;
+  border-radius: 0 0 18px;
+}
+.scanner-target-line {
+  width: calc(100% - 30px);
+  height: 2px;
+  position: absolute;
+  left: 15px;
+  top: 16%;
+  background: linear-gradient(90deg,transparent,#84ffd4,transparent);
+  box-shadow: 0 0 14px #9fffe7b0;
+  animation: scanner-sweep 2.4s ease-in-out infinite alternate;
+}
+@keyframes scanner-sweep {
+  from { transform: translateY(0); }
+  to { transform: translateY(min(55vw,28dvh,260px)); }
+}
+.scanner-fullscreen-footer {
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  gap: 13px;
+  padding: 14px 19px max(env(safe-area-inset-bottom),25px);
+  background: linear-gradient(180deg,transparent,#050d19d9 27%);
+}
+.scanner-fullscreen-result {
+  width: min(100%,580px);
+  min-height: 62px;
+  border: 1px solid #a6c8f17e;
+  border-radius: 17px;
+  background: #182c42ef;
+  padding: 13px 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.45;
+  color: #f3f8ff;
+  font-size: clamp(15px,4.1vw,19px);
+  font-weight: 720;
+  overflow-wrap: anywhere;
+}
+.scanner-fullscreen-result[data-kind="ok"] {
+  color: #08321b;
+  background: #b9f5d1;
+  border-color: #8bebb4;
+}
+.scanner-fullscreen-result[data-kind="error"] {
+  color: #fff0dc;
+  background: #803323eb;
+  border-color: #f8aa7d;
+  font-size: clamp(13px,3.5vw,16px);
+}
+.scanner-fullscreen-footer p {
+  margin: 0;
+  color: #d3e0ee;
+  text-align: center;
+  font-size: 12px;
+  max-width: 360px;
+  line-height: 1.6;
+}
+.bombax-scanner-fullscreen button.scanner-fullscreen-retry {
+  background: #e6efff;
+  color: #1c456d;
+  min-height: 43px;
+  font-size: 14px;
+  border-radius: 999px;
+  padding: 8px 22px;
+}
+@media (max-height: 620px) and (orientation: landscape) {
+  .scanner-fullscreen-header { padding-top: 8px; }
+  .scanner-fullscreen-footer { padding-bottom: 8px; gap: 5px; }
+  .scanner-fullscreen-footer p { display: none; }
+  .scanner-target { width: min(39vw,55dvh,245px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scanner-target-line { animation: none; }
+}
