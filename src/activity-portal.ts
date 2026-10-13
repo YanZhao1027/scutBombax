@@ -1,13 +1,17 @@
-import { Capacitor } from '@capacitor/core';
-import { Browser } from '@capacitor/browser';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+
+/** Restricted native destination selection — arbitrary URLs never cross the bridge. */
+const NativeActivityPortal=registerPlugin<{open(options:{destination:ActivityDestination}):Promise<{opened:boolean}>}>('BombaxActivityPortal');
 
 /**
  * The activity site is an independent Cloudflare origin with its OWN credentials.
  * The school balance bridge never sees its cookies or QR tokens.
  *
- * Chrome Custom Tabs supplies Android's trusted HTTPS rendering, location and
- * camera prompts. The local Capacitor page must not fetch or iframe activity
- * data: the stage deliberately has a separate-origin session + CSRF policy.
+ * Android uses an isolated native WebView Activity with explicit per-site
+ * camera/location permission prompts and a document picker. No SCUT Kotlin
+ * bridge is registered in that WebView; browser cookies remain host-scoped.
+ * The local Capacitor water/electricity page never fetches or iframes activity
+ * data: the stage requires separate-origin session + CSRF protection.
  */
 export const ACTIVITY_STAGE = 'https://activity-stage.10273055.xyz/';
 export const ACTIVITY_SHOWCASE = 'https://activity-demo.10273055.xyz/';
@@ -38,11 +42,11 @@ export function activityDestinationUrl(which: ActivityDestination): string {
   return url;
 }
 
-/** Android: Custom Tabs. Browser preview: a distinct HTTPS tab. */
+/** Android: isolated native WebView. Browser preview: a distinct HTTPS tab. */
 export async function openActivityPortal(which: ActivityDestination): Promise<void> {
   const url = activityDestinationUrl(which);
   if (Capacitor.isNativePlatform()) {
-    await Browser.open({ url, toolbarColor: '#F5F7FF' });
+    await NativeActivityPortal.open({ destination: which });
     return;
   }
   const popup = window.open(url, '_blank', 'noopener,noreferrer');
