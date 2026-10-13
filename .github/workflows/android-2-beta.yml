@@ -37,11 +37,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Verify preinstalled Android SDK
-        run: |
-          test -n "$ANDROID_HOME"
-          command -v sdkmanager
-          sdkmanager --version
+      - uses: android-actions/setup-android@v3
+        with:
+          # The action's default "tools" package was retired by Google.
+          # Explicit packages avoid sdkmanager "tools" failing on hosted runners.
+          packages: 'platform-tools'
       - uses: gradle/actions/setup-gradle@v4
       - name: Install Android API and build tools
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
