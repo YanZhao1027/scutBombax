@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#101014" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f8f9ff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#13151b" media="(prefers-color-scheme: dark)" />
     <!--
       Defense in depth for the project rule "the WebView never talks to SCUT":
       only same-origin assets and data: captcha images are allowed, and
@@ -14,10 +14,28 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'"
     />
-    <meta name="description" content="华南理工大学宿舍电费、水费与空调费余额查询。" />
-    <title>宿舍水电</title>
+    <meta name="description" content="花工木棉 2.0 Beta：宿舍水电查询与校园活动报名签到。" />
+    <title>花工木棉 2.0 Beta</title>
   </head>
-  <body>
+  <body class="material-beta">
+    <div class="beta-app-shell">
+      <div class="beta-appbar">
+        <div class="beta-brand">
+          <img src="/bombax-mark.webp" alt="" class="beta-brand-mark" />
+          <div>
+            <div class="beta-brand-name">花工木棉 <span class="beta-label">BETA</span></div>
+            <p class="beta-brand-caption">SCUT BOMBAX · 2.0.0</p>
+          </div>
+        </div>
+        <span class="beta-top-label" aria-label="安卓测试版本">Android Preview</span>
+      </div>
+      <div class="beta-page">
+        <section id="utilities-screen" class="beta-screen" aria-label="宿舍水电模块">
+          <div class="beta-screen-intro">
+            <p class="beta-eyebrow">CAMPUS UTILITIES</p>
+            <h1>宿舍水电<span class="beta-heading-dot">.</span></h1>
+            <p class="beta-lead">余额、用量趋势与校园生活，一目了然。</p>
+          </div>
     <header>
       <span id="session-pill" data-state="off">未登录</span>
     </header>
@@ -65,6 +83,11 @@
 
       <!-- DXC only; no school/account authentication is passed into these external apps. -->
       <section id="recharge-panel" aria-label="官方充值">
+        <div class="utility-card-head">
+          <p class="beta-eyebrow">OFFICIAL RECHARGE</p>
+          <h2>校园充值</h2>
+          <p>仅跳转学校官方入口，不读取支付或充值信息。</p>
+        </div>
         <p class="recharge-actions">
           <button id="recharge-wechat" type="button">发送到微信充值 ↗</button>
           <button id="recharge-browser" type="button" class="quiet">浏览器打开</button>
@@ -75,6 +98,11 @@
 
       <!-- Everything that can talk to the school, or schedule a talk to it. Session-gated. -->
       <section id="results-panel" hidden>
+        <div class="utility-card-head">
+          <p class="beta-eyebrow">LIVE QUERY & ALERTS</p>
+          <h2>查询与提醒</h2>
+          <p>余额更新、前台刷新及自愿开启的常驻通知。</p>
+        </div>
         <p class="meta">
           <button id="query-button" type="button">刷新</button>
           <span id="query-state"></span>
@@ -109,6 +137,11 @@
       </section>
 
       <section id="login-panel">
+        <div class="utility-card-head">
+          <p class="beta-eyebrow">CAMPUS LOGIN</p>
+          <h2>登录校园一卡通</h2>
+          <p>密码不保存；校园请求仍通过 Kotlin 原生安全连接。</p>
+        </div>
         <form id="login-form" novalidate>
           <p class="pair">
             <select id="campus" autocomplete="off" aria-label="所在校区">
@@ -191,6 +224,85 @@
         <pre id="native-log" aria-live="polite"></pre>
       </details>
     </main>
+    </section>
+
+    <section id="activity-screen" class="beta-screen" aria-label="校园活动速签模块" hidden>
+      <div class="beta-screen-intro">
+        <p class="beta-eyebrow">CAMPUS ACTIVITIES</p>
+        <h1>活动速签<span class="beta-heading-dot">.</span></h1>
+        <p class="beta-lead">从报名、资料审核，到活动现场快速核销。</p>
+      </div>
+
+      <div class="activity-hero">
+        <div class="activity-hero-art" aria-hidden="true">
+          <span class="activity-blob one"></span>
+          <span class="activity-blob two"></span>
+          <svg viewBox="0 0 84 84" width="84" height="84" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="17" y="14" width="50" height="57" rx="12" fill="#fff" opacity=".94" />
+            <rect x="25" y="24" width="34" height="6" rx="3" fill="#c7d9f6"/>
+            <path d="M26 43h11m-11 7h17" stroke="#83a9e9" stroke-width="4" stroke-linecap="round"/>
+            <circle cx="55" cy="56" r="16" fill="#2672c9"/>
+            <path d="m49 55 5 5 9-11" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <span class="activity-hero-chip">独立服务 · HTTPS</span>
+        <h2>更轻松地参与每一场校园活动</h2>
+        <p>活动进行中也能报名、补交虚构截图。通过材料审核和到场核验后，进入候选名单。</p>
+        <md-filled-button id="activity-open-stage" type="button" aria-label="打开 App 内独立 HTTPS 活动测试工作台">
+          打开活动工作台
+          <svg slot="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 4h7v2H6v12h12v-5h2v7H4V4Zm9 0h7v7h-2V7.4l-8.3 8.3-1.4-1.4L16.6 6H13V4Z"/></svg>
+        </md-filled-button>
+        <p id="activity-launch-status" class="activity-launch-status" role="status" aria-live="polite"></p>
+      </div>
+
+      <section class="activity-feature-section" aria-labelledby="activity-path-heading">
+        <div class="activity-section-heading">
+          <p class="beta-eyebrow">HOW IT WORKS</p>
+          <h2 id="activity-path-heading">一次报名，两种签到方式</h2>
+        </div>
+        <ol class="activity-steps">
+          <li>
+            <span class="step-symbol" aria-hidden="true">01</span>
+            <div><h3>报名与上传材料</h3><p>提交报名，上传测试用集赞截图；现场报名也可以。</p></div>
+          </li>
+          <li>
+            <span class="step-symbol" aria-hidden="true">02</span>
+            <div><h3>等待人工审核</h3><p>后台持续处理新材料，审核员决定是否通过。</p></div>
+          </li>
+          <li>
+            <span class="step-symbol" aria-hidden="true">03</span>
+            <div><h3>GPS + 二维码核销</h3><p>通过定位后出示短时二维码；也可走人工认证通道。</p></div>
+          </li>
+        </ol>
+      </section>
+
+      <section class="activity-test-card" aria-label="测试环境说明">
+        <div class="activity-test-icon" aria-hidden="true">✦</div>
+        <div>
+          <h2>先从虚构数据试运行</h2>
+          <p>目前仅接入独立测试站。只允许 demo_ 账号、TEST- 学号和系统内置模拟图片；它不会获得学校水电登录态，也不签发官方活动票。</p>
+          <md-outlined-button id="activity-open-showcase" type="button">查看纯演示页面</md-outlined-button>
+        </div>
+      </section>
+      <div class="beta-disclaimer">Android 在 App 内以独立 HTTPS 页面打开活动服务，相机、定位和图片选择均由系统授权；活动模块不获得学校一卡通登录态。</div>
+    </section>
+      </div>
+
+      <nav class="beta-bottom-nav" role="tablist" aria-label="切换花工木棉功能模块">
+        <button class="beta-nav-item" type="button" role="tab" data-beta-section="utilities" aria-controls="utilities-screen" aria-selected="true">
+          <span class="beta-nav-indicator">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3-7 10h6l-1 8 9-12h-6l1-6-2 0Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="beta-nav-label">宿舍水电</span>
+        </button>
+        <button class="beta-nav-item" type="button" role="tab" data-beta-section="activity" aria-controls="activity-screen" aria-selected="false" tabindex="-1">
+          <span class="beta-nav-indicator">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M7 2.5v5M17 2.5v5M3.5 10h17m-12 5 2.2 2.2 4.6-4.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="beta-nav-label">活动速签</span>
+        </button>
+      </nav>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
