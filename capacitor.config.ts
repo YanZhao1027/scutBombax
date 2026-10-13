@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'cn.scut.bombax',
-  appName: 'SCUT Bombax',
+  appId: 'cn.scut.bombax.beta',
+  appName: '花工木棉 Beta',
   webDir: 'dist',
   // The WebView is presentation only. Every SCUT request goes through the
   // native ScutApi plugin, so the page never needs to reach the school hosts.
