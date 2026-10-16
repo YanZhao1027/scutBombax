@@ -25,7 +25,7 @@ function locationHelp(error,forCheckin=false){
     ? '请转人工身份核验窗口，工作人员确认到场后仍可继续资料审核。'
     : '可改用经过核实的 WGS84 经纬度手动创建活动，或到室外重试。';
   if(error?.code===1)
-    return '位置权限被拒绝。请在系统设置 → Via 浏览器 → 位置信息中允许定位，再检查浏览器的网站权限。'+fallback;
+    return '位置权限被拒绝。请在系统设置中允许当前浏览器或花工木棉活动工作台使用位置，并检查网站权限。'+fallback;
   if(error?.code===2)
     return '设备当前无法取得位置（可能没有室内 GPS 信号或网络定位不可用）。'+fallback;
   if(error?.code===3)
@@ -78,44 +78,37 @@ function clean(){
   if(app.qr){URL.revokeObjectURL(app.qr);app.qr=null;}
 }
 async function start(){
-  const me=await request('/api/me');app.me=me.user;
   const ready=await request('/api/health');app.syntheticOnly=Boolean(ready.syntheticOnly);
   if(!ready.ready){notice('生产 API 尚未开放。请使用公开演示站；不要填写真实学生资料。','error');$('account').replaceChildren();$('content').replaceChildren(
     card('正在安全验收',text('此环境目前禁用真实报名、附件和 DeepSeek 处理。'),
       el('a',{href:'https://activity-demo.10273055.xyz/',text:'打开无个人信息的交互演示'})));
     return;
   }
+  const me=await request('/api/me');app.me=me.user;
   app.events=(await request('/api/events')).events;
   renderAccount();home();
   notice('活动速签已连接；请按提示确认资料用途。');
 }
 function renderAccount(){
   const root=$('account');root.replaceChildren();
-  if(app.me){
-    root.append(card('我的账号',el('div',{class:'row between'},el('div',{},
-      el('strong',{text:app.me.displayName}),text(app.me.role==='student'?'学号自行填写（未官方认证）':'主办方账户')),
-      button('退出登录',async()=>{
+  if(app.me?.role==='organizer'){
+    root.append(card('工作人员已登录',el('div',{class:'row between'},el('div',{},
+      el('strong',{text:app.me.displayName}),text('主办方或被授权岗位，负责创建、审核和核销活动')),
+      button('退出工作人员账号',async()=>{
         await request('/api/logout',{method:'POST'});clean();app.me=null;renderAccount();home();
       },'secondary'))));
     return;
   }
-  const signIn=form([label('用户名',inp('username')),label('测试密码统一 12341234',inp('password','password','12341234'))],'登录',
-    async x=>{await request('/api/login',{method:'POST',data:x});await start();});
-  const privacy=el('input',{type:'checkbox',name:'privacyAcknowledged',value:'yes'});
-  const signUp=form([
-    label('注册用户名',inp('username')),
-    label('姓名（目前无法独立验证）',inp('displayName')),
-    label('学号（自行填写）',inp('studentNumber')),
-    label('测试密码统一 12341234',inp('password','password','12341234')),
-    el('label',{class:'check'},privacy,'我知悉活动报名会保存自填身份与证明材料，只有授权人员可以查看；正式部署前须公示数据保留及删除办法。')
-  ],'注册学生账号',async x=>{
-    if(!privacy.checked)throw new Error('须先确认了解个人信息处理规则');
-    await request('/api/register',{method:'POST',data:{...x,privacyAcknowledged:true}});
-    notice('学生账户已创建，请登录。所填学号尚未经学校认证。','success');
+  const signIn=form([
+    label('主办方 / 工作人员用户名',inp('username')),
+    label('工作人员密码',inp('password','password'))
+  ],'工作人员登录',async x=>{
+    await request('/api/login',{method:'POST',data:x});await start();
   });
-  root.append(card('登录与学生注册',text('此站仅使用虚构资料；所有测试账号密码均为 12341234。'),
-    el('div',{class:'grid'},el('div',{},el('h3',{text:'登录'}),signIn),
-      el('div',{},el('h3',{text:'学生注册'}),signUp))));
+  root.append(card('学生免登录',
+    text('学生直接选择活动报名、上传材料及查看审核状态，无须注册账号或输入密码。'),
+    text('报名后会在本浏览器保存专属 HttpOnly 私密凭证，只允许访问该活动自己的报名；清除浏览器数据或换手机后不能仅凭学号找回，需由主办方当面协助。'),
+    el('details',{},el('summary',{text:'主办方 / 审核员 / 扫码员登录'}),signIn)));
 }
 function home(){
   clean();app.active=null;
@@ -163,21 +156,20 @@ function home(){
   for(const event of app.events){
     const item=el('div',{class:'item'},el('h3',{text:event.title}),text(event.guidelines||'按主办方要求提交材料'),
       text(stamp(event.starts_at)+' 至 '+stamp(event.ends_at)),
-      button(app.me?.role==='organizer'?'进入工作台':app.me?.role==='student'?'报名 / 签到':'请先登录',
+      button(app.me?.role==='organizer'?'进入工作人员后台':'免登录报名 / 签到',
         ()=>viewEvent(event),app.me?'':'secondary'));
     list.append(item);
   }
   root.append(list);
 }
 async function viewEvent(event){
-  if(!app.me)throw new Error('请先登录');
   clean();app.active=event.id;
   const root=$('content');root.replaceChildren();
   const head=card(event.title,button('← 返回活动列表',home,'secondary'),
     text('活动期间新报名与新上传材料仍可由后台实时审核；最终名单必须同时满足材料通过与到场。'));
   root.append(head);
-  if(app.me.role==='student')await studentView(event,root);
-  else await organizerView(event,root);
+  if(app.me?.role==='organizer')await organizerView(event,root);
+  else await studentView(event,root);
 }
 async function studentView(event,root){
   const snapshot=await request('/api/events/'+event.id);
@@ -185,15 +177,23 @@ async function studentView(event,root){
   const box=card('我的报名与审核状态');
   root.append(box);
   if(!reg){
-    const consent=el('input',{type:'checkbox',name:'aiConsent',value:'yes'});
+    const privacy=el('input',{type:'checkbox',name:'privacyAcknowledged',value:'yes'});
     const join=form([
-      label('补充说明',el('textarea',{name:'note',maxlength:'500'})),
-      el('label',{class:'check'},consent,'可选：我同意在审核员主动请求时，将本活动证明截图发送至 DeepSeek V4.1 Flash 辅助阅读；不同意也可人工审核。')
-    ],'提交报名',async v=>{
-      await request('/api/events/'+event.id+'/join',{method:'POST',data:{note:v.note,aiConsent:consent.checked}});
-      notice('报名成功；可在活动现场继续上传集赞截图。','success');await studentViewReload(event);
+      label('虚构测试姓名（以“测试”开头）',inp('displayName')),
+      label('虚构测试学号（TEST- 开头）',inp('studentNumber')),
+      label('补充说明（可选）',el('textarea',{name:'note',maxlength:'500'})),
+      el('label',{class:'check'},privacy,'我确认仅使用虚构测试资料，理解报名会保存自填信息和内置模拟截图，仅授权工作人员可查看；本测试站尚不支持真实报名或学校实名认证。')
+    ],'免登录提交报名',async v=>{
+      if(!privacy.checked)throw new Error('请先确认虚构数据演练说明');
+      await request('/api/events/'+event.id+'/join',{method:'POST',data:{
+        displayName:v.displayName,studentNumber:v.studentNumber,note:v.note,
+        privacyAcknowledged:true,aiConsent:false
+      }});
+      notice('报名成功。仅本浏览器保存本场活动的私密报名凭证，可继续上传测试截图。','success');
+      await studentViewReload(event);
     });
-    box.append(join);return;
+    box.append(text('无需登录。演练环境仅接受 TEST- 虚构学号及“测试”开头的姓名；同一设备报名后可再次打开本活动查看状态。'),join);
+    return;
   }
   const attendance=reg.attendance;
   box.append(el('div',{class:'row'},
@@ -310,12 +310,13 @@ async function renderDuty(event,root,duty,owner){
         photos.replaceChildren(...m.materials.map(f=>el('div',{},el('img',{class:'qr',src:'/api/materials/'+f.id,alt:'审核证明截图'}))));
       },'secondary'),photos);
       const advice=el('div');
-      item.append(button('DeepSeek V4.1 辅助初审（须获学生同意）',async()=>{
+      if(!app.syntheticOnly)item.append(button('DeepSeek V4.1 辅助初审（须获学生同意）',async()=>{
         const x=await request('/api/events/'+event.id+'/ai-review',{method:'POST',data:{registrationId:r.id}});
         advice.replaceChildren(text('AI 建议：'+x.advice.assessment+' · 可见点赞：'+(x.advice.visibleLikeCount??'不确定')),
           text('可见依据：'+x.advice.visibleEvidence),text('疑点：'+x.advice.concerns.join('；')),
           text('AI 不能验证截图真实性，必须人工确认。'));
       },'secondary'),advice);
+      else item.append(text('虚构资料演练站禁用第三方 AI；请由审核员人工审核。'));
       const note=el('input',{placeholder:'审核说明/要求补充',maxlength:'300'});
       item.append(note,el('div',{class:'row'},
         button('人工审核通过',()=>review('approved')),
