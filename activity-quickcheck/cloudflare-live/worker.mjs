@@ -116,11 +116,17 @@ async function vision(env,images,guideline){
     humanApprovalRequired:true,identityVerified:false,screenshotAuthenticityVerified:false,model:'deepseek-flash'};
 }
 async function api(req,env,url){
-  const db=env.DB,method=req.method,p=url.pathname,user=await current(db,req);
-  if(method==='GET'&&p==='/api/health')return json({ok:true,product:'Activity QuickCheck Cloudflare',ready:env.ENABLE_LIVE==='true',syntheticOnly:env.SYNTHETIC_ONLY==='true'});
+  const db=env.DB,method=req.method,p=url.pathname;
+  const syntheticOnly=env.SYNTHETIC_ONLY==='true';
+  const ready=env.ENABLE_LIVE==='true'&&syntheticOnly;
+  if(method==='GET'&&p==='/api/health')return json({ok:true,product:'Activity QuickCheck Cloudflare',ready,syntheticOnly});
+  // Fail closed before any session/database lookup. This codebase has ONLY
+  // self-declared, shared-password synthetic accounts: it is not a production identity provider.
+  // ENABLE_LIVE is a staging traffic switch, NOT permission to process real student data.
+  need(syntheticOnly,503,'仅虚构数据演练模式可用；正式身份认证和数据治理尚未上线');
+  need(env.ENABLE_LIVE==='true',503,'活动测试后台暂未开放');
+  const user=await current(db,req);
   if(method==='GET'&&p==='/api/me')return json({user:safeUser(user)});
-  // Deployment readiness is explicit. The public demo must not route here.
-  need(env.ENABLE_LIVE==='true',503,'生产后台暂未开放，公网页面只提供无数据演示');
   if(method!=='GET')mutation(req,env);
   if(method==='POST'&&(p==='/api/register'||p==='/api/login')){
     need(env.AUTH_RATE_LIMIT?.limit,503,'认证安全限流尚未配置，暂不能接收真实报名');
@@ -130,8 +136,7 @@ async function api(req,env,url){
     need(rate.success,429,'认证请求过于频繁，请稍后再试');
   }
   if(method==='POST'&&p.endsWith('/ai-review')){
-    need(env.SYNTHETIC_ONLY!=='true',503,'公开共用密码的演练站不开放计费 AI，请使用人工审核');
-    need(env.SYNTHETIC_ONLY!=='true',503,'公开共用密码的演练站不开放计费 AI，请使用人工审核');
+    need(false,503,'虚构数据演练站不允许向第三方 AI 发送材料；仅保留人工审核');
     need(env.AI_RATE_LIMIT?.limit,503,'AI 费用保护限流尚未配置');
     const key=user?.id||'anonymous';
     const rate=await env.AI_RATE_LIMIT.limit({key:'ai:'+key});
