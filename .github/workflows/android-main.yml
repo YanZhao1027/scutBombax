@@ -1,0 +1,74 @@
+name: Hua Gong Mu Mian Android Main CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-main:
+    name: Privacy / web / Kotlin / Debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          # The default legacy "tools" package is retired.
+          packages: 'platform-tools'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android API 36 and build tools
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Privacy guard and DOM contract
+        run: |
+          pnpm check:privacy
+          pnpm check:dom
+
+      - name: TypeScript and business tests
+        run: |
+          pnpm test
+          pnpm build
+
+      - name: Sync web assets and Capacitor Android
+        run: pnpm exec cap sync android
+
+      - name: Kotlin unit tests and Android Debug APK
+        working-directory: android
+        run: ../scripts/with-jdk.sh ./gradlew --no-daemon testDebugUnitTest assembleDebug
+
+      - name: Preserve CI-only Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HuaGongMuMian-main-CI-debug-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+          if-no-files-found: error
