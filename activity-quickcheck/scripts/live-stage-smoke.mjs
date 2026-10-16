@@ -11,7 +11,8 @@ import assert from 'node:assert/strict';
 if(process.env.BOMBAX_CONFIRM_SYNTHETIC_STAGE!=='yes')
   throw Error('Specify BOMBAX_CONFIRM_SYNTHETIC_STAGE=yes to use only fictional data');
 const base='https://activity-stage.10273055.xyz';
-const secret='12341234'; // Deliberately public *fictional test* credential.
+const secret=process.env.BOMBAX_STAGE_STAFF_PASSWORD;
+if(!secret)throw Error('Set BOMBAX_STAGE_STAFF_PASSWORD locally for authorized synthetic staff; never upload or paste it into chat.');
 const id=randomBytes(4).toString('hex');
 const clients=new Map();
 const dummy=fs.readFileSync(new URL('../cloudflare-live/public/demo-proof.png',import.meta.url));
@@ -63,22 +64,6 @@ async function login(role){
   }
   assertStatus(result,200);
 }
-async function register(role,number){
-  assert(role.startsWith('demo_')&&number.startsWith('TEST-'));
-  let result=await request('POST','/api/register','anonymous',{
-    username:role,password:secret,displayName:'测试参与者乙',
-    studentNumber:number,privacyAcknowledged:true
-  });
-  if(result.status===429){
-    console.log('Registration rate limit enforced. Waiting for a new 60-second window.');
-    await new Promise(resolve=>setTimeout(resolve,66000));
-    result=await request('POST','/api/register','anonymous',{
-      username:role,password:secret,displayName:'测试参与者乙',
-      studentNumber:number,privacyAcknowledged:true
-    });
-  }
-  assertStatus(result,201);
-}
 async function main(){
   console.log('Synthetic Stage End-to-End: Cloudflare D1 + R2 + 45s QR + human review');
   const health=assertStatus(await request('GET','/api/health'),200);
@@ -101,14 +86,16 @@ async function main(){
     assertStatus(await request('POST',root+'/staff','demo_owner',{username,duty}),200);
   }
   for(const staff of ['demo_review','demo_scan','demo_manual'])await login(staff);
-  await login('demo_student01');
-  const a=assertStatus(await request('POST',root+'/join','demo_student01',{
-    note:'synthetic upload-first path',aiConsent:false
+  const aRole='guestA';
+  const a=assertStatus(await request('POST',root+'/join',aRole,{
+    displayName:'测试报名甲',studentNumber:'TEST-A-'+id.toUpperCase(),
+    privacyAcknowledged:true,note:'synthetic upload-first path',aiConsent:false
   }),201);
+  assert.match(clients.get(aRole)||'',/^bqx_g_[a-f0-9]{32}=[a-f0-9]{64}$/);
   console.log('Applicant A enrolled');
-  const uploaded=assertStatus(await request('POST',root+'/upload','demo_student01',dummy,{upload:true}),201);
+  const uploaded=assertStatus(await request('POST',root+'/upload',aRole,dummy,{upload:true}),201);
   assert.equal(uploaded.bytes,dummy.length);
-  const ownFiles=assertStatus(await request('GET',root+'/materials','demo_student01'),200);
+  const ownFiles=assertStatus(await request('GET',root+'/materials',aRole),200);
   assert.equal(ownFiles.materials.length,1);
   assert.equal(ownFiles.materials[0].id,uploaded.id);
   const protectedFile='/api/materials/'+uploaded.id;
@@ -124,20 +111,20 @@ async function main(){
   assertStatus(await request('POST',root+'/review','demo_review',{
     registrationId:a.id,state:'approved',reason:'TEST ONLY fixture meets trial guideline'
   }),200);
-  const offsite=await request('POST',root+'/ticket','demo_student01',{
+  const offsite=await request('POST',root+'/ticket',aRole,{
     latitude:0,longitude:0,accuracyM:5
   });
   assertStatus(offsite,422);
-  const inaccurate=await request('POST',root+'/ticket','demo_student01',{
+  const inaccurate=await request('POST',root+'/ticket',aRole,{
     latitude:23.12,longitude:113.32,accuracyM:300
   });
   assertStatus(inaccurate,422);
-  const token=assertStatus(await request('POST',root+'/ticket','demo_student01',{
+  const token=assertStatus(await request('POST',root+'/ticket',aRole,{
     latitude:23.12005,longitude:113.32005,accuracyM:8
   }),200);
   assert.match(token.token,/^bqx_[0-9a-f]{64}$/);
   assert(token.expiresAt>Date.now());
-  const svg=assertStatus(await request('POST','/api/qr','demo_student01',{token:token.token}),200);
+  const svg=assertStatus(await request('POST','/api/qr',aRole,{token:token.token}),200);
   assert.match(svg,/<svg/);
   console.log('GPS gate, 45s anonymous QR, and SVG generation passed');
   const parallel=await Promise.all([
@@ -150,13 +137,13 @@ async function main(){
     registrationId:a.id,reason:'duplicate should fail',identityChecked:true
   }),409);
   console.log('Concurrent QR replay test passed (exactly 1 of 2 scanner requests succeeded)');
-  const bRole='demo_e2e_'+id;
+  const bRole='guestB';
   const bNum='TEST-E2E-'+id.toUpperCase();
-  await register(bRole,bNum);
-  await login(bRole);
   const b=assertStatus(await request('POST',root+'/join',bRole,{
-    note:'synthetic manual-first path',aiConsent:true
+    displayName:'测试报名乙',studentNumber:bNum,privacyAcknowledged:true,
+    note:'synthetic manual-first path',aiConsent:false
   }),201);
+  assert.match(clients.get(bRole)||'',/^bqx_g_[a-f0-9]{32}=[a-f0-9]{64}$/);
   assertStatus(await request('POST',root+'/manual-checkin','demo_scan',{
     registrationId:b.id,reason:'scanner is unauthorized',identityChecked:true
   }),403);
