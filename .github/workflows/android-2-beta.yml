@@ -11,6 +11,7 @@ on:
       - 'index.html'
       - 'package.json'
       - 'pnpm-lock.yaml'
+      - 'scripts/**'
       - 'capacitor.config.ts'
       - '.github/workflows/android-2-beta.yml'
   workflow_dispatch:
@@ -57,6 +58,8 @@ jobs:
           pnpm check:dom
           pnpm test
       - run: pnpm build
+      - name: Verify device preflight script syntax
+        run: sh -n scripts/beta-device-preflight.sh
       - run: pnpm exec cap sync android
       - name: Kotlin tests and installable Android debug APK
         working-directory: android

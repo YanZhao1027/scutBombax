@@ -8,9 +8,12 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
+import android.webkit.WebResourceError
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -45,6 +48,12 @@ class ActivityPortalActivity : Activity() {
     }
 
     private lateinit var webView: WebView
+    private lateinit var loadNotice: LinearLayout
+    private lateinit var loadNoticeText: TextView
+    private val loadHandler = Handler(Looper.getMainLooper())
+    private var loadGeneration = 0
+    private var pageCommitted = false
+    private var pageLoadFailed = false
     private var pendingCamera: PermissionRequest? = null
     private var pendingLocation: Pair<String, GeolocationPermissions.Callback>? = null
     private var pendingFile: ValueCallback<Array<Uri>>? = null
@@ -65,6 +74,41 @@ class ActivityPortalActivity : Activity() {
 
     private fun permissionGranted(permission: String): Boolean =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun showPortalNotice(message: String, failed: Boolean = false) {
+        if (failed) pageLoadFailed = true
+        if (::loadNotice.isInitialized && ::loadNoticeText.isInitialized) {
+            loadNoticeText.text = message
+            loadNotice.visibility = View.VISIBLE
+        }
+    }
+
+    private fun loadPortal(url: String) {
+        val generation = ++loadGeneration
+        pageCommitted = false
+        pageLoadFailed = false
+        loadNotice.visibility = View.GONE
+        webView.loadUrl(url)
+        // Campus Wi-Fi captive portals can leave WebView blank without a quick
+        // error callback. Offer a retry while continuing the original load.
+        loadHandler.postDelayed({
+            if (generation == loadGeneration && !pageLoadFailed && !isFinishing) {
+                if (!pageCommitted) {
+                    showPortalNotice("活动测试站尚未响应。请确认校园 Wi-Fi 已完成网络认证，或切换可用网络后点“重试连接”。")
+                } else {
+                    // The static page may load from cache while its API calls hang.
+                    // The probe reports only a boolean; no personal text enters native code.
+                    webView.evaluateJavascript(
+                        "(function(){var n=document.getElementById('notice');return !!n && n.textContent.indexOf('系统初始化中')!==-1})()"
+                    ) { waiting ->
+                        if (waiting == "true" && generation == loadGeneration && !isFinishing) {
+                            showPortalNotice("活动网页已打开，但后台初始化超时。请检查校园网认证或切换可用网络后重试。")
+                        }
+                    }
+                }
+            }
+        }, 12_000L)
+    }
 
     /** Web Fullscreen API: occupy the ENTIRE phone viewport, including the native header. */
     private fun showFullscreenCamera(view: View, callback: WebChromeClient.CustomViewCallback) {
@@ -153,6 +197,30 @@ class ActivityPortalActivity : Activity() {
         header.addView(subtitle)
         content.addView(header)
 
+        loadNoticeText = TextView(this).apply {
+            textSize = 14f
+            setTextColor(ink)
+            setPadding(0, 0, 0, dp(10))
+        }
+        val retry = TextView(this).apply {
+            text = "重试连接"
+            textSize = 15f
+            setTextColor(Color.parseColor(if (dark) "#AFC9FF" else "#245DA8"))
+            isClickable = true
+            isFocusable = true
+            contentDescription = "重试加载活动测试站"
+            setOnClickListener { loadPortal(url) }
+        }
+        loadNotice = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(17), dp(15), dp(17), dp(15))
+            setBackgroundColor(Color.parseColor(if (dark) "#344052" else "#E8F0FC"))
+            visibility = View.GONE
+            addView(loadNoticeText)
+            addView(retry)
+        }
+        content.addView(loadNotice)
+
         webView = WebView(this)
         webView.setBackgroundColor(Color.WHITE)
         webView.settings.apply {
@@ -182,6 +250,20 @@ class ActivityPortalActivity : Activity() {
 
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                 handler.cancel() // Do not override TLS errors, even on campus Wi-Fi.
+                showPortalNotice("活动站证书验证失败，已阻止不安全连接。请检查网络后重试。", failed = true)
+            }
+
+            override fun onReceivedError(
+                view: WebView, request: WebResourceRequest, error: WebResourceError
+            ) {
+                if (request.isForMainFrame) {
+                    showPortalNotice("活动测试站加载失败。请检查校园网认证及网络连接后重试。", failed = true)
+                }
+            }
+
+            override fun onPageCommitVisible(view: WebView, url: String) {
+                pageCommitted = true
+                if (!pageLoadFailed) loadNotice.visibility = View.GONE
             }
         }
         webView.webChromeClient = object : WebChromeClient() {
@@ -270,7 +352,7 @@ class ActivityPortalActivity : Activity() {
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         )
         setContentView(content)
-        webView.loadUrl(url)
+        loadPortal(url)
     }
 
     override fun onRequestPermissionsResult(
@@ -328,6 +410,8 @@ class ActivityPortalActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ++loadGeneration
+        loadHandler.removeCallbacksAndMessages(null)
         hideFullscreenCamera()
         pendingCamera?.deny()
         pendingCamera = null
