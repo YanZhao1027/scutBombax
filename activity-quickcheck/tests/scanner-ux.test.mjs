@@ -8,14 +8,22 @@ const code=fs.readFileSync(new URL('scan-utils.js',base),'utf8');
 const html=fs.readFileSync(new URL('index.html',base),'utf8');
 const app=fs.readFileSync(new URL('app.js',base),'utf8');
 function loadScanner(secure=true){
-  const window={isSecureContext:secure};
-  vm.runInNewContext(code,{window});
+  const window={isSecureContext:secure,location:{origin:'https://activity-stage.10273055.xyz'}};
+  vm.runInNewContext(code,{window,URL});
   return window.BombaxScanner;
 }
 test('Only 256-bit activity tokens are accepted, never official payment/authentication QR payloads',()=>{
   const scan=loadScanner();
   assert.equal(scan.validToken('bqx_'+('a0'.repeat(32))),true);
   assert.equal(scan.validToken('  bqx_'+('ab'.repeat(32))+'  '),true);
+  const bearer='bqx_'+('ab'.repeat(32));
+  assert.equal(scan.validToken('https://activity-stage.10273055.xyz/#pass='+bearer),true);
+  assert.equal(scan.normalizeToken('https://activity-stage.10273055.xyz/#pass='+bearer),bearer);
+  assert.equal(scan.normalizeToken(bearer),bearer);
+  assert.equal(scan.validToken('https://evil.example/#pass='+bearer),false);
+  assert.equal(scan.validToken('https://activity-stage.10273055.xyz/?pass='+bearer),false);
+  assert.equal(scan.validToken('https://activity-stage.10273055.xyz/#pass='+bearer+'&admin=1'),false);
+  assert.equal(scan.validToken('https://activity-stage.10273055.xyz.evil.example/#pass='+bearer),false);
   for(const bad of [
     null,'',42,'bqx_00000','bqx_'+('f'.repeat(63)),
     'bqx_'+('f'.repeat(65)),'bqx_'+('G'.repeat(64)),
