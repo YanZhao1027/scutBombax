@@ -65,7 +65,7 @@ async function login(role){
   assertStatus(result,200);
 }
 async function main(){
-  console.log('Synthetic Stage End-to-End: Cloudflare D1 + R2 + 45s QR + human review');
+  console.log('Synthetic Stage End-to-End: one-code pass + D1/R2 + human review');
   const health=assertStatus(await request('GET','/api/health'),200);
   assert.equal(health.syntheticOnly,true);
   assert.equal(health.ready,true);
@@ -91,7 +91,7 @@ async function main(){
     displayName:'测试报名甲',studentNumber:'TEST-A-'+id.toUpperCase(),
     privacyAcknowledged:true,note:'synthetic upload-first path',aiConsent:false
   }),201);
-  assert.match(clients.get(aRole)||'',/^bqx_g_[a-f0-9]{32}=[a-f0-9]{64}$/);
+  assert.match(clients.get(aRole)||'',/^bqx_g_[a-f0-9]{32}=bqx_[a-f0-9]{64}$/);
   console.log('Applicant A enrolled');
   const uploaded=assertStatus(await request('POST',root+'/upload',aRole,dummy,{upload:true}),201);
   assert.equal(uploaded.bytes,dummy.length);
@@ -111,39 +111,35 @@ async function main(){
   assertStatus(await request('POST',root+'/review','demo_review',{
     registrationId:a.id,state:'approved',reason:'TEST ONLY fixture meets trial guideline'
   }),200);
-  const offsite=await request('POST',root+'/ticket',aRole,{
-    latitude:0,longitude:0,accuracyM:5
-  });
-  assertStatus(offsite,422);
-  const inaccurate=await request('POST',root+'/ticket',aRole,{
-    latitude:23.12,longitude:113.32,accuracyM:300
-  });
-  assertStatus(inaccurate,422);
-  const token=assertStatus(await request('POST',root+'/ticket',aRole,{
-    latitude:23.12005,longitude:113.32005,accuracyM:8
-  }),200);
-  assert.match(token.token,/^bqx_[0-9a-f]{64}$/);
-  assert(token.expiresAt>Date.now());
-  const svg=assertStatus(await request('POST','/api/qr',aRole,{token:token.token}),200);
-  assert.match(svg,/<svg/);
-  console.log('GPS gate, 45s anonymous QR, and SVG generation passed');
+  // The registration receipt IS the QR throughout: no GPS-based 45s token.
+  const pass=clients.get(aRole).split('=')[1];
+  assert.match(pass,/^bqx_[0-9a-f]{64}$/);
+  const qr=assertStatus(await request('POST',root+'/pass-qr',aRole,{}),200);
+  assert.match(qr,/<svg/);
+  const restored=assertStatus(await request('POST','/api/pass/restore','secondPhoneA',{token:pass}),200);
+  assert.equal(restored.eventId,event.id);
+  console.log('One-code pass created and restored on a second simulated browser');
   const parallel=await Promise.all([
-    request('POST',root+'/redeem','demo_scan',{token:token.token}),
-    request('POST',root+'/redeem','demo_owner',{token:token.token})
+    request('POST',root+'/redeem','demo_scan',{token:pass}),
+    request('POST',root+'/redeem','demo_owner',{token:pass})
   ]);
   assert.deepEqual(parallel.map(r=>r.status).sort(),[200,409]);
-  assertStatus(await request('POST',root+'/redeem','demo_scan',{token:token.token}),409);
+  assertStatus(await request('POST',root+'/redeem','demo_scan',{token:pass}),409);
   assertStatus(await request('POST',root+'/manual-checkin','demo_manual',{
     registrationId:a.id,reason:'duplicate should fail',identityChecked:true
   }),409);
-  console.log('Concurrent QR replay test passed (exactly 1 of 2 scanner requests succeeded)');
+  const qrAfter=assertStatus(await request('POST',root+'/pass-qr','secondPhoneA',{}),200);
+  assert.equal(qrAfter,qr,'Original QR must not change after check-in');
+  const current=assertStatus(await request('GET',root,'secondPhoneA'),200);
+  assert.equal(current.registration.attendance.channel,'scan');
+  console.log('Concurrent scan exactly once; unchanged pass still shows checked-in status');
   const bRole='guestB';
   const bNum='TEST-E2E-'+id.toUpperCase();
   const b=assertStatus(await request('POST',root+'/join',bRole,{
     displayName:'测试报名乙',studentNumber:bNum,privacyAcknowledged:true,
     note:'synthetic manual-first path',aiConsent:false
   }),201);
-  assert.match(clients.get(bRole)||'',/^bqx_g_[a-f0-9]{32}=[a-f0-9]{64}$/);
+  assert.match(clients.get(bRole)||'',/^bqx_g_[a-f0-9]{32}=bqx_[a-f0-9]{64}$/);
   assertStatus(await request('POST',root+'/manual-checkin','demo_scan',{
     registrationId:b.id,reason:'scanner is unauthorized',identityChecked:true
   }),403);
@@ -161,9 +157,8 @@ async function main(){
   assertStatus(await request('POST',root+'/review','demo_review',{
     registrationId:b.id,state:'approved',reason:'补交测试截图已经审核'
   }),200);
-  assertStatus(await request('POST',root+'/ticket',bRole,{
-    latitude:23.12,longitude:113.32,accuracyM:8
-  }),409);
+  assertStatus(await request('POST',root+'/redeem','demo_scan',{token:clients.get(bRole).split('=')[1]}),409);
+  assertStatus(await request('POST',root+'/ticket',bRole,{}),410);
   assertStatus(await request('GET',root+'/export','demo_scan'),403);
   const exported=assertStatus(await request('GET',root+'/export','demo_owner'),200);
   assert(exported.includes('TEST-E2E-'+id.toUpperCase()));
@@ -172,7 +167,7 @@ async function main(){
   assert(!exported.includes('bqx_'));
   console.log('Manual-first late-upload route, role separation, and CSV export passed');
   console.log('PASS:',requests,'synthetic-only real HTTPS requests, event=',event.id);
-  console.log('NOTE: phone physical GPS & camera decoding remain a separate device-level check.');
+  console.log('NOTE: physical QR scan and identity verification remain separate device-level checks.');
 }
 await main().catch(err=>{
   console.error('FAIL:',err.message);
