@@ -90,3 +90,33 @@ test('Legacy 240k account is refused with actionable migration error instead of 
   assert.equal(res.status,503);
   assert.match((await res.json()).error,/不兼容|迁移/);
 });
+
+test('missing synthetic-only switch fails closed before touching any D1 session or business data',async()=>{
+  for(const setting of [undefined,'false','TRUE']){
+    const env=makeEnv();
+    env.ENABLE_LIVE='true';
+    if(setting===undefined)delete env.SYNTHETIC_ONLY;
+    else env.SYNTHETIC_ONLY=setting;
+    for(const [path,init] of [
+      ['/api/me',undefined],
+      ['/api/events',undefined],
+      ['/api/register',{method:'POST',headers:{Origin:env.PUBLIC_ORIGIN,'X-Bombax-Action':'1'},body:'{}'}]
+    ]){
+      const response=await backend.fetch(new Request(env.PUBLIC_ORIGIN+path,init),env);
+      assert.equal(response.status,503,path+' mode='+setting);
+    }
+    const health=await backend.fetch(new Request(env.PUBLIC_ORIGIN+'/api/health'),env);
+    assert.equal(health.status,200);
+    assert.equal((await health.json()).ready,false);
+  }
+});
+
+test('synthetic-only stage requires ENABLE_LIVE before any D1 access',async()=>{
+  const env={...makeEnv(),SYNTHETIC_ONLY:'true'};
+  for(const path of ['/api/me','/api/events']){
+    const response=await backend.fetch(new Request(env.PUBLIC_ORIGIN+path),env);
+    assert.equal(response.status,503);
+  }
+  const health=await backend.fetch(new Request(env.PUBLIC_ORIGIN+'/api/health'),env);
+  assert.equal((await health.json()).ready,false);
+});
