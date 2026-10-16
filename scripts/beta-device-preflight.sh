@@ -50,10 +50,11 @@ if [ "${ADB_NO_INSTALL:-0}" != 1 ]; then
   # Do not uninstall on signature mismatch; preserving test phone app data is deliberate.
   adb install -r "$APK"
 fi
-if ! adb shell pm path "$PACKAGE" >/dev/null 2>&1; then
-  echo "BLOCKED: Beta application is not installed." >&2
-  exit 1
-fi
+installed_path="$(adb shell pm path "$PACKAGE" 2>/dev/null || true)"
+case "$installed_path" in
+  package:*) : ;;
+  *) echo "BLOCKED: Beta application is not installed." >&2; exit 1 ;;
+esac
 
 launch="$(adb shell am start -W -n "$PACKAGE/cn.scut.bombax.MainActivity" 2>&1)"
 case "$launch" in
