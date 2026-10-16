@@ -84,10 +84,30 @@ async function start(){
       el('a',{href:'https://activity-demo.10273055.xyz/',text:'打开无个人信息的交互演示'})));
     return;
   }
+  // The QR opens this page with a private fragment: browsers never send it
+  // in the HTTP request. Consume it immediately, then erase it from history.
+  let restoredEventId=null;
+  const fragment=location.hash;
+  if(fragment.startsWith('#pass=')){
+    history.replaceState(history.state,'',location.pathname+location.search);
+    const match=/^#pass=(bqx_[a-f0-9]{64})$/.exec(fragment);
+    if(match){
+      try {
+        const restored=await request('/api/pass/restore',{method:'POST',data:{token:match[1]}});
+        restoredEventId=restored.eventId;
+      }catch(error){
+        notice(error.message||'一码通无效，请联系活动主办方','error');
+      }
+    }else notice('这不是有效的花工木棉一码通二维码','error');
+  }
   const me=await request('/api/me');app.me=me.user;
   app.events=(await request('/api/events')).events;
   renderAccount();home();
-  notice('活动速签已连接；请按提示确认资料用途。');
+  if(restoredEventId){
+    const event=app.events.find(x=>x.id===restoredEventId);
+    if(event)await viewEvent(event);
+    else notice('本次活动不在当前可用列表中，请联系主办方','error');
+  }else if(!fragment)notice('活动速签已连接；学生无需登录，报名后请保存一码通二维码。');
 }
 function renderAccount(){
   const root=$('account');root.replaceChildren();
@@ -189,16 +209,26 @@ async function studentView(event,root){
         displayName:v.displayName,studentNumber:v.studentNumber,note:v.note,
         privacyAcknowledged:true,aiConsent:false
       }});
-      notice('报名成功。仅本浏览器保存本场活动的私密报名凭证，可继续上传测试截图。','success');
       await studentViewReload(event);
+      notice('报名成功！一码通二维码已经生成；请立即保存，以后查询和签到都使用这一个码。','success');
     });
     box.append(text('无需登录。演练环境仅接受 TEST- 虚构学号及“测试”开头的姓名；同一设备报名后可再次打开本活动查看状态。'),join);
     return;
   }
   const attendance=reg.attendance;
   box.append(el('div',{class:'row'},
-    el('span',{class:'tag',text:reg.state==='approved'?'材料通过':reg.state==='pending'?'待审核':'待补充材料'}),
-    el('span',{class:'tag '+(attendance?'green':''),text:attendance?'已到场（'+(attendance.channel==='manual'?'人工通道':'扫码')+'）':'尚未到场'})));
+    el('span',{class:'tag',text:reg.state==='approved'?'审核通过 · 可参加现场签到':reg.state==='pending'?'审核中 · 暂不可签到':'需补充材料 · 暂不可签到'}),
+    el('span',{class:'tag '+(attendance?'green':''),text:attendance?'已签到（'+(attendance.channel==='manual'?'人工通道':'扫码')+'）':'尚未签到'})));
+  const passResponse=await request('/api/events/'+event.id+'/pass-qr',{method:'POST'});
+  const passSvg=await passResponse.blob();
+  if(app.qr)URL.revokeObjectURL(app.qr);
+  app.qr=URL.createObjectURL(passSvg);
+  box.append(el('h3',{text:'我的一码通 · 报名时生成的固定二维码'}),
+    el('img',{class:'qr',src:app.qr,alt:'本次活动唯一的一码通凭证，可查询报名状态并由工作人员扫码核销'}),
+    el('div',{class:'row'},
+      el('a',{href:app.qr,download:'花工木棉-活动一码通.svg',text:'下载并保存一码通二维码'})),
+    text('整个活动都用这一个二维码：扫描可查询是否审核通过，审核通过后到场由授权工作人员核销；扫码签到后仍能查询状态。'),
+    text('二维码相当于私密通行凭证，请勿转发或展示给陌生人；工作人员核销时仍需当面核实身份。'));
   if(reg.reviewReason)box.append(text('审核意见：'+reg.reviewReason));
   if(attendance&&reg.state!=='approved')box.append(text('人工通道已记录到场，仍需补齐证明材料并获得审核通过。'));
   const files=await request('/api/events/'+event.id+'/materials');
@@ -226,24 +256,11 @@ async function studentView(event,root){
     }
   }
   if(!attendance){
-    const qrArea=el('div');
-    box.append(el('hr'),el('h3',{text:'快速现场签到'}),
-      text('资料通过后，抵达现场并授权定位，即可生成 45 秒有效二维码。'),
-      button('现场定位并生成二维码',async()=>{
-        const pos=await requestPhoneLocation(true);
-        if(!Number.isFinite(pos.coords.accuracy)||pos.coords.accuracy>120)
-          throw new Error('当前定位精度不足（约 '+Math.round(pos.coords.accuracy||0)+' 米）。请移至开阔区域重试或走人工通道。');
-        const ticket=await request('/api/events/'+event.id+'/ticket',{method:'POST',data:{
-          latitude:pos.coords.latitude,longitude:pos.coords.longitude,accuracyM:pos.coords.accuracy
-        }});
-        const response=await request('/api/qr',{method:'POST',data:{token:ticket.token}});
-        const svg=await response.blob();
-        if(app.qr)URL.revokeObjectURL(app.qr);
-        app.qr=URL.createObjectURL(svg);
-        qrArea.replaceChildren(el('img',{class:'qr',src:app.qr,alt:'本次活动临时签到二维码'}),
-          text('请在 '+stamp(ticket.expiresAt)+' 前出示给工作人员；用过即失效。'));
-        notice('定位符合要求，请出示二维码。','success');
-      }),qrArea);
+    box.append(el('hr'),text(
+      reg.state==='approved'
+        ? '审核已通过。请在活动现场出示上方一码通，由已登录的工作人员核对身份后扫码签到；无需 GPS 重新生成二维码。'
+        : '同一个一码通可以随时查询审核进度。审核通过之前不能签到；你仍可按要求上传内置模拟材料。'
+    ));
   }
   box.append(button('刷新审核结果',()=>studentViewReload(event),'secondary'));
 }
@@ -351,9 +368,9 @@ async function renderDuty(event,root,duty,owner){
     search.addEventListener('input',draw);draw();
   }else if(duty==='scanner'){
     slot.dataset.duty='scanner';
-    slot.append(text('仅识别花工木棉活动签到二维码。点击下方按钮进入全屏扫码；学校校园认证码和支付码无效。'));
+    slot.append(text('只核销花工木棉报名时生成的一码通：先检查审核状态并在现场核对本人身份。学校校园认证码和支付码无效。'));
     const status=el('div',{class:'status',role:'status','aria-live':'polite',text:'摄像头尚未开启。'});
-    const token=el('input',{type:'text',placeholder:'备用：粘贴完整 bqx_ 签到码',maxlength:68,
+    const token=el('input',{type:'text',placeholder:'备用：粘贴完整一码通或其私密链接',maxlength:160,
       autocomplete:'off',autocapitalize:'off',spellcheck:'false','aria-label':'完整花工木棉签到码'});
     let scanning=false,lastAccepted='',lastAttempt='',lastAttemptAt=0;
     function report(message,kind='normal'){
@@ -369,7 +386,9 @@ async function renderDuty(event,root,duty,owner){
       }
     }
     async function redeem(value){
-      const checkin=String(value||'').trim();
+      // Same static pass is valid for status lookup and staff check-in.
+      // Scanner accepts only a raw bqx_ pass or this site's exact #pass URL.
+      const checkin=window.BombaxScanner?.normalizeToken(String(value||'').trim())||'';
       if(scanning||checkin===lastAccepted)return;
       if(!window.BombaxScanner?.validToken(checkin)){
         if(lastAttempt!==checkin||Date.now()-lastAttemptAt>2000)
@@ -501,7 +520,7 @@ async function renderDuty(event,root,duty,owner){
         button('从图片识别测试二维码',()=>picker.click(),'secondary'),picker));
     }
     slot.append(el('div',{class:'scanner-fallback'},token,
-      button('备用：核销已读取的完整签到码',()=>redeem(token.value),'secondary')));
+      button('备用：核销已读取的一码通',()=>redeem(token.value),'secondary')));
   }
 }
 function cleanScanner(){
