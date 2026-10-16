@@ -111,11 +111,25 @@ test('students join without login; per-event HttpOnly receipt stays private and 
   const joined=await f.api(route+'/join',{method:'POST',data});
   assert.equal(joined.status,201,await joined.clone().text());
   const setCookie=joined.headers.get('set-cookie')||'';
-  assert.match(setCookie,/^bqx_g_[a-f0-9]{32}=[a-f0-9]{64};/);
+  assert.match(setCookie,/^bqx_g_[a-f0-9]{32}=bqx_[a-f0-9]{64};/);
   for(const flag of ['HttpOnly','Secure','SameSite=Strict','Path=/api'])assert.ok(setCookie.includes(flag));
   const guestCookie=setCookie.split(';')[0];
   const receipt=guestCookie.split('=')[1];
+  assert.match(receipt,/^bqx_[a-f0-9]{64}$/);
+  const initialQr=await f.api(route+'/pass-qr',{method:'POST',cookie:guestCookie});
+  assert.equal(initialQr.status,200);
+  const initialSvg=await initialQr.text();
+  assert.match(initialSvg,/<svg/);
+  assert.doesNotMatch(initialSvg,/TEST-STAGE-001|测试甲/);
+  assert.equal((await f.api(route+'/pass-qr',{method:'POST'})).status,403);
+  const restored=await f.api('/api/pass/restore',{method:'POST',data:{token:receipt}});
+  assert.equal(restored.status,200);
+  assert.equal((await restored.clone().json()).eventId,eid);
+  assert.equal(restored.headers.get('set-cookie')?.split(';')[0],guestCookie);
+  assert.equal((await f.api('/api/pass/restore',{method:'POST',data:{token:receipt},limit:false})).status,503);
   const receiptRecord=f.sqlite.prepare('SELECT * FROM activity_guest_access').get();
+  const end=f.sqlite.prepare('SELECT ends_at FROM activity_events WHERE id=?').get(eid).ends_at;
+  assert.equal(receiptRecord.expires_at,end+30*86400_000,'one QR must remain valid through event and its stage status retention');
   assert.equal(createHash('sha256').update(receipt).digest('hex'),receiptRecord.token_digest);
   assert.notEqual(receiptRecord.token_digest,receipt);
   assert.equal(f.sqlite.prepare('SELECT student_number FROM activity_users WHERE role=? AND username LIKE ?').get('student','guest_%').student_number,null);
@@ -144,6 +158,8 @@ test('students join without login; per-event HttpOnly receipt stays private and 
   assert.equal((await f.api(route+'/staff',{method:'POST',cookie:owner,data:{username:'demo_scanner',duty:'scanner'}})).status,200);
   assert.equal((await f.api('/api/materials/'+fileId,{cookie:scanner})).status,403);
   assert.equal((await f.api('/api/materials/'+fileId,{cookie:reviewer})).status,200);
+  // Even authorized scanner must not check in unapproved applicants.
+  assert.equal((await f.api(route+'/redeem',{method:'POST',cookie:scanner,data:{token:receipt}})).status,409);
   const queue=await f.api(route+'/queue',{cookie:reviewer});
   assert.equal(queue.status,200);
   const rows=(await queue.json()).registrations;
@@ -152,20 +168,22 @@ test('students join without login; per-event HttpOnly receipt stays private and 
   assert.equal(rows[0].student_number,'TEST-STAGE-001');
   assert.equal((await f.api(route+'/review',{method:'POST',cookie:reviewer,data:{registrationId:joinedData.id,state:'approved'}})).status,200);
 
-  assert.equal((await f.api(route+'/ticket',{method:'POST',data:{latitude:23.1,longitude:113.3,accuracyM:5}})).status,403);
-  const ticket=await f.api(route+'/ticket',{method:'POST',cookie:guestCookie,data:{latitude:23.1,longitude:113.3,accuracyM:5}});
-  assert.equal(ticket.status,200);
-  const qrToken=(await ticket.json()).token;
-  assert.match(qrToken,/^bqx_[a-f0-9]{64}$/);
-  assert.equal((await f.api('/api/qr',{method:'POST',data:{token:qrToken}})).status,403);
-  const svg=await f.api('/api/qr',{method:'POST',cookie:guestCookie,data:{token:qrToken}});
-  assert.equal(svg.status,200);
-  assert.match(await svg.text(),/<svg/);
-  assert.equal((await f.api(route+'/redeem',{method:'POST',data:{token:qrToken},cookie:guestCookie})).status,403);
-  assert.equal((await f.api(route+'/redeem',{method:'POST',data:{token:qrToken},cookie:scanner})).status,200);
-  assert.equal((await f.api(route+'/redeem',{method:'POST',data:{token:qrToken},cookie:scanner})).status,409);
+  assert.equal((await f.api(route+'/ticket',{method:'POST',cookie:guestCookie,data:{}})).status,410);
+  assert.equal((await f.api('/api/qr',{method:'POST',cookie:guestCookie,data:{token:receipt}})).status,410);
+  assert.equal((await f.api(route+'/redeem',{method:'POST',data:{token:receipt},cookie:guestCookie})).status,403);
+  assert.equal((await f.api(route+'/redeem',{method:'POST',data:{token:receipt},cookie:scanner})).status,200);
+  assert.equal((await f.api(route+'/redeem',{method:'POST',data:{token:receipt},cookie:scanner})).status,409);
   const state=await(await f.api(route,{cookie:guestCookie})).json();
   assert.equal(state.registration.attendance.channel,'scan');
+  // Check-in does NOT revoke the original pass or change its QR image.
+  const afterQr=await f.api(route+'/pass-qr',{method:'POST',cookie:guestCookie});
+  assert.equal(afterQr.status,200);
+  assert.equal(await afterQr.text(),initialSvg);
+  const postCheckInDevice=await f.api('/api/pass/restore',{method:'POST',data:{token:receipt}});
+  assert.equal(postCheckInDevice.status,200);
+  assert.equal((await postCheckInDevice.json()).eventId,eid);
+  const restoredCookie=postCheckInDevice.headers.get('set-cookie').split(';')[0];
+  assert.equal((await(await f.api(route,{cookie:restoredCookie})).json()).registration.attendance.channel,'scan');
   const csv=await f.api(route+'/export',{cookie:owner});
   assert.equal(csv.status,200);
   assert.match(await csv.text(),/TEST-STAGE-001/);
@@ -175,7 +193,13 @@ test('students join without login; per-event HttpOnly receipt stays private and 
   assert.equal(joinedElsewhere.status,201,await joinedElsewhere.clone().text());
   const secondCookie=(joinedElsewhere.headers.get('set-cookie')||'').split(';')[0];
   assert.notEqual(secondCookie.split('=')[0],guestCookie.split('=')[0]);
-  assert.equal((await f.api('/api/qr',{method:'POST',cookie:secondCookie,data:{token:qrToken}})).status,403);
+  const secondPass=secondCookie.split('=')[1];
+  assert.notEqual(secondPass,receipt);
+  assert.equal((await f.api(route+'/pass-qr',{method:'POST',cookie:secondCookie})).status,403);
+  assert.equal((await(await f.api('/api/pass/restore',{method:'POST',data:{token:secondPass}})).json()).eventId,eid2);
+  assert.equal((await f.api('/api/events/'+eid2+'/redeem',{method:'POST',data:{token:receipt},cookie:scanner})).status,403);
+  assert.equal((await f.api('/api/events/'+eid2+'/redeem',{method:'POST',data:{token:receipt},cookie:owner})).status,409);
+  assert.equal((await f.api('/api/pass/restore',{method:'POST',data:{token:'bqx_'+('0'.repeat(64))}})).status,403);
 });
 
 test('stage gate refuses anonymous registration when switches are not both explicitly enabled',async t=>{
@@ -218,14 +242,57 @@ test('separate guests in the same activity cannot access each other or enable th
   const reviewer=await f.signIn('demo_reviewer');
   assert.equal((await f.api(route+'/staff',{method:'POST',cookie:owner,data:{username:'demo_reviewer',duty:'reviewer'}})).status,200);
   assert.equal((await f.api(route+'/review',{method:'POST',cookie:reviewer,data:{registrationId:first.id,state:'approved'}})).status,200);
-  const ticket=(await(await f.api(route+'/ticket',{method:'POST',cookie:first.cookie,data:{latitude:23.1,longitude:113.3,accuracyM:5}})).json()).token;
-  assert.equal((await f.api('/api/qr',{method:'POST',cookie:second.cookie,data:{token:ticket}})).status,403);
-  assert.equal((await f.api('/api/qr',{method:'POST',cookie:first.cookie,data:{token:ticket}})).status,200);
+  const pass=first.cookie.split('=')[1];
+  const secondPass=second.cookie.split('=')[1];
+  assert.equal((await f.api(route+'/pass-qr',{method:'POST',cookie:second.cookie})).status,200);
+  const svgBefore=await(await f.api(route+'/pass-qr',{method:'POST',cookie:first.cookie})).text();
+  assert.notEqual(svgBefore,await(await f.api(route+'/pass-qr',{method:'POST',cookie:second.cookie})).text());
+  assert.equal((await f.api('/api/pass/restore',{method:'POST',data:{token:pass}})).status,200);
+  assert.equal((await f.api('/api/pass/restore',{method:'POST',data:{token:secondPass}})).status,200);
   const beforeExpiry=await f.api(route,{cookie:first.cookie});
   assert.equal((await beforeExpiry.json()).registration.state,'approved');
   f.sqlite.prepare('UPDATE activity_guest_access SET expires_at=? WHERE registration_id=?').run(now()-1,first.id);
   assert.equal((await(await f.api(route,{cookie:first.cookie})).json()).registration,null);
   assert.equal((await f.api(route+'/materials',{cookie:first.cookie})).status,403);
-  assert.equal((await f.api('/api/qr',{method:'POST',cookie:first.cookie,data:{token:ticket}})).status,403);
+  assert.equal((await f.api(route+'/pass-qr',{method:'POST',cookie:first.cookie})).status,403);
+  assert.equal((await f.api('/api/pass/restore',{method:'POST',data:{token:pass}})).status,403);
+  assert.equal((await f.api(route+'/redeem',{method:'POST',data:{token:pass},cookie:owner})).status,409);
   assert.equal((await f.api(route+'/upload',{method:'POST',cookie:first.cookie,raw:png})).status,403);
+});
+
+test('one-code remains unchanged through manual arrival, late evidence and approval',async t=>{
+  const f=makeFixture();t.after(()=>f.close());
+  const owner=await f.signIn('demo_owner');
+  const manual=await f.signIn('demo_reviewer');
+  const eid=await f.createEvent(owner,'虚构现场人工通道');
+  const route='/api/events/'+eid;
+  assert.equal((await f.api(route+'/staff',{method:'POST',cookie:owner,
+    data:{username:'demo_reviewer',duty:'manual'}})).status,200);
+  const join=await f.api(route+'/join',{method:'POST',data:{
+    displayName:'测试人工通道',studentNumber:'TEST-MANUAL',
+    privacyAcknowledged:true,aiConsent:false
+  }});
+  assert.equal(join.status,201);
+  const registrationId=(await join.json()).id;
+  const cookie=join.headers.get('set-cookie').split(';')[0],pass=cookie.split('=')[1];
+  const initialQr=await(await f.api(route+'/pass-qr',{method:'POST',cookie})).text();
+  const checked=await f.api(route+'/manual-checkin',{method:'POST',cookie:manual,
+    data:{registrationId,reason:'虚构现场身份已当面核实',identityChecked:true}});
+  assert.equal(checked.status,200);
+  assert.equal((await checked.json()).reviewPending,true);
+  assert.equal((await f.api(route+'/redeem',{method:'POST',cookie:owner,data:{token:pass}})).status,409);
+  assert.equal((await f.api(route+'/upload',{method:'POST',cookie,raw:png})).status,201);
+  const reviewer=await f.signIn('demo_scanner');
+  assert.equal((await f.api(route+'/staff',{method:'POST',cookie:owner,
+    data:{username:'demo_scanner',duty:'reviewer'}})).status,200);
+  assert.equal((await f.api(route+'/review',{method:'POST',cookie:reviewer,
+    data:{registrationId,state:'approved'}})).status,200);
+  const final=await(await f.api(route,{cookie})).json();
+  assert.equal(final.registration.state,'approved');
+  assert.equal(final.registration.attendance.channel,'manual');
+  const returnedQr=await(await f.api(route+'/pass-qr',{method:'POST',cookie})).text();
+  assert.equal(returnedQr,initialQr);
+  const restore=await f.api('/api/pass/restore',{method:'POST',data:{token:pass}});
+  assert.equal(restore.status,200);
+  assert.equal((await restore.json()).eventId,eid);
 });
