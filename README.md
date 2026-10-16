@@ -1,4 +1,27 @@
-# scutBombax
+# 花工木棉 · SCUT BOMBAX
+
+> **非华南理工大学官方 App。** 宿舍水电查询以用户本机校园会话访问校方服务；活动速签使用独立账户和 HTTPS 后端，不与校园登录凭据互通。实验活动系统不提供学校实名认证、活动票或学分认定。
+
+## 当前版本与下载（2026-10-16 核查）
+
+| 交付线 | 状态 | 获取方式 / 验收边界 |
+| --- | --- | --- |
+| **Android v1.0.1（`main`）** | 已正式发布 | [签名 APK / 校验文件](https://github.com/YanZhao1027/scutBombax/releases/tag/v1.0.1)；DXC 查询有真机记录，GZIC 和部分充值接力仍待验证 |
+| **Android 2.0.0-beta.2（`release/2.0.0-beta`）** | 测试版，PR [#9](https://github.com/YanZhao1027/scutBombax/pull/9) 仍为 Draft | [2026-10-13 成功 CI / Debug APK Artifact](https://github.com/YanZhao1027/scutBombax/actions/runs/38429739680)；非正式 Release，Artifact 可能到期，不能推断相机/GPS/文件选择已经通过真机验收 |
+| **活动速签（`feat/activity-quickcheck-mvp` / `feat/activity-production-ai-review`）** | 独立开发与虚构数据试点，PR [#7](https://github.com/YanZhao1027/scutBombax/pull/7) / [#8](https://github.com/YanZhao1027/scutBombax/pull/8) | 报名、材料审核、GPS 辅助、45 秒二维码、人工到场及 CSV；公开测试站只允许虚构资料，不能收集真实学生信息 |
+| **iOS SideStore / HarmonyOS** | 实验分支，PR [#6](https://github.com/YanZhao1027/scutBombax/pull/6) / [#5](https://github.com/YanZhao1027/scutBombax/pull/5) | 真机登录/余额或签名安装尚未完成验收；不能视作正式客户端 |
+
+**两条业务边界：** Android 的水电登录通过 Capacitor → Kotlin/OkHttp 留在本机原生层；活动速签通过独立域名、会话和授权进行。不得将学校 Cookie、支付码、个人材料或签名密钥提交到 Git。公开活动试点只接受虚构截图及虚构身份，学校身份核验、资料保留/删除、500 人并发和独立校园 HTTPS 部署均未完成正式验收。
+
+项目背景、审计发现及下一阶段任务：**[项目说明与仓库评估](docs/PROJECT_OVERVIEW.md)**。活动系统和平台实验的代码只存在于各自分支；`main` 的构建说明仅适用于当前稳定版。
+
+---
+
+## 稳定版工程说明（历史记录）
+
+以下技术细节保留原有开发与真机调试记录。原文中的「First release」「Target architecture」「no D1 / no server backend」等表述仅针对**早期 Android 水电客户端范围**，不是整个项目在 2026-10-16 的产品声明。旧版 `versionCode` / `versionName`、测试数量、安装指令与构建路径等也只能按对应历史提交阅读；正式分发请以 Release、分支源码及各自 CI 为准。
+
+# Android 水电客户端：原始技术文档（归档段落）
 
 > **充值入口（1.0.1 候选）：** 大学城校区新增“发送到微信充值”和“浏览器打开”。
 > Android 不能可靠地将任意网页一键强制置入微信内置浏览器；需要在微信里选择聊天并点开分享的链接。
