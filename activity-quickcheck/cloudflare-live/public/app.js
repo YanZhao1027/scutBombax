@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const app={me:null,events:[],active:null,poll:null,scanner:null,scannerOverlay:null,scannerVideo:null,scannerEpoch:0,scannerHistory:false,scannerFullscreenEntered:false,scannerPreviousFocus:null,qr:null,syntheticOnly:false};
+const app={me:null,events:[],active:null,poll:null,scanner:null,scannerOverlay:null,scannerVideo:null,scannerEpoch:0,scannerHistory:false,scannerFullscreenEntered:false,scannerPreviousFocus:null,scannerFeedback:null,qr:null,syntheticOnly:false};
 function el(tag,props={},...children){
   const n=document.createElement(tag);
   for(const [k,v] of Object.entries(props)){
@@ -75,6 +75,7 @@ function form(fields,submit,fn){
 function clean(){
   if(app.poll){clearInterval(app.poll);app.poll=null;}
   try{app.scanner?.stop();}catch{}app.scanner=null;
+  app.scannerFeedback?.dispose();app.scannerFeedback=null;
   if(app.qr){URL.revokeObjectURL(app.qr);app.qr=null;}
 }
 async function start(){
@@ -316,7 +317,12 @@ async function organizerView(event,root){
   },5000);
 }
 async function renderDuty(event,root,duty,owner){
-  const old=$('duty-body');if(old?.dataset.duty==='scanner')cleanScanner();if(old)old.remove();
+  const old=$('duty-body');
+  if(old?.dataset.duty==='scanner'){
+    cleanScanner();
+    app.scannerFeedback?.dispose();app.scannerFeedback=null;
+  }
+  if(old)old.remove();
   const slot=card(duty==='reviewer'?'待审核队列':duty==='scanner'?'扫码通道':'人工认证窗口');
   slot.id='duty-body';root.append(slot);
   const response=await request('/api/events/'+event.id+'/queue');
@@ -379,7 +385,11 @@ async function renderDuty(event,root,duty,owner){
     const status=el('div',{class:'status',role:'status','aria-live':'polite',text:'摄像头尚未开启。'});
     const token=el('input',{type:'text',placeholder:'备用：粘贴完整一码通或其私密链接',maxlength:160,
       autocomplete:'off',autocapitalize:'off',spellcheck:'false','aria-label':'完整花工木棉签到码'});
-    let scanning=false,lastAccepted='',lastAttempt='',lastAttemptAt=0;
+    const feedback=window.BombaxCheckinFeedback?.create();
+    if(!feedback)throw new Error('扫码反馈组件未加载，请刷新测试站');
+    app.scannerFeedback=feedback;
+    const soundControls=[],markers=[];
+    let scanning=false,lastAccepted='',lastAttempt='',lastAttemptAt=0,successResetTimer=null;
     function report(message,kind='normal'){
       status.textContent=message;
       status.className='status '+(kind==='ok'?'scan-good':kind==='error'?'scan-error':'');
@@ -392,14 +402,81 @@ async function renderDuty(event,root,duty,owner){
         }
       }
     }
+    function marker(compact=false){
+      const number=el('strong',{class:'scan-marker-number',text:'#000'});
+      const caption=el('span',{class:'scan-marker-caption',text:'等待第 1 位 · 只有服务端确认成功才计数'});
+      const card=el('div',{
+        class:'scan-marker'+(compact?' scan-marker-overlay':''),
+        'data-result':'idle',role:'status','aria-live':compact?'off':'polite'
+      },el('span',{class:'scan-marker-title',text:'本机本次成功核销'}),number,caption);
+      // Discard detached overlay views when staff reopen full-screen camera.
+      for(let i=markers.length-1;i>=0;i--)if(!markers[i].card.isConnected)markers.splice(i,1);
+      markers.push({card,number,caption});
+      if(feedback.count){
+        number.textContent='#'+String(feedback.count).padStart(3,'0');
+        caption.textContent='上一次成功 · 等待下一位';
+        card.dataset.result=feedback.count%2?'odd':'even';
+      }
+      return card;
+    }
+    function markSuccess(confirmation){
+      for(const view of markers){
+        view.number.textContent=confirmation.marker;
+        view.caption.textContent='第 '+confirmation.count+' 位成功 · 等待下一位';
+        view.card.dataset.result=confirmation.variant;
+        view.card.classList.remove('scan-marker-pulse');
+        void view.card.offsetWidth;
+        view.card.classList.add('scan-marker-pulse');
+      }
+    }
+    function markFailed(){
+      for(const view of markers){
+        view.card.dataset.result='error';
+        view.caption.textContent='刚才的核销未通过 · 成功计数未增加';
+      }
+    }
+    function syncSoundControls(){
+      for(const item of soundControls){
+        item.textContent=feedback.soundEnabled?'🔔 成功铃声：开':'🔕 成功铃声：关';
+        item.setAttribute('aria-checked',String(feedback.soundEnabled));
+        item.setAttribute('aria-label',feedback.soundEnabled?'关闭成功核销提示音':'开启成功核销提示音');
+      }
+    }
+    function soundSwitch(css='secondary'){
+      const control=el('button',{
+        type:'button',class:css,role:'switch','aria-checked':'false',
+        'aria-label':'开启成功核销提示音'
+      },'🔕 成功铃声：关');
+      control.addEventListener('click',()=>safe(async()=>{
+        const requested=!feedback.soundEnabled;
+        const active=await feedback.setSound(requested);
+        syncSoundControls();
+        report(requested&&!active
+          ? '浏览器无法开启提示音，请检查系统音量或改用文字计数'
+          : active?'提示音已开启：每次成功核销响一声':'提示音已关闭：仅显示成功编号',
+          requested&&!active?'error':'normal');
+      }));
+      // Keep both the panel and fullscreen switches synchronized, including
+      // when fullscreen opens after the panel switch was already enabled.
+      for(let i=soundControls.length-1;i>=0;i--)
+        if(!soundControls[i].isConnected)soundControls.splice(i,1);
+      soundControls.push(control);
+      syncSoundControls();
+      return control;
+    }
+    function clearSuccessReset(){
+      if(successResetTimer){clearTimeout(successResetTimer);successResetTimer=null;}
+    }
     async function redeem(value){
       // Same static pass is valid for status lookup and staff check-in.
       // Scanner accepts only a raw bqx_ pass or this site's exact #pass URL.
       const checkin=window.BombaxScanner?.normalizeToken(String(value||'').trim())||'';
       if(scanning||checkin===lastAccepted)return;
       if(!window.BombaxScanner?.validToken(checkin)){
-        if(lastAttempt!==checkin||Date.now()-lastAttemptAt>2000)
+        if(lastAttempt!==checkin||Date.now()-lastAttemptAt>2000){
           report('不是花工木棉签到码；请勿扫描学校支付或认证二维码。','error');
+          markFailed();
+        }
         lastAttempt=checkin;lastAttemptAt=Date.now();
         return;
       }
@@ -407,15 +484,33 @@ async function renderDuty(event,root,duty,owner){
       // repeated requests against the high-throughput onsite check-in API.
       if(checkin===lastAttempt&&Date.now()-lastAttemptAt<3000)return;
       lastAttempt=checkin;lastAttemptAt=Date.now();
+      clearSuccessReset();
       scanning=true;
+      report('正在核销下一位…');
       try{
-        await request('/api/events/'+event.id+'/redeem',{method:'POST',data:{token:checkin}});
+        const confirmation=await request('/api/events/'+event.id+'/redeem',{
+          method:'POST',data:{token:checkin}
+        });
+        if(confirmation?.ok!==true)throw new Error('服务端尚未确认核销成功');
         lastAccepted=checkin;
-        report('✓ 核销成功 · 请下一位','ok');
+        // One increment (and at most one bell) per confirmed server response.
+        // Failed, duplicate, unauthorized or in-flight scans never count.
+        const receipt=feedback.confirmed({audible:!document.hidden});
+        markSuccess(receipt);
+        syncSoundControls();
+        report('✓ 核销成功 '+receipt.marker+' · 本机已成功 '+receipt.count+' 人','ok');
         token.value='';
         try{navigator.vibrate?.(75);}catch{}
+        successResetTimer=setTimeout(()=>{
+          successResetTimer=null;
+          if(!scanning&&slot.isConnected&&app.active===event.id&&feedback.count===receipt.count){
+            report('等待下一位 · 本机已成功核销 '+receipt.count+' 人');
+            for(const view of markers)view.caption.textContent='上一次成功 '+receipt.marker+' · 等待下一位';
+          }
+        },2100);
       }catch(e){
-        report('核销失败：'+e.message,'error');
+        markFailed();
+        report('核销失败：'+e.message+'（成功计数未增加）','error');
         try{navigator.vibrate?.([75,55,75]);}catch{}
       }finally{
         setTimeout(()=>{scanning=false;},650);
@@ -456,7 +551,7 @@ async function renderDuty(event,root,duty,owner){
       const hdr=el('div',{class:'scanner-fullscreen-header'},
         el('div',{class:'scanner-fullscreen-brand'},
           el('strong',{text:'花工木棉 · 全屏扫码'}),
-          el('span',{text:'仅限本场活动二维码'})),close);
+          el('span',{text:'仅限本场活动一码通'})),close);
       const target=el('div',{class:'scanner-target','aria-hidden':'true'},
         el('div',{class:'scanner-target-line'}));
       const hud=el('div',{class:'scanner-fullscreen-result','data-scanner-result':'',role:'status',
@@ -469,8 +564,11 @@ async function renderDuty(event,root,duty,owner){
         video.srcObject=null;
         void startCamera(video,overlay,epoch);
       },'scanner-fullscreen-retry');
-      const bottom=el('div',{class:'scanner-fullscreen-footer'},hud,
-        el('p',{text:'扫描成功后无需退出；继续对准下一位同学的动态二维码。'}),retry);
+      const bottom=el('div',{class:'scanner-fullscreen-footer'},
+        marker(true),hud,
+        el('div',{class:'scanner-fullscreen-controls'},
+          soundSwitch('scanner-fullscreen-sound'),retry),
+        el('p',{text:'每次成功编号加一、铃声至多响一次；失败或重复不加。继续扫描下一位的一码通。'}));
       const overlay=el('div',{class:'bombax-scanner-fullscreen',role:'dialog','aria-modal':'true',
         'aria-label':'全屏二维码签到扫码','tabindex':'-1'},
         video,el('div',{class:'scanner-fullscreen-shade','aria-hidden':'true'}),
@@ -499,8 +597,10 @@ async function renderDuty(event,root,duty,owner){
       }
       void startCamera(video,overlay,epoch);
     }
-    slot.append(button('开启全屏摄像头扫码',openCamera),
-      status,text('摄像头将进入全屏扫码取景界面。底部显示扫码结果；顶部退出。没有相机权限时请改走人工认证通道。'));
+    slot.append(el('div',{class:'row scanner-action-row'},
+        button('开启全屏摄像头扫码',openCamera),soundSwitch()),
+      marker(),status,
+      text('成功核销会显示新的 #001、#002… 编号；失败或重复不会加一。铃声默认关闭，开启后每次核销成功只响一声。扫码时先核对本人身份。'));
     if(app.syntheticOnly){
       const picker=el('input',{type:'file',accept:'image/png,image/jpeg,image/webp',class:'hidden',
         'aria-label':'只在虚构数据演练站选择二维码图片'});
