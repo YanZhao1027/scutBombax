@@ -228,7 +228,7 @@ async function renderStudentPassDesk(root){
   const native=window.BombaxAppVault;
   const box=card(native?.enabled?'本机活动票夹 · 无账号':'一码通找回 · 无账号',
     text('活动报名不用登录。每次报名都只有一个固定二维码，可随时查询、补交材料或在现场签到。'),
-    text('请务必另外截图保存一码通！清除 App 数据、卸载、换手机或丢失原浏览器 Cookie 都可能丢失本机凭证。普通“清除缓存”通常不会删除 App 私有票夹。'),
+    text('请务必另外截图保存一码通！在手机设置中清除 App 应用数据（包括本机活动记录和缓存）、卸载、换手机，或丢失原浏览器 Cookie，都可能失去本机凭证。恢复时必须联网由服务器查验；仅保存本机数据不是独立备份。'),
     text('一码通等同于私密报名凭证，截图持有人也可查看报名，请勿公开转发。'));
   const picker=el('input',{type:'file',accept:'image/png,image/jpeg,image/webp'});
   picker.setAttribute('aria-label','从照片导入旧的一码通截图');
@@ -765,5 +765,12 @@ window.addEventListener('popstate',()=>{
 document.addEventListener('fullscreenchange',()=>{
   if(app.scannerOverlay&&app.scannerFullscreenEntered&&
       document.fullscreenElement!==app.scannerOverlay)cleanScanner();
+});
+// Native shelf can change only the URL fragment within the already-loaded WebView.
+// A same-document navigation does not rerun DOMContentLoaded, so explicitly
+// re-verify the stored receipt with the Stage backend before entering an event.
+window.addEventListener('hashchange',()=>{
+  const fragment=location.hash;
+  if(fragment.startsWith('#event=')||fragment.startsWith('#pass='))void safe(start);
 });
 safe(start);
