@@ -26,13 +26,13 @@ function fakeAudio(){
           exponentialRampToValueAtTime(freq){events.push(['ramp',freq]);}
         },
         connect(){},disconnect(){},
-        start(at){notes.push('start');events.push(['start',at]);},
+        start(at){notes.push('start');events.push(['start',at,this.type]);},
         stop(at){notes.push('stop');events.push(['stop',at]);}
       };
       return tone;
     },
     createGain(){
-      return {gain:{setValueAtTime(){},exponentialRampToValueAtTime(){}},
+      return {gain:{setValueAtTime(v){events.push(['gainSet',v]);},exponentialRampToValueAtTime(v){events.push(['gainRamp',v]);}},
         connect(){},disconnect(){}};
     },
     async close(){events.push('close');this.state='closed';}
@@ -71,18 +71,22 @@ test('audio is disabled by default; explicit opt-in produces one bell per confir
   const first=f.confirmed();
   assert.equal(first.marker,'#003');
   assert.equal(first.played,true);
-  assert.deepEqual(audio.notes,['start','stop'],'a single oscillator starts/stops once');
+  assert.deepEqual(audio.notes,['start','stop','start','stop'],'one two-note 8-bit chime per successful response');
   const second=f.confirmed();
   assert.equal(second.marker,'#004');
   assert.equal(second.played,true);
-  assert.deepEqual(audio.notes,['start','stop','start','stop'],'exactly one new bell per success');
-  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='frequency').map(x=>x[1]),[880,880]);
+  assert.equal(audio.notes.length,8,'two short notes per success, never repeated per frame');
+  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='frequency').map(x=>x[1]),[880,1320,880,1320]);
+  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='start').map(x=>x[2]),
+    ['square','square','square','square'],'eight-bit-style square oscillators, not quiet sine waves');
+  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='gainRamp'&&x[1]>0.1).map(x=>x[1]),
+    [0.28,0.28,0.28,0.28],'success is about four times the previous peak amplitude');
   assert.equal(await f.setSound(false),false);
   assert.equal(f.soundEnabled,false);
   const quiet=f.confirmed();
   assert.equal(quiet.count,5);
   assert.equal(quiet.played,false);
-  assert.equal(audio.notes.length,4,'no bell after turning switch off');
+  assert.equal(audio.notes.length,8,'no new sound after turning switch off');
   f.dispose();
   assert.equal(audio.events.includes('close'),true);
 });
@@ -156,8 +160,12 @@ test('failed scans use a different low-pitch two-pulse alert, never count as suc
   const failed=f.rejected();
   assert.equal(failed.count,0);
   assert.equal(failed.played,true);
-  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='frequency').map(x=>x[1]),[370,260]);
-  assert.equal(audio.notes.length,4,'two low-frequency pulses start/stop');
+  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='frequency').map(x=>x[1]),[698,523]);
+  assert.equal(audio.notes.length,4,'two prominent midrange 8-bit alert pulses');
+  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='gainRamp'&&x[1]>0.1).map(x=>x[1]),
+    [0.36,0.36],'failures get louder peaks than success to remain audible on phone speakers');
+  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='start').map(x=>x[2]),
+    ['square','square']);
   const accepted=f.confirmed();
   assert.equal(accepted.marker,'#001');
   assert.equal(f.count,1);
@@ -184,20 +192,43 @@ test('opt-in staff sound previews play both tones without ever changing check-in
   const failure=f.preview('failure');
   assert.equal(failure.played,true);
   assert.equal(failure.count,0);
-  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='frequency').map(x=>x[1]),[370,260]);
+  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='frequency').map(x=>x[1]),[698,523]);
   assert.equal(audio.notes.length,4,'two low error pulses');
   const success=f.preview('success');
   assert.equal(success.played,true);
   assert.equal(success.count,0);
   assert.equal(f.count,0,'previews cannot advance successful marker');
-  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='frequency').map(x=>x[1]),[370,260,880]);
-  assert.equal(audio.notes.length,6,'one high success pulse');
+  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='frequency').map(x=>x[1]),[698,523,880,1320]);
+  assert.equal(audio.notes.length,8,'one two-note chiptune success cue');
   assert.equal(f.preview('arbitrary').played,false,'unsupported preview outcome is silent');
   assert.equal(f.preview('failure',{audible:false}).played,false,'hidden page never plays sample');
   assert.equal(f.count,0);
   assert.equal(await f.setSound(false),false);
   assert.equal(f.preview('failure').played,false);
   assert.equal(f.count,0);
+  f.dispose();
+});
+
+test('8-bit motifs remain brief, separated and non-clipping without overlapping voices',async()=>{
+  const audio=fakeAudio();
+  const f=scannerFeedback().create({audioFactory:()=>audio.ctx});
+  assert.equal(await f.setSound(true),true);
+  for(const kind of ['success','failure']){
+    const before=audio.events.length;
+    assert.equal(f.preview(kind).played,true);
+    const batch=audio.events.slice(before);
+    const starts=batch.filter(x=>Array.isArray(x)&&x[0]==='start');
+    const stops=batch.filter(x=>Array.isArray(x)&&x[0]==='stop');
+    const volume=batch.filter(x=>Array.isArray(x)&&x[0]==='gainRamp'&&x[1]>0.1);
+    assert.equal(starts.length,2);
+    assert.equal(stops.length,2);
+    assert.equal(volume.length,2);
+    assert.ok(stops[0][1]<starts[1][1],'no overlapping waveforms that can clip');
+    assert.ok(stops[1][1]-starts[0][1]<0.52,'cue remains short and responsive');
+    assert.ok(volume.every(x=>x[1]>0.2&&x[1]<0.45),'amplitude increased without full-scale clipping');
+    assert.ok(starts.every(x=>x[2]==='square'));
+    assert.equal(f.count,0,'preview must not affect check-in success count');
+  }
   f.dispose();
 });
 

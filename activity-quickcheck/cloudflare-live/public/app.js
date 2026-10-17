@@ -547,7 +547,7 @@ async function renderDuty(event,root,duty,owner){
         syncSoundControls();
         report(requested&&!active
           ? '浏览器无法开启提示音，请检查系统音量或改用文字计数'
-          : active?'提示音已开启：成功响高音铃、失败响两声低音':'提示音已关闭：仅显示成功编号',
+          : active?'8-bit 提示音已开启：成功响亮上行音、失败两段下降警示音':'提示音已关闭：仅显示成功编号',
           requested&&!active?'error':'normal');
       }));
       // Keep both the panel and fullscreen switches synchronized, including
@@ -664,7 +664,7 @@ async function renderDuty(event,root,duty,owner){
         marker(true),hud,
         el('div',{class:'scanner-fullscreen-controls'},
           soundSwitch('scanner-fullscreen-sound'),retry),
-        el('p',{text:'每次成功编号加一、响一次高音；失败或重复不加，响两声低音（启用音效后）。继续扫描下一位的一码通。'}));
+        el('p',{text:'每次成功编号加一、播放一次 8-bit 上行提示音；失败或重复不加，播放两段更响亮的 8-bit 下降警示音（须先开启音效）。继续扫描下一位的一码通。'}));
       const overlay=el('div',{class:'bombax-scanner-fullscreen',role:'dialog','aria-modal':'true',
         'aria-label':'全屏二维码签到扫码','tabindex':'-1'},
         video,el('div',{class:'scanner-fullscreen-shade','aria-hidden':'true'}),
@@ -702,7 +702,7 @@ async function renderDuty(event,root,duty,owner){
       }
       const sample=feedback.preview(kind,{audible:!document.hidden});
       report(sample.played
-        ?kind==='success'?'已试听成功高音铃：未核销，成功编号不变':'已试听失败两声低音：未核销，成功编号不变'
+        ?kind==='success'?'已试听成功 8-bit 上行音：未核销，成功编号不变':'已试听失败 8-bit 下降警示音：未核销，成功编号不变'
         :'此设备暂无法播放提示音。请检查系统媒体音量或浏览器声音权限。',
         sample.played?'normal':'error');
     }
@@ -714,7 +714,7 @@ async function renderDuty(event,root,duty,owner){
           button('试听成功铃声',()=>previewSound('success'),'secondary'),
           button('试听失败提示音',()=>previewSound('failure'),'secondary'))),
       marker(),status,
-      text('成功核销会显示新的 #001、#002… 编号；失败或重复不会加一。音效默认关闭，开启后成功响一声高音铃，失败响两声低音。扫码时先核对本人身份。'));
+      text('成功核销会显示新的 #001、#002… 编号；失败或重复不会加一。音效默认关闭，开启后成功播放一次清晰的 8-bit 上行短音，失败播放两段更响亮的 8-bit 下降警示音。扫码时先核对本人身份。'));
     if(app.syntheticOnly){
       const picker=el('input',{type:'file',accept:'image/png,image/jpeg,image/webp',class:'hidden',
         'aria-label':'只在虚构数据演练站选择二维码图片'});
