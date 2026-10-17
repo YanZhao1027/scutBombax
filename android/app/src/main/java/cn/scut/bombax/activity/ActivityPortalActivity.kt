@@ -499,7 +499,7 @@ class ActivityPortalActivity : Activity() {
             ): Boolean {
                 pendingFile?.onReceiveValue(null)
                 pendingFile = filePathCallback
-                val picker = Intent(Intent.ACTION_GET_CONTENT).apply {
+                val picker = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     type = "image/*"
                     addCategory(Intent.CATEGORY_OPENABLE)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -507,7 +507,7 @@ class ActivityPortalActivity : Activity() {
                 }
                 return try {
                     startActivityForResult(
-                        Intent.createChooser(picker, "选择虚构演练图片"),
+                        Intent.createChooser(picker, "选择相册或文件中的一码通截图"),
                         FILE_PICK_REQUEST
                     )
                     true
@@ -561,7 +561,14 @@ class ActivityPortalActivity : Activity() {
         if (requestCode == FILE_PICK_REQUEST) {
             val callback = pendingFile
             pendingFile = null
-            callback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
+            val result = if (resultCode == RESULT_OK) {
+                WebChromeClient.FileChooserParams.parseResult(resultCode, data)
+                    ?: data?.data?.let { arrayOf(it) }
+                    ?: data?.clipData?.let { clip ->
+                        Array(clip.itemCount) { index -> clip.getItemAt(index).uri }
+                    }
+            } else null
+            callback?.onReceiveValue(result)
         }
     }
 
