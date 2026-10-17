@@ -26,6 +26,7 @@ import android.net.http.SslError
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -252,6 +253,60 @@ class ActivityPortalActivity : Activity() {
         uri?.scheme == "https" && uri.host == "activity-stage.10273055.xyz" &&
             (uri.port == -1 || uri.port == 443) && uri.userInfo == null
 
+    private fun showOfflineOneCode(eventId: String, title: String) {
+        val receipt = localPasses.readReceipt(eventId)
+        if (receipt == null) {
+            AlertDialog.Builder(this).setTitle("本机一码通已不可用")
+                .setMessage("此凭证已过期或加密数据已失效。请导入保存的二维码截图并向服务器查证。")
+                .setPositiveButton("知道了", null).show()
+            return
+        }
+        // The existing opaque pass is only decoded in native Kotlin. Neither
+        // the webpage nor the Android photo gallery receives a token copy.
+        val picture = ImageView(this).apply {
+            setImageBitmap(ActivityPassQr.bitmap(receipt, 720))
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(285)
+            )
+            contentDescription = "本场活动的离线一码通二维码，请仅向授权工作人员展示"
+        }
+        val caption = TextView(this).apply {
+            text = "此码与原始报名二维码完全相同，可离线展示、截图备份。\n" +
+                "持码者也可以查看报名，请勿公开转发。\n" +
+                "离线状态不是有效性证明；工作人员仍须联网核销、当面确认身份。"
+            textSize = 13f
+            setPadding(dp(4), dp(8), dp(4), dp(4))
+        }
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(4), dp(14), dp(4))
+            addView(picture)
+            addView(caption)
+        }
+        AlertDialog.Builder(this).setTitle("离线一码通 · " + title)
+            .setView(layout).setPositiveButton("关闭", null).show()
+    }
+
+    private fun restoreOneCodeAndVerify(eventId: String) {
+        val receipt = localPasses.readReceipt(eventId)
+        val name = ActivityPassRules.cookieName(eventId)
+        if (receipt == null || name == null) {
+            showPortalNotice("此本机凭证已过期或不可用，请导入截图核验")
+            return
+        }
+        CookieManager.getInstance().setCookie(
+            STAGE, name + "=" + receipt + "; Path=/api; Secure; HttpOnly; SameSite=Strict"
+        ) { applied ->
+            if (applied == true) {
+                CookieManager.getInstance().flush()
+                // UUID is public; raw bearer stays in native CookieManager.
+                loadPortal(STAGE + "#event=" + eventId)
+            } else showPortalNotice("无法恢复本机凭证，请导入二维码截图")
+        }
+    }
+
     private fun openLocalPassShelf() {
         try {
             val items = localPasses.listSummaries()
@@ -273,26 +328,24 @@ class ActivityPortalActivity : Activity() {
                     }
                 row.optString("title", "活动") + " · 上次同步：" + state
             }
-            AlertDialog.Builder(this).setTitle("本机活动 · 点击联网查验")
+            AlertDialog.Builder(this).setTitle("本机已参与活动 · 离线可出示二维码")
                 .setItems(labels) { _, index ->
-                    val eventId = items.getJSONObject(index).optString("eventId")
-                    val receipt = localPasses.readReceipt(eventId)
-                    val name = ActivityPassRules.cookieName(eventId)
-                    if (receipt == null || name == null) {
-                        showPortalNotice("此本机凭证已过期或不可用，请导入截图核验")
-                        return@setItems
-                    }
-                    CookieManager.getInstance().setCookie(
-                        STAGE, name + "=" + receipt + "; Path=/api; Secure; HttpOnly; SameSite=Strict"
-                    ) { applied ->
-                        if (applied == true) {
-                            CookieManager.getInstance().flush()
-                            loadPortal(STAGE + "#event=" + eventId)
-                        } else showPortalNotice("无法恢复本机凭证，请导入二维码截图")
-                    }
+                    val row = items.getJSONObject(index)
+                    val eventId = row.optString("eventId")
+                    val title = row.optString("title", "活动")
+                    AlertDialog.Builder(this).setTitle(title)
+                        .setMessage("同一个一码通贯穿报名、查询和签到。离线出示只用于现场展示，不会离线核销。")
+                        .setPositiveButton("离线出示一码通") { _, _ ->
+                            runCatching { showOfflineOneCode(eventId, title) }
+                                .onFailure { showPortalNotice("本机二维码暂无法生成，请使用保存的原截图") }
+                        }
+                        .setNeutralButton("联网核验当前状态") { _, _ ->
+                            restoreOneCodeAndVerify(eventId)
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
                 }
                 .setNegativeButton("关闭", null)
-                .setNeutralButton("注意：离线状态仅供参考", null)
                 .show()
         } catch (_: Exception) {
             showPortalNotice("本机加密票夹无法读取。仍可使用已保存的二维码截图查验。")
