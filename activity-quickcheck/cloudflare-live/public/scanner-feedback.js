@@ -45,6 +45,33 @@
         return false;
       }
     }
+    function errorTone(){
+      if(!soundEnabled||!audio||audio.state!=='running')return false;
+      try{
+        // Distinct from success: two brief descending, low-volume error tones.
+        const at=audio.currentTime;
+        for(const [offset,frequency] of [[0,370],[0.15,260]]){
+          const tone=audio.createOscillator(),gain=audio.createGain();
+          const start=at+offset;
+          tone.type='sine';
+          tone.frequency.setValueAtTime(frequency,start);
+          gain.gain.setValueAtTime(0.0001,start);
+          gain.gain.exponentialRampToValueAtTime(0.06,start+0.012);
+          gain.gain.exponentialRampToValueAtTime(0.0001,start+0.12);
+          tone.connect(gain);gain.connect(audio.destination);
+          tone.onended=()=>{try{tone.disconnect();gain.disconnect();}catch{}};
+          tone.start(start);tone.stop(start+0.13);
+        }
+        return true;
+      }catch{
+        soundEnabled=false;
+        return false;
+      }
+    }
+    function rejected({audible=true}={}){
+      // Never increments the successful count, even for a duplicated QR.
+      return Object.freeze({count,played:audible?errorTone():false});
+    }
     function confirmed({audible=true}={}){
       // Caller MUST invoke only once after a successful response from /redeem.
       ++count;
@@ -62,7 +89,7 @@
       }
     }
     return Object.freeze({
-      confirmed,setSound,dispose,
+      confirmed,rejected,setSound,dispose,
       get count(){return count;},
       get soundEnabled(){return soundEnabled;}
     });
