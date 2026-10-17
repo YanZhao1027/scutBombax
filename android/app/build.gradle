@@ -128,6 +128,7 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation "androidx.webkit:webkit:$androidxWebkitVersion" // Main-frame, exact-origin message listener for encrypted activity passes
+    implementation "com.google.zxing:core:3.5.3" // Offline native QR rendering, no web token exposure
     implementation project(':capacitor-android')
     // Every SCUT request is sent from Kotlin, never from the WebView.
     implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
