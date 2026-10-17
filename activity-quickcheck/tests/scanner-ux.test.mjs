@@ -67,7 +67,7 @@ test('Full-viewport camera UI supports continuous scanning, closure, Android Bac
   assert.match(app,/if\(document\.hidden\)cleanScanner\(\)/);
   assert.match(app,/getTracks\?\.\(\)\.forEach\(track=>track\.stop\(\)\)/);
   assert.match(app,/lastAccepted=checkin/);
-  assert.match(app,/核销成功 · 请下一位/);
+  assert.match(app,/核销成功 .*本机已成功/);
   assert.match(app,/✕ 退出扫码/);
   assert.match(css,/position:\s*fixed;/);
   assert.match(css,/100dvh/);
