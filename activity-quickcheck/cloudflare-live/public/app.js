@@ -693,8 +693,26 @@ async function renderDuty(event,root,duty,owner){
       }
       void startCamera(video,overlay,epoch);
     }
+    function previewSound(kind){
+      // Staff must opt in first; sample tones never call the server or alter
+      // the success counter, even during active camera scanning.
+      if(!feedback.soundEnabled){
+        report('请先手动开启提示音，再试听。试听不核销、不计数。','error');
+        return;
+      }
+      const sample=feedback.preview(kind,{audible:!document.hidden});
+      report(sample.played
+        ?kind==='success'?'已试听成功高音铃：未核销，成功编号不变':'已试听失败两声低音：未核销，成功编号不变'
+        :'此设备暂无法播放提示音。请检查系统媒体音量或浏览器声音权限。',
+        sample.played?'normal':'error');
+    }
     slot.append(el('div',{class:'row scanner-action-row'},
         button('开启全屏摄像头扫码',openCamera),soundSwitch()),
+      el('details',{class:'sound-preview'},
+        el('summary',{text:'现场试听提示音（不核销、不计数）'}),
+        el('div',{class:'row'},
+          button('试听成功铃声',()=>previewSound('success'),'secondary'),
+          button('试听失败提示音',()=>previewSound('failure'),'secondary'))),
       marker(),status,
       text('成功核销会显示新的 #001、#002… 编号；失败或重复不会加一。音效默认关闭，开启后成功响一声高音铃，失败响两声低音。扫码时先核对本人身份。'));
     if(app.syntheticOnly){
