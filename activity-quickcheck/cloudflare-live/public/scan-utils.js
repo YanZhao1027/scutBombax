@@ -5,9 +5,22 @@
  */
 (function attachScanHelpers(root){
   const TOKEN=/^bqx_[0-9a-f]{64}$/;
-  function validToken(value){
-    return typeof value==='string'&&TOKEN.test(value.trim());
+  function normalizeToken(value){
+    if(typeof value!=='string')return null;
+    const v=value.trim();
+    if(TOKEN.test(v))return v;
+    // Only this Activity QuickCheck domain's exact one-code URL is accepted.
+    // Campus/payment URLs, foreign domains, query-string tokens and arbitrary
+    // fragments must never become staff check-in credentials.
+    try{
+      const url=new URL(v);
+      if(!root.location?.origin||url.origin!==root.location.origin||
+          url.pathname!=='/'||url.search||url.username||url.password)return null;
+      const match=/^#pass=(bqx_[0-9a-f]{64})$/.exec(url.hash);
+      return match?match[1]:null;
+    }catch{return null;}
   }
+  function validToken(value){return normalizeToken(value)!==null;}
   function scannerProblem(error){
     const name=String(error?.name||'');
     const detail=String(error?.message||'');
@@ -24,5 +37,5 @@
       return '相机需要有效 HTTPS 安全连接。请不要使用纯 HTTP 校园网地址；改用独立 HTTPS 入口。';
     return '摄像头启动失败。请检查浏览器相机权限或改用人工到场通道。';
   }
-  root.BombaxScanner=Object.freeze({validToken,scannerProblem});
+  root.BombaxScanner=Object.freeze({validToken,normalizeToken,scannerProblem});
 })(typeof window!=='undefined'?window:globalThis);

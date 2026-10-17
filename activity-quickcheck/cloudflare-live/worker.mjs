@@ -2,7 +2,10 @@ import QRCode from 'qrcode';
 // Cloudflare Workers + D1 + R2 backend for Activity QuickCheck.
 // NOT deployed by the public showcase. ENABLE_LIVE must be enabled only after review.
 const te=new TextEncoder();
-const SESSION_MS=12*3600_000, TICKET_MS=45_000, MAX_IMAGE=3*1024*1024;
+const SESSION_MS=12*3600_000, MAX_IMAGE=3*1024*1024;
+// A single registration pass stays unchanged through check-in and post-event status lookup.
+// The +30 day window is only a synthetic-stage policy, not an approved real-data retention rule.
+const GUEST_AFTER_EVENT_MS=30*86400_000;
 const uuid=()=>crypto.randomUUID(), epoch=()=>Date.now();
 const bytes=n=>crypto.getRandomValues(new Uint8Array(n));
 const hex=a=>Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');
@@ -30,7 +33,30 @@ function cookie(req,token){
 function sessionToken(req){return (req.headers.get('Cookie')||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('bqx_live='))?.slice(9)||'';}
 async function current(db,req){
   const raw=sessionToken(req);if(!/^[a-f0-9]{64}$/.test(raw))return null;
-  return await db.prepare('SELECT u.* FROM activity_sessions s JOIN activity_users u ON u.id=s.user_id WHERE s.digest=? AND s.expires_at>?').bind(await sha(raw),epoch()).first();
+  // Only staff accounts may obtain a login session. Old student cookies are invalid.
+  return await db.prepare("SELECT u.* FROM activity_sessions s JOIN activity_users u ON u.id=s.user_id WHERE s.digest=? AND s.expires_at>? AND u.role='organizer'").bind(await sha(raw),epoch()).first();
+}
+// One 256-bit bearer pass per registration; SHA-256 digest only in D1.
+// The SAME pass is encoded as a QR URL fragment and stays usable for status
+// checks even after on-site attendance is recorded. NEVER log it or put it in
+// query parameters, Referer headers, R2 metadata or CSV exports.
+// Anyone with a photo of the QR has the bearer capability: physical identity
+// confirmation is still required before authorized staff check-in.
+const guestName=eid=>'bqx_g_'+eid.replaceAll('-','');
+function guestCookie(req,eid){
+  const name=guestName(eid)+'=';
+  const value=(req.headers.get('Cookie')||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(name))?.slice(name.length)||'';
+  return /^bqx_[a-f0-9]{64}$/.test(value)?value:null;
+}
+async function guestFor(db,req,eid){
+  const token=guestCookie(req,eid);
+  if(!token)return null;
+  return await db.prepare('SELECT r.* FROM activity_guest_access g JOIN activity_registrations r ON r.id=g.registration_id WHERE g.event_id=? AND g.token_digest=? AND g.expires_at>? AND r.event_id=?')
+    .bind(eid,await sha(token),epoch(),eid).first();
+}
+function guestSetCookie(eid,token,expiresAt){
+  const maxAge=Math.max(1,Math.floor((expiresAt-epoch())/1000));
+  return guestName(eid)+'='+token+'; HttpOnly; Secure; SameSite=Strict; Path=/api; Max-Age='+maxAge;
 }
 function mutation(req,env){
   const url=new URL(req.url);
@@ -128,11 +154,12 @@ async function api(req,env,url){
   const user=await current(db,req);
   if(method==='GET'&&p==='/api/me')return json({user:safeUser(user)});
   if(method!=='GET')mutation(req,env);
-  if(method==='POST'&&(p==='/api/register'||p==='/api/login')){
+  if(method==='POST'&&(p==='/api/login'||p==='/api/pass/restore'||/\/join$/.test(p))){
     need(env.AUTH_RATE_LIMIT?.limit,503,'认证安全限流尚未配置，暂不能接收真实报名');
     const key=req.headers.get('CF-Connecting-IP');
     need(key,403,'请求来源未通过 Cloudflare 验证');
-    const rate=await env.AUTH_RATE_LIMIT.limit({key:'auth:'+key});
+    const limiterPrefix=p==='/api/login'?'staff:':p==='/api/pass/restore'?'pass:':'guest:';
+    const rate=await env.AUTH_RATE_LIMIT.limit({key:limiterPrefix+key});
     need(rate.success,429,'认证请求过于频繁，请稍后再试');
   }
   if(method==='POST'&&p.endsWith('/ai-review')){
@@ -142,34 +169,27 @@ async function api(req,env,url){
     const rate=await env.AI_RATE_LIMIT.limit({key:'ai:'+key});
     need(rate.success,429,'AI 审核频率超限，请稍后再试');
   }
+  if(method==='POST'&&p==='/api/pass/restore'){
+    // Scanning the one-code pass on a new phone trades a bearer QR for a
+    // same-origin HttpOnly cookie. Only the event ID is returned, never PII.
+    const token=str((await body(req)).token,68);
+    need(/^bqx_[a-f0-9]{64}$/.test(token),400,'一码通凭证格式无效');
+    const receipt=await db.prepare('SELECT event_id,registration_id,expires_at FROM activity_guest_access WHERE token_digest=? AND expires_at>?')
+      .bind(await sha(token),epoch()).first();
+    need(receipt,403,'一码通凭证已失效或不存在');
+    return json({ok:true,eventId:receipt.event_id},200,{
+      'Set-Cookie':guestSetCookie(receipt.event_id,token,receipt.expires_at)
+    });
+  }
   if(method==='POST'&&p==='/api/qr'){
-    need(user?.role==='student',403,'只有学生能生成自己的二维码');
-    const x=await body(req),token=str(x.token,70);
-    need(/^bqx_[a-f0-9]{64}$/.test(token),400,'动态码格式无效');
-    const row=await db.prepare("SELECT r.user_id,r.state,t.expires_at,a.registration_id AS checked FROM activity_tickets t JOIN activity_registrations r ON r.id=t.registration_id LEFT JOIN activity_attendance a ON a.registration_id=t.registration_id WHERE t.digest=?").bind(await sha(token)).first();
-    need(row?.user_id===user.id&&row.state==='approved'&&!row.checked&&row.expires_at>epoch(),403,'二维码已失效');
-    const svg=await QRCode.toString(token,{type:'svg',width:320,margin:2,errorCorrectionLevel:'M'});
-    return new Response(svg,{headers:{'Content-Type':'image/svg+xml; charset=utf-8',
-      'Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; sandbox",
-      'X-Content-Type-Options':'nosniff'}});
+    err(410,'本版本一码通在首次报名时生成，不再使用短时签到二维码');
   }
   if(method==='POST'&&p==='/api/register'){
-    const x=await body(req),username=str(x.username,32),name=str(x.displayName,40),studentNumber=str(x.studentNumber,32);
-    need(/^[A-Za-z0-9_]{3,32}$/.test(username)&&/^[A-Za-z0-9-]{4,32}$/.test(studentNumber),400,'账号或学号格式不合法');
-    need(x.privacyAcknowledged===true,400,'须先阅读个人信息处理说明');
-    if(env.SYNTHETIC_ONLY==='true'){
-      need(username.startsWith('demo_')&&studentNumber.startsWith('TEST-')&&name.startsWith('测试'),403,'演练环境仅允许虚构资料：用户名 demo_ 开头、学号 TEST- 开头、姓名 测试 开头');
-    }
-    need(env.SYNTHETIC_ONLY==='true',503,'真实学生认证尚未启用，不允许用演练密码规则注册');
-    need(x.password===STAGE_SHARED_TEST_PASSWORD,400,'此虚构数据测试站统一使用密码 12341234');
-    const salt=hex(bytes(16)),digest=await passwordHash(x.password,salt,STAGE_PBKDF2_ITERATIONS,true),id=uuid();
-    await db.prepare('INSERT INTO activity_users(id,username,password_salt,password_digest,password_iterations,role,student_number,display_name,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-      .bind(id,username,salt,digest,STAGE_PBKDF2_ITERATIONS,'student',studentNumber,name,epoch()).run();
-    return json({ok:true,identityStatus:'self_declared'},201);
+    err(410,'学生不需要注册账号，请直接进入活动提交报名');
   }
   if(method==='POST'&&p==='/api/login'){
     const x=await body(req),username=str(x.username,32);
-    const u=await db.prepare('SELECT * FROM activity_users WHERE username=?').bind(username).first();
+    const u=await db.prepare("SELECT * FROM activity_users WHERE username=? AND role='organizer'").bind(username).first();
     need(u&&typeof x.password==='string',401,'账号或密码错误');
     need(env.SYNTHETIC_ONLY==='true',503,'正式身份认证提供方尚未配置');
     const digest=await passwordHash(x.password,u.password_salt,Number(u.password_iterations),true);
@@ -206,27 +226,43 @@ async function api(req,env,url){
     const event=await db.prepare('SELECT * FROM activity_events WHERE id=?').bind(eid).first();
     need(event,404,'活动不存在');
     if(method==='GET'&&action===''){
-      const reg=user?.role==='student'?await regFor(db,eid,user.id):null;
+      const reg=await guestFor(db,req,eid);
       const attendance=reg?await db.prepare('SELECT attended_at,channel FROM activity_attendance WHERE registration_id=?').bind(reg.id).first():null;
       return json({event,registration:reg?{id:reg.id,state:reg.state,reviewReason:reg.review_reason,
         aiConsent:Boolean(reg.ai_consent),attendance}:null});
     }
     if(method==='POST'&&action==='join'){
-      need(user?.role==='student',403,'只有学生可报名');need(epoch()<=event.ends_at,409,'报名结束');
-      const x=await body(req),id=uuid(),t=epoch();
-      await db.prepare('INSERT INTO activity_registrations(id,event_id,user_id,note,created_at,updated_at,ai_consent) VALUES (?,?,?,?,?,?,?)')
-        .bind(id,eid,user.id,String(x.note||'').slice(0,500),t,t,x.aiConsent===true?1:0).run();
-      return json({id,state:'pending'},201);
+      need(epoch()<=event.ends_at,409,'报名结束');
+      need(!(await guestFor(db,req,eid)),409,'你已经报名，请返回当前报名页面');
+      const x=await body(req),name=str(x.displayName,40),studentNumber=str(x.studentNumber,32);
+      need(x.privacyAcknowledged===true,400,'须明确确认虚构资料演练说明');
+      need(/^TEST-[A-Za-z0-9-]{1,27}$/.test(studentNumber)&&name.startsWith('测试'),403,'演练环境只接受 TEST- 虚构学号和以“测试”开头的虚构姓名');
+      need(x.aiConsent!==true,400,'演练站不向第三方 AI 发送材料，请使用人工审核');
+      const now=epoch(),accountId=uuid(),registrationId=uuid(),token='bqx_'+hex(bytes(32));
+      const expiresAt=event.ends_at+GUEST_AFTER_EVENT_MS;
+      // The synthetic placeholder user cannot log in (only organizers can).
+      // A NULL user student_number avoids cross-event collisions. The entered
+      // stage number is stored ONLY with this registration's staff-visible claim.
+      await db.batch([
+        db.prepare('INSERT INTO activity_users(id,username,password_salt,password_digest,password_iterations,role,student_number,display_name,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+          .bind(accountId,'guest_'+accountId.replaceAll('-',''),hex(bytes(16)),hex(bytes(32)),STAGE_PBKDF2_ITERATIONS,'student',null,name,now),
+        db.prepare('INSERT INTO activity_registrations(id,event_id,user_id,note,created_at,updated_at,ai_consent) VALUES (?,?,?,?,?,?,?)')
+          .bind(registrationId,eid,accountId,String(x.note||'').slice(0,500),now,now,0),
+        db.prepare('INSERT INTO activity_guest_access(registration_id,event_id,student_number,token_digest,expires_at,created_at) VALUES (?,?,?,?,?,?)')
+          .bind(registrationId,eid,studentNumber,await sha(token),expiresAt,now)
+      ]);
+      return json({id:registrationId,state:'pending',receiptStored:true,expiresAt},201,{'Set-Cookie':guestSetCookie(eid,token,expiresAt)});
     }
     if(method==='POST'&&action==='consent'){
-      need(user?.role==='student',403,'无权限');const r=await regFor(db,eid,user.id);need(r,404,'尚未报名');
+      const r=await guestFor(db,req,eid);need(r,403,'本机没有此活动的有效报名凭证');
       const x=await body(req);need(typeof x.aiConsent==='boolean',400,'需要明确选择');
-      await db.prepare('UPDATE activity_registrations SET ai_consent=? WHERE id=?').bind(x.aiConsent?1:0,r.id).run();
+      need(x.aiConsent===false,403,'虚构数据演练环境禁用第三方 AI；只能人工审核');
+      await db.prepare('UPDATE activity_registrations SET ai_consent=0 WHERE id=?').bind(r.id).run();
       return json({ok:true});
     }
     if(method==='POST'&&action==='upload'){
-      need(user?.role==='student',403,'无权限');const r=await regFor(db,eid,user.id);
-      need(r,403,'请先报名');need(epoch()<event.ends_at,409,'活动结束');
+      const r=await guestFor(db,req,eid);
+      need(r,403,'本机没有此活动的有效报名凭证');need(epoch()<event.ends_at,409,'活动结束');
       const checkin=await db.prepare('SELECT channel FROM activity_attendance WHERE registration_id=?').bind(r.id).first();
       need(!checkin||checkin.channel==='manual',409,'扫码已核销，不得补传材料');
       const files=await db.prepare('SELECT COUNT(*) AS total FROM activity_files WHERE registration_id=?').bind(r.id).first();
@@ -254,32 +290,32 @@ async function api(req,env,url){
       return json({id,mime,bytes:array.byteLength},201);
     }
     if(method==='GET'&&action==='materials'){
-      need(user,401,'请先登录');
       const rid=url.searchParams.get('registrationId');
       let r;
       if(rid){
         await access(db,user,eid,['owner','reviewer']);
         r=await db.prepare('SELECT * FROM activity_registrations WHERE id=? AND event_id=?').bind(rid,eid).first();
       } else{
-        need(user.role==='student',403,'无权限');
-        r=await regFor(db,eid,user.id);
+        r=await guestFor(db,req,eid);
       }
-      need(r,404,'报名不存在');
+      need(r,403,'本机没有此活动的有效报名凭证');
       const files=await db.prepare('SELECT id,mime,length,added_at FROM activity_files WHERE registration_id=?').bind(r.id).all();
       return json({materials:files.results});
     }
+    if(method==='POST'&&action==='pass-qr'){
+      const reg=await guestFor(db,req,eid);
+      need(reg,403,'请先使用本活动的一码通凭证打开报名页面');
+      const token=guestCookie(req,eid);
+      // The fragment is NOT sent to the HTTP server on page navigation.
+      // It is immediately consumed by same-origin app.js and removed from history.
+      const passUrl=env.PUBLIC_ORIGIN+'/#pass='+token;
+      const svg=await QRCode.toString(passUrl,{type:'svg',width:340,margin:3,errorCorrectionLevel:'M'});
+      return new Response(svg,{headers:{'Content-Type':'image/svg+xml; charset=utf-8',
+        'Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
+    }
     if(method==='POST'&&action==='ticket'){
-      need(user?.role==='student',403,'无权限');
-      const r=await regFor(db,eid,user.id);
-      need(r?.state==='approved',403,'材料尚未审核通过');
-      const attendance=await db.prepare('SELECT 1 FROM activity_attendance WHERE registration_id=?').bind(r.id).first();
-      need(!attendance,409,'已经到场');
-      need(epoch()>=event.starts_at&&epoch()<=event.ends_at,409,'尚未到签到时间');
-      geo(event,await body(req));
-      const token='bqx_'+hex(bytes(32));
-      await db.prepare('INSERT INTO activity_tickets(registration_id,digest,expires_at) VALUES (?,?,?) ON CONFLICT(registration_id) DO UPDATE SET digest=excluded.digest,expires_at=excluded.expires_at')
-        .bind(r.id,await sha(token),epoch()+TICKET_MS).run();
-      return json({token,expiresAt:epoch()+TICKET_MS});
+      err(410,'无需现场生成新码；请使用报名时保存的一码通二维码');
     }
     if(method==='POST'&&action==='staff'){
       await access(db,user,eid,['owner']);
@@ -292,7 +328,7 @@ async function api(req,env,url){
     }
     if(method==='GET'&&action==='queue'){
       const a=await access(db,user,eid);
-      const rows=await db.prepare("SELECT r.id,r.state,r.review_reason,r.updated_at,r.note,u.display_name,u.student_number,t.channel,t.attended_at,(SELECT COUNT(*) FROM activity_files f WHERE f.registration_id=r.id) material_count FROM activity_registrations r JOIN activity_users u ON u.id=r.user_id LEFT JOIN activity_attendance t ON t.registration_id=r.id WHERE r.event_id=? ORDER BY CASE WHEN r.state='pending' AND t.channel='manual' THEN 0 WHEN r.state='pending' THEN 1 ELSE 2 END,r.updated_at DESC LIMIT 500").bind(eid).all();
+      const rows=await db.prepare("SELECT r.id,r.state,r.review_reason,r.updated_at,r.note,u.display_name,COALESCE(g.student_number,u.student_number) AS student_number,t.channel,t.attended_at,(SELECT COUNT(*) FROM activity_files f WHERE f.registration_id=r.id) material_count FROM activity_registrations r JOIN activity_users u ON u.id=r.user_id LEFT JOIN activity_guest_access g ON g.registration_id=r.id LEFT JOIN activity_attendance t ON t.registration_id=r.id WHERE r.event_id=? ORDER BY CASE WHEN r.state='pending' AND t.channel='manual' THEN 0 WHEN r.state='pending' THEN 1 ELSE 2 END,r.updated_at DESC LIMIT 500").bind(eid).all();
       return json({duty:a.duty,registrations:rows.results.map(r=>{
         if(a.duty==='scanner')return {id:r.id,state:r.state,attendedAt:r.attended_at};
         if(a.duty==='manual')return {id:r.id,displayName:r.display_name,studentNumber:r.student_number,attendedAt:r.attended_at,state:r.state};
@@ -323,12 +359,12 @@ async function api(req,env,url){
       const x=await body(req),token=str(x.token,70);
       need(/^bqx_[a-f0-9]{64}$/.test(token),400,'二维码错误');
       const digest=await sha(token);
-      const r=await db.prepare("SELECT t.registration_id FROM activity_tickets t JOIN activity_registrations r ON r.id=t.registration_id WHERE t.digest=? AND t.expires_at>? AND r.event_id=? AND r.state='approved'").bind(digest,epoch(),eid).first();
-      need(r,409,'签到码已过期或无效');
+      const r=await db.prepare("SELECT g.registration_id FROM activity_guest_access g JOIN activity_registrations r ON r.id=g.registration_id WHERE g.token_digest=? AND g.expires_at>? AND g.event_id=? AND r.event_id=? AND r.state='approved'").bind(digest,epoch(),eid,eid).first();
+      need(r,409,'一码通无效、已过期或报名尚未审核通过');
       // Unique registration_id in attendance rejects simultaneous scan/manual and double scan.
       await db.prepare("INSERT INTO activity_attendance(registration_id,event_id,staff_id,channel,attended_at) VALUES (?,?,?,'scan',?)")
         .bind(r.registration_id,eid,user.id,epoch()).run();
-      await db.prepare('DELETE FROM activity_tickets WHERE registration_id=?').bind(r.registration_id).run();
+      // Do NOT delete/revoke the pass: it remains valid for status lookup after check-in.
       await audit(db,eid,user.id,'attendance.scan',r.registration_id);
       return json({ok:true});
     }
@@ -347,7 +383,7 @@ async function api(req,env,url){
     }
     if(method==='GET'&&action==='export'){
       await access(db,user,eid,['owner','reviewer']);
-      const rows=await db.prepare("SELECT u.display_name,u.student_number,r.reviewed_at,t.channel,t.attended_at,t.reason FROM activity_registrations r JOIN activity_users u ON u.id=r.user_id JOIN activity_attendance t ON t.registration_id=r.id WHERE r.event_id=? AND r.state='approved' ORDER BY t.attended_at").bind(eid).all();
+      const rows=await db.prepare("SELECT u.display_name,COALESCE(g.student_number,u.student_number) AS student_number,r.reviewed_at,t.channel,t.attended_at,t.reason FROM activity_registrations r JOIN activity_users u ON u.id=r.user_id LEFT JOIN activity_guest_access g ON g.registration_id=r.id JOIN activity_attendance t ON t.registration_id=r.id WHERE r.event_id=? AND r.state='approved' ORDER BY t.attended_at").bind(eid).all();
       return new Response(csv([['姓名','学号','审核通过时间','到场方式','签到时间','人工原因'],...rows.results.map(r=>
         [r.display_name,r.student_number,new Date(r.reviewed_at).toISOString(),r.channel,new Date(r.attended_at).toISOString(),r.reason||''])]),
         {headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="activity-approved-present.csv"','Cache-Control':'no-store'}});
@@ -376,10 +412,10 @@ async function api(req,env,url){
   }
   const material=p.match(/^\/api\/materials\/([a-f0-9-]{36})$/);
   if(method==='GET'&&material){
-    need(user,401,'请先登录');
     const file=await db.prepare('SELECT f.*,r.user_id,r.event_id FROM activity_files f JOIN activity_registrations r ON r.id=f.registration_id WHERE f.id=?').bind(material[1]).first();
     need(file,404,'材料不存在');
-    if(file.user_id!==user.id)await access(db,user,file.event_id,['owner','reviewer']);
+    const guest=await guestFor(db,req,file.event_id);
+    if(guest?.id!==file.registration_id)await access(db,user,file.event_id,['owner','reviewer']);
     const blob=await env.MATERIALS.get(file.object_key);
     need(blob,404,'材料未找到');
     return new Response(blob.body,{headers:{'Content-Type':file.mime,'Cache-Control':'private, no-store',

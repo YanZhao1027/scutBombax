@@ -8,14 +8,22 @@ const code=fs.readFileSync(new URL('scan-utils.js',base),'utf8');
 const html=fs.readFileSync(new URL('index.html',base),'utf8');
 const app=fs.readFileSync(new URL('app.js',base),'utf8');
 function loadScanner(secure=true){
-  const window={isSecureContext:secure};
-  vm.runInNewContext(code,{window});
+  const window={isSecureContext:secure,location:{origin:'https://activity-stage.10273055.xyz'}};
+  vm.runInNewContext(code,{window,URL});
   return window.BombaxScanner;
 }
 test('Only 256-bit activity tokens are accepted, never official payment/authentication QR payloads',()=>{
   const scan=loadScanner();
   assert.equal(scan.validToken('bqx_'+('a0'.repeat(32))),true);
   assert.equal(scan.validToken('  bqx_'+('ab'.repeat(32))+'  '),true);
+  const bearer='bqx_'+('ab'.repeat(32));
+  assert.equal(scan.validToken('https://activity-stage.10273055.xyz/#pass='+bearer),true);
+  assert.equal(scan.normalizeToken('https://activity-stage.10273055.xyz/#pass='+bearer),bearer);
+  assert.equal(scan.normalizeToken(bearer),bearer);
+  assert.equal(scan.validToken('https://evil.example/#pass='+bearer),false);
+  assert.equal(scan.validToken('https://activity-stage.10273055.xyz/?pass='+bearer),false);
+  assert.equal(scan.validToken('https://activity-stage.10273055.xyz/#pass='+bearer+'&admin=1'),false);
+  assert.equal(scan.validToken('https://activity-stage.10273055.xyz.evil.example/#pass='+bearer),false);
   for(const bad of [
     null,'',42,'bqx_00000','bqx_'+('f'.repeat(63)),
     'bqx_'+('f'.repeat(65)),'bqx_'+('G'.repeat(64)),
@@ -59,11 +67,18 @@ test('Full-viewport camera UI supports continuous scanning, closure, Android Bac
   assert.match(app,/if\(document\.hidden\)cleanScanner\(\)/);
   assert.match(app,/getTracks\?\.\(\)\.forEach\(track=>track\.stop\(\)\)/);
   assert.match(app,/lastAccepted=checkin/);
-  assert.match(app,/核销成功 · 请下一位/);
+  assert.match(app,/核销成功 .*本机已成功/);
   assert.match(app,/✕ 退出扫码/);
   assert.match(css,/position:\s*fixed;/);
   assert.match(css,/100dvh/);
   assert.match(css,/env\(safe-area-inset-bottom\)/);
   assert.match(css,/object-fit:\s*cover;/);
   assert.match(css,/prefers-reduced-motion:\s*reduce/);
+});
+
+test('One-code synthetic Stage organizer form avoids collecting real GPS coordinates',()=>{
+  assert.match(app,/app\.syntheticOnly\?trialCoordinates:useGps/);
+  assert.match(app,/一键填入虚构测试坐标/);
+  assert.match(app,/换手机可直接扫码恢复/);
+  assert.doesNotMatch(app,/手机需在此区域才能领取签到码/);
 });
