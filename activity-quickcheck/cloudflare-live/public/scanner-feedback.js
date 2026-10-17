@@ -72,6 +72,14 @@
       // Never increments the successful count, even for a duplicated QR.
       return Object.freeze({count,played:audible?errorTone():false});
     }
+    function preview(kind,{audible=true}={}){
+      // Explicit staff-only preview. No check-in API, no successful count,
+      // no lastAccepted state, and no QR data.
+      const played=audible
+        ?kind==='success'?ringOnce():kind==='failure'?errorTone():false
+        :false;
+      return Object.freeze({count,played});
+    }
     function confirmed({audible=true}={}){
       // Caller MUST invoke only once after a successful response from /redeem.
       ++count;
@@ -89,7 +97,7 @@
       }
     }
     return Object.freeze({
-      confirmed,rejected,setSound,dispose,
+      confirmed,rejected,preview,setSound,dispose,
       get count(){return count;},
       get soundEnabled(){return soundEnabled;}
     });
