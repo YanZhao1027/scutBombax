@@ -127,7 +127,7 @@ function renderAccount(){
   });
   root.append(card('学生免登录',
     text('学生直接选择活动报名、上传材料及查看审核状态，无须注册账号或输入密码。'),
-    text('报名后会在本浏览器保存专属 HttpOnly 私密凭证，只允许访问该活动自己的报名；清除浏览器数据或换手机后不能仅凭学号找回，需由主办方当面协助。'),
+    text('学生报名后请保存一码通二维码；换手机可直接扫码恢复自己的报名与审核状态。二维码与本浏览器数据都丢失时，不能仅凭学号找回，需主办方现场核实。'),
     el('details',{},el('summary',{text:'主办方 / 审核员 / 扫码员登录'}),signIn)));
 }
 function home(){
@@ -156,7 +156,12 @@ function home(){
         throw new Error('当前位置精度较差（约 '+Math.round(pos.coords.accuracy||0)+' 米），不建议用作活动中心；请到开阔处或使用准确的 WGS84 坐标。');
       create.elements.latitude.value=pos.coords.latitude.toFixed(7);
       create.elements.longitude.value=pos.coords.longitude.toFixed(7);
-      notice('已根据 GPS 填入测试活动中心。手机需在此区域才能领取签到码。','success');
+      notice('已填写活动地点；学生一码通无需重新定位生成，现场由工作人员当面核验。','success');
+    },'secondary');
+    const trialCoordinates=button('一键填入虚构测试坐标',async()=>{
+      create.elements.latitude.value='23.12';
+      create.elements.longitude.value='113.32';
+      notice('已填入虚构坐标（不读取真实位置）；一码通签到由工作人员现场核验。','success');
     },'secondary');
     const fillTrialTime=button('一键设置：开始前 5 分钟，结束后 90 分钟',async()=>{
       create.elements.namedItem('startsAt').value=localInputTime(Date.now()-5*60000);
@@ -165,9 +170,11 @@ function home(){
       notice('已填入合法的演练时间和 150 米半径（以本设备时间为准）。','success');
     },'secondary');
     root.append(card('主办方：创建活动',
-      text('请在现场点击 GPS 获取活动中心。半径 50–1000 米；开始须早于结束；活动不超过 7 天；结束时间必须在未来。'),
+      text(app.syntheticOnly
+        ? '虚构数据测试：请使用固定测试坐标，切勿采集真实活动地点或学生定位。一码通签到无需学生 GPS；只能由工作人员现场核对身份。'
+        : '填写活动地点，开始须早于结束；活动不超过 7 天。'),
       el('details',{},el('summary',{text:'展开创建表单'}),
-        el('div',{class:'row'},useGps,fillTrialTime),
+        el('div',{class:'row'},app.syntheticOnly?trialCoordinates:useGps,fillTrialTime),
         text('当前设备时区：'+(Intl.DateTimeFormat().resolvedOptions().timeZone||'本地')+'。时间已预填，可直接创建 90 分钟模拟活动。'),
         create)));
   }
