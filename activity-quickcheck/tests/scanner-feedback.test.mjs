@@ -173,3 +173,45 @@ test('invalid or unauthorized staff scans ring only on a throttled user-visible 
   assert.match(area,/feedback\.rejected\(\{audible:!document\.hidden\}\)/);
   assert.match(area,/feedback\.confirmed\(\{audible:!document\.hidden\}\)/);
 });
+
+test('opt-in staff sound previews play both tones without ever changing check-in number',async()=>{
+  const audio=fakeAudio();
+  const f=scannerFeedback().create({audioFactory:()=>audio.ctx});
+  assert.equal(f.preview('failure').played,false,'muted by default');
+  assert.equal(audio.notes.length,0,'no sound nodes created before explicit opt-in');
+  assert.equal(f.count,0);
+  assert.equal(await f.setSound(true),true);
+  const failure=f.preview('failure');
+  assert.equal(failure.played,true);
+  assert.equal(failure.count,0);
+  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='frequency').map(x=>x[1]),[370,260]);
+  assert.equal(audio.notes.length,4,'two low error pulses');
+  const success=f.preview('success');
+  assert.equal(success.played,true);
+  assert.equal(success.count,0);
+  assert.equal(f.count,0,'previews cannot advance successful marker');
+  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='frequency').map(x=>x[1]),[370,260,880]);
+  assert.equal(audio.notes.length,6,'one high success pulse');
+  assert.equal(f.preview('arbitrary').played,false,'unsupported preview outcome is silent');
+  assert.equal(f.preview('failure',{audible:false}).played,false,'hidden page never plays sample');
+  assert.equal(f.count,0);
+  assert.equal(await f.setSound(false),false);
+  assert.equal(f.preview('failure').played,false);
+  assert.equal(f.count,0);
+  f.dispose();
+});
+
+test('staff-only preview controls are opt-in, hidden by details, never call backend or count',()=>{
+  const scanner=app.slice(app.indexOf("}else if(duty==='scanner'){"),app.indexOf("function cleanScanner(){"));
+  const begin=scanner.indexOf('function previewSound(kind){');
+  const end=scanner.indexOf('    slot.append(el(\'div\',{class:\'row scanner-action-row\'}',begin);
+  assert.ok(begin>0&&end>begin,'scanner code includes preview handler');
+  const handler=scanner.slice(begin,end);
+  assert.match(handler,/if\(!feedback.soundEnabled\)/);
+  assert.match(handler,/feedback.preview\(kind,\{audible:!document.hidden\}\)/);
+  assert.doesNotMatch(handler,/request\(|\/api\/|feedback.confirmed\(|markSuccess\(|feedback.rejected\(/);
+  assert.match(scanner,/现场试听提示音（不核销、不计数）/);
+  assert.match(scanner,/button\('试听成功铃声',\(\)=>previewSound\('success'\)/);
+  assert.match(scanner,/button\('试听失败提示音',\(\)=>previewSound\('failure'\)/);
+  assert.match(scanner,/el\('details',\{class:'sound-preview'\}/);
+});
