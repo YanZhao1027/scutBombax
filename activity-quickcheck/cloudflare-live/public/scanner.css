@@ -276,3 +276,104 @@ body.scanner-modal-open {
 @media (prefers-reduced-motion: reduce) {
   .scanner-target-line { animation: none; }
 }
+
+/* Per-confirmation marker: local scanner count, not the event's attendance total.
+ * Change both numeral and background on each new accepted registration.
+ */
+#duty-body[data-duty="scanner"] .scanner-action-row > button {
+  min-height: 48px;
+}
+.scan-marker {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 1px 12px;
+  border-radius: 17px;
+  border: 2px solid #a6c8e5;
+  background: #f2f8fe;
+  color: #123e65;
+  padding: 11px 16px;
+  min-height: 96px;
+}
+.scan-marker-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+.scan-marker-number {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  font-size: clamp(35px, 9vw, 53px);
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .5px;
+  line-height: 1.08;
+}
+.scan-marker-caption {
+  grid-column: 1;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.scan-marker[data-result="odd"] {
+  border-color: #36bfa0;
+  background: #dffaf0;
+  color: #145943;
+}
+.scan-marker[data-result="even"] {
+  border-color: #74b0f2;
+  background: #e4f0ff;
+  color: #154d91;
+}
+.scan-marker[data-result="error"] {
+  border-color: #f3a78b;
+  background: #fff3eb;
+  color: #873e29;
+}
+.scan-marker-pulse {
+  animation: scan-confirm-pulse .34s ease-out;
+}
+@keyframes scan-confirm-pulse {
+  from { transform: scale(1.055); }
+  to { transform: scale(1); }
+}
+.scanner-fullscreen-footer .scan-marker-overlay {
+  width: min(100%,580px);
+  min-height: 80px;
+  padding: 8px 16px;
+  border-width: 2px;
+}
+.scanner-fullscreen-footer .scan-marker-overlay .scan-marker-number {
+  font-size: clamp(31px, 8vw, 48px);
+}
+.scanner-fullscreen-controls {
+  width: min(100%,580px);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.scanner-fullscreen-controls > button {
+  flex: 1 1 145px;
+  min-height: 44px;
+}
+.bombax-scanner-fullscreen button.scanner-fullscreen-sound {
+  background: #193e5b;
+  color: #ffffff;
+  border: 1px solid #89bcdf;
+  border-radius: 999px;
+  font-weight: 700;
+  padding: 8px 16px;
+}
+.bombax-scanner-fullscreen button.scanner-fullscreen-sound[aria-checked="true"] {
+  background: #275e46;
+  border-color: #84d4af;
+}
+@media (max-height: 650px) and (orientation: landscape) {
+  .scanner-fullscreen-footer { gap: 5px; padding-top: 6px; }
+  .scanner-fullscreen-footer .scan-marker-overlay { min-height: 56px; padding: 4px 10px; }
+  .scanner-fullscreen-footer .scan-marker-number { font-size: 28px; }
+  .scanner-fullscreen-footer .scan-marker-caption { font-size: 11px; }
+  .scanner-fullscreen-controls > button { min-height: 38px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-marker-pulse { animation: none; }
+}
