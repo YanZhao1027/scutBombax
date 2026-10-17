@@ -122,8 +122,8 @@ test('staff panel and full-screen share a large changing marker and synchronized
   assert.match(app,/feedback\.setSound\(requested\)/);
   assert.match(app,/syncSoundControls\(\)/);
   assert.match(app,/app\.scannerFeedback\?\.dispose\(\)/);
-  assert.match(app,/成功铃声：关/);
-  assert.match(app,/成功铃声：开/);
+  assert.match(app,/成功\/错误提示音：关/);
+  assert.match(app,/成功\/错误提示音：开/);
   assert.match(css,/\.scan-marker-number/);
   assert.match(css,/\.scan-marker\[data-result="odd"\]/);
   assert.match(css,/\.scan-marker\[data-result="even"\]/);
@@ -140,9 +140,36 @@ test('successful HTTP response gates both the counter and the bell',()=>{
   assert.ok(area.indexOf('const receipt=feedback.confirmed(')>area.indexOf('if(confirmation?.ok!==true)throw'));
   assert.ok(area.indexOf('markSuccess(receipt)')>area.indexOf('const receipt=feedback.confirmed('));
   assert.match(area,/if\(scanning\|\|checkin===lastAccepted\)return/);
-  assert.match(area,/markFailed\(\);\s*report\('核销失败/);
+  assert.match(area,/markFailed\(\);\s*feedback\.rejected\(\{audible:!document\.hidden\}\);\s*report\('核销失败/);
   assert.match(area,/successResetTimer=setTimeout\(/);
   assert.match(area,/等待下一位 · 本机已成功核销/);
   assert.match(area,/feedback\.confirmed\(\{audible:!document\.hidden\}\)/);
   assert.doesNotMatch(area,/console\.(?:log|debug|info)\([^)]*checkin/);
+});
+
+test('failed scans use a different low-pitch two-pulse alert, never count as successful',async()=>{
+  const audio=fakeAudio();
+  const f=scannerFeedback().create({audioFactory:()=>audio.ctx});
+  assert.equal(f.rejected().played,false);
+  assert.equal(f.count,0);
+  assert.equal(await f.setSound(true),true);
+  const failed=f.rejected();
+  assert.equal(failed.count,0);
+  assert.equal(failed.played,true);
+  assert.deepEqual(audio.events.filter(x=>Array.isArray(x)&&x[0]==='frequency').map(x=>x[1]),[370,260]);
+  assert.equal(audio.notes.length,4,'two low-frequency pulses start/stop');
+  const accepted=f.confirmed();
+  assert.equal(accepted.marker,'#001');
+  assert.equal(f.count,1);
+  assert.equal(f.rejected().count,1);
+  assert.equal(f.count,1);
+  assert.equal(await f.setSound(false),false);
+  assert.equal(f.rejected().played,false);
+  f.dispose();
+});
+test('invalid or unauthorized staff scans ring only on a throttled user-visible failure',()=>{
+  const area=app.slice(app.indexOf('async function redeem(value){'),app.indexOf('async function startCamera('));
+  assert.match(area,/if\(lastAttempt!==checkin\|\|Date\.now\(\)-lastAttemptAt>2000\)\{/);
+  assert.match(area,/feedback\.rejected\(\{audible:!document\.hidden\}\)/);
+  assert.match(area,/feedback\.confirmed\(\{audible:!document\.hidden\}\)/);
 });
