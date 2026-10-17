@@ -289,6 +289,21 @@ class ActivityPortalActivity : Activity() {
             .setView(layout).setPositiveButton("关闭", null).show()
     }
 
+    /** Avoid a false 12-second network timeout on same-document fragment navigation. */
+    private fun navigateToSavedEvent(eventId: String) {
+        val destination = STAGE + "#event=" + eventId
+        val current = Uri.parse(webView.url ?: "")
+        if (pageCommitted && !pageLoadFailed && isStageUri(current) &&
+            (current.path == "/" || current.path.isNullOrEmpty())) {
+            // The current WebView is already loaded: frontend hashchange handler
+            // fetches the server-confirmed status. No second page commit occurs.
+            loadNotice.visibility = View.GONE
+            webView.loadUrl(destination)
+        } else {
+            loadPortal(destination)
+        }
+    }
+
     private fun restoreOneCodeAndVerify(eventId: String) {
         val receipt = localPasses.readReceipt(eventId)
         val name = ActivityPassRules.cookieName(eventId)
@@ -302,7 +317,7 @@ class ActivityPortalActivity : Activity() {
             if (applied == true) {
                 CookieManager.getInstance().flush()
                 // UUID is public; raw bearer stays in native CookieManager.
-                loadPortal(STAGE + "#event=" + eventId)
+                navigateToSavedEvent(eventId)
             } else showPortalNotice("无法恢复本机凭证，请导入二维码截图")
         }
     }
