@@ -2,6 +2,7 @@ package cn.scut.bombax.activity
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -26,11 +27,19 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import androidx.webkit.WebMessageCompat
+import androidx.webkit.JavaScriptReplyProxy
+import org.json.JSONObject
 import androidx.core.content.ContextCompat
 
 /**
  * Android-native, isolated HTTPS workbench. This is a plain WebView: there is
  * NO Capacitor bridge and NO SCUT authentication or billing cookie injection.
+ * A separately guarded WebMessageListener exposes only an encrypted *activity*
+ * receipt vault to the exact HTTPS Stage main frame. It never exposes tokens,
+ * keys, balance history, school login cookies or cross-origin iframe access.
  * Only a hardcoded synthetic-data activity origin can request camera/GPS.
  *
  * The user authorizes camera and location through Android runtime permissions.
@@ -44,10 +53,12 @@ class ActivityPortalActivity : Activity() {
         private const val LOCATION_PERMISSION_REQUEST = 6082
         private const val FILE_PICK_REQUEST = 6083
         private const val STAGE = "https://activity-stage.10273055.xyz/"
+        private const val STAGE_ORIGIN = "https://activity-stage.10273055.xyz"
         private const val SHOWCASE = "https://activity-demo.10273055.xyz/"
     }
 
     private lateinit var webView: WebView
+    private val localPasses by lazy { ActivityPassVault(applicationContext) }
     private lateinit var loadNotice: LinearLayout
     private lateinit var loadNoticeText: TextView
     private val loadHandler = Handler(Looper.getMainLooper())
@@ -146,6 +157,148 @@ class ActivityPortalActivity : Activity() {
         callback?.onCustomViewHidden()
     }
 
+    /**
+     * AndroidX injects the JS receiver for this exact HTTPS origin. Unlike
+     * addJavascriptInterface, this callback includes frame/origin metadata:
+     * reject all subframes, even if they display same-origin content.
+     * Never use this bridge in the showcase or in the main SCUT Capacitor WebView.
+     */
+    private fun installActivityVaultBridge(): Boolean {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return false
+        WebViewCompat.addWebMessageListener(
+            webView, "BombaxNativeVault", setOf(STAGE_ORIGIN),
+            object : WebViewCompat.WebMessageListener {
+                override fun onPostMessage(
+                    view: WebView, message: WebMessageCompat,
+                    sourceOrigin: Uri, isMainFrame: Boolean,
+                    replyProxy: JavaScriptReplyProxy
+                ) {
+                    if (!isMainFrame || sourceOrigin.toString() != STAGE_ORIGIN ||
+                        !isStageUri(Uri.parse(view.url ?: ""))) return
+                    val input = runCatching { JSONObject(message.data ?: "") }.getOrNull() ?: return
+                    val requestId = input.optString("id")
+                    if (!Regex("^[A-Za-z0-9_-]{1,48}$").matches(requestId)) return
+                    fun success(value: Any) {
+                        replyProxy.postMessage(
+                            JSONObject().put("id", requestId).put("ok", true)
+                                .put("data", value).toString()
+                        )
+                    }
+                    fun error() {
+                        // No exception messages, tokens, cookie strings or stack traces leak to JS.
+                        replyProxy.postMessage(
+                            JSONObject().put("id", requestId).put("ok", false)
+                                .put("error", "本机加密票夹暂不可用；请保存一码通截图").toString()
+                        )
+                    }
+                    try {
+                        when (input.optString("op")) {
+                            "list" -> success(localPasses.listSummaries())
+                            "save" -> {
+                                val eid = input.getString("eventId")
+                                val title = input.getString("title")
+                                val state = input.getString("state")
+                                val cookie = CookieManager.getInstance()
+                                    .getCookie(STAGE + "api/events/" + eid)
+                                val pass = ActivityPassRules.extractReceipt(eid, cookie)
+                                    ?: throw IllegalStateException("receipt cookie unavailable")
+                                localPasses.save(
+                                    eid, title, state,
+                                    input.optBoolean("attended"), input.getLong("expiresAt"), pass
+                                )
+                                success(JSONObject().put("saved", true))
+                            }
+                            "restore" -> {
+                                val eid = input.getString("eventId")
+                                val pass = localPasses.readReceipt(eid)
+                                    ?: throw IllegalStateException("no valid pass")
+                                val name = ActivityPassRules.cookieName(eid)
+                                    ?: throw IllegalArgumentException("bad event")
+                                // Only native code handles the plaintext pass. JS receives a
+                                // confirmation but cannot read the saved bearer credential.
+                                CookieManager.getInstance().setCookie(
+                                    STAGE, "$name=$pass; Path=/api; Secure; HttpOnly; SameSite=Strict"
+                                ) { applied ->
+                                    if (applied == true) {
+                                        CookieManager.getInstance().flush()
+                                        success(JSONObject().put("restored", true))
+                                    } else error()
+                                }
+                            }
+                            "forget" -> {
+                                val eid = input.getString("eventId")
+                                val name = ActivityPassRules.cookieName(eid)
+                                    ?: throw IllegalArgumentException("bad event")
+                                localPasses.forget(eid)
+                                CookieManager.getInstance().setCookie(
+                                    STAGE, "$name=; Path=/api; Secure; HttpOnly; Max-Age=0"
+                                ) {
+                                    CookieManager.getInstance().flush()
+                                    success(JSONObject().put("removed", true))
+                                }
+                            }
+                            else -> error()
+                        }
+                    } catch (_: Exception) {
+                        error()
+                    }
+                }
+            }
+        )
+        return true
+    }
+
+    private fun isStageUri(uri: Uri?): Boolean =
+        uri?.scheme == "https" && uri.host == "activity-stage.10273055.xyz" &&
+            (uri.port == -1 || uri.port == 443) && uri.userInfo == null
+
+    private fun openLocalPassShelf() {
+        try {
+            val items = localPasses.listSummaries()
+            if (items.length() == 0) {
+                AlertDialog.Builder(this).setTitle("我的活动 · 本机加密票夹")
+                    .setMessage(
+                        "还没有已保存的报名。活动报名后会自动保存在本机。" +
+                            "请务必另外截图备份一码通，清除应用数据或卸载后本机记录会消失。"
+                    ).setPositiveButton("知道了", null).show()
+                return
+            }
+            val labels = Array(items.length()) { index ->
+                val row = items.getJSONObject(index)
+                val state = if (row.optBoolean("attended")) "已签到" else
+                    when (row.optString("state")) {
+                        "approved" -> "审核通过"
+                        "pending" -> "审核中"
+                        else -> "待补交 / 驳回"
+                    }
+                row.optString("title", "活动") + " · 上次同步：" + state
+            }
+            AlertDialog.Builder(this).setTitle("本机活动 · 点击联网查验")
+                .setItems(labels) { _, index ->
+                    val eventId = items.getJSONObject(index).optString("eventId")
+                    val receipt = localPasses.readReceipt(eventId)
+                    val name = ActivityPassRules.cookieName(eventId)
+                    if (receipt == null || name == null) {
+                        showPortalNotice("此本机凭证已过期或不可用，请导入截图核验")
+                        return@setItems
+                    }
+                    CookieManager.getInstance().setCookie(
+                        STAGE, name + "=" + receipt + "; Path=/api; Secure; HttpOnly; SameSite=Strict"
+                    ) { applied ->
+                        if (applied == true) {
+                            CookieManager.getInstance().flush()
+                            loadPortal(STAGE + "#event=" + eventId)
+                        } else showPortalNotice("无法恢复本机凭证，请导入二维码截图")
+                    }
+                }
+                .setNegativeButton("关闭", null)
+                .setNeutralButton("注意：离线状态仅供参考", null)
+                .show()
+        } catch (_: Exception) {
+            showPortalNotice("本机加密票夹无法读取。仍可使用已保存的二维码截图查验。")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val url = when (intent.getStringExtra(EXTRA_DESTINATION)) {
@@ -181,13 +334,13 @@ class ActivityPortalActivity : Activity() {
             setOnClickListener { finish() }
         }
         val title = TextView(this).apply {
-            text = "活动速签 · 测试工作台"
+            text = "活动速签 · 免登录一码通"
             textSize = 18f
             setTextColor(ink)
             setTypeface(null, android.graphics.Typeface.BOLD)
         }
         val subtitle = TextView(this).apply {
-            text = "独立 HTTPS · 仅限 TEST- 虚构资料 · 不读取校园一卡通"
+            text = "活动列表免登录 · 本机加密保存 · 请截图备份 · 仅虚构资料"
             textSize = 11f
             setTextColor(Color.parseColor(if (dark) "#B9C8E1" else "#506887"))
             setPadding(0, dp(5), 0, 0)
@@ -195,6 +348,19 @@ class ActivityPortalActivity : Activity() {
         header.addView(back)
         header.addView(title)
         header.addView(subtitle)
+        if (url == STAGE) {
+            val localShelf = TextView(this).apply {
+                text = "▣ 我的活动（本机加密票夹）"
+                textSize = 14f
+                setTextColor(ink)
+                setPadding(0, dp(12), 0, dp(8))
+                isClickable = true
+                isFocusable = true
+                contentDescription = "查看本机保存的参与活动，必要时联网验证"
+                setOnClickListener { openLocalPassShelf() }
+            }
+            header.addView(localShelf)
+        }
         content.addView(header)
 
         loadNoticeText = TextView(this).apply {
@@ -237,6 +403,11 @@ class ActivityPortalActivity : Activity() {
             mediaPlaybackRequiresUserGesture = false // live camera video stream
         }
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false)
+        if (url == STAGE) {
+            // Fail closed if WebView lacks the exact-origin listener feature.
+            // Ordinary website enrollment and screenshot recovery still work.
+            installActivityVaultBridge()
+        }
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
