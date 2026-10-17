@@ -63,3 +63,38 @@ test('Android local shelf only opens non-secret #event UUID and server checks at
   assert.match(app,/if\(event\)await viewEvent\(event\)/);
   assert.doesNotMatch(app,/location\.hash\s*=.*receiptToken/);
 });
+
+test('Android same-page #event navigation triggers server revalidation; other hashes do not',()=>{
+  const snippet=app.match(/window\.addEventListener\('hashchange',\(\)=>\{[\s\S]*?\n\}\);/);
+  assert.ok(snippet,'main-page native shelf needs a live hashchange handler');
+  const calls=[];
+  let handler;
+  const ctx={
+    window:{addEventListener:(name,fn)=>{
+      assert.equal(name,'hashchange');handler=fn;
+    }},
+    location:{hash:''},
+    safe:fn=>calls.push(fn),
+    start:()=>{}
+  };
+  vm.runInNewContext(snippet[0],ctx);
+  assert.equal(typeof handler,'function');
+  ctx.location.hash='#event=1b71a955-dad9-4112-8d01-f575a3c0149e';
+  handler();
+  assert.equal(calls.length,1);
+  ctx.location.hash='#pass=bqx_'+'0'.repeat(64);
+  handler();
+  assert.equal(calls.length,2);
+  for(const other of ['','#x=y','#auth=token']){
+    ctx.location.hash=other;handler();
+  }
+  assert.equal(calls.length,2);
+  assert.match(app,/const proof=await request\('\/api\/events\/'/);
+  assert.match(app,/if\(!proof.registration\)throw/);
+});
+
+test('clearing Android application data, not merely a memory cache, requires an independent screenshot',()=>{
+  assert.match(app,/清除 App 应用数据（包括本机活动记录和缓存）/);
+  assert.match(app,/恢复时必须联网由服务器查验/);
+  assert.doesNotMatch(app,/普通“清除缓存”通常不会删除 App 私有票夹/);
+});
