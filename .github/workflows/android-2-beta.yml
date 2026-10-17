@@ -48,9 +48,10 @@ jobs:
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - name: Enforce Beta metadata before publishing any APK
         run: |
-          node -e "const p=require('./package.json');if(p.version!=='2.0.0-beta.2')process.exit(1)"
+          node -e "const p=require('./package.json');if(p.version!=='2.0.0-beta.3')process.exit(1)"
           grep -q 'applicationId "cn.scut.bombax.beta"' android/app/build.gradle
-          grep -q 'versionName "2.0.0-beta.2"' android/app/build.gradle
+          grep -q 'versionName "2.0.0-beta.3"' android/app/build.gradle
+          grep -q 'versionCode 2000003' android/app/build.gradle
       - run: pnpm install --frozen-lockfile
       - name: Verify source and business logic
         run: |
@@ -66,7 +67,7 @@ jobs:
         run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: HuaGongMuMian-2.0.0-beta.2-Android-APK
+          name: HuaGongMuMian-2.0.0-beta.3-Android-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
           if-no-files-found: error
