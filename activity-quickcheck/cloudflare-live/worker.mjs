@@ -531,18 +531,11 @@ export default {
         resp.headers.set('X-Content-Type-Options','nosniff');
         return resp;
       }
-      // Static admin, login and private-pass pages have dedicated paths.
-      // None embeds secrets or bypasses /api/me staff authorization.
-      const pages={'/adminlogin':'/adminlogin.html','/admin':'/admin.html','/my':'/my.html'};
-      if(Object.hasOwn(pages,url.pathname)){
-        const target=new URL(pages[url.pathname],url.origin);
-        const page=await env.ASSETS.fetch(new Request(target,req));
-        const headers=new Headers(page.headers);
-        headers.set('Cache-Control','no-store');
-        headers.set('X-Content-Type-Options','nosniff');
-        headers.set('X-Frame-Options','DENY');
-        return new Response(page.body,{status:page.status,headers});
-      }
+      // Cloudflare Static Assets default HTML handling directly resolves
+      // /adminlogin, /admin and /my to matching .html assets.
+      // DO NOT internally rewrite to *.html: that canonicalizes back to the
+      // extensionless URL and causes an infinite redirect loop.
+      // Backend data and actions remain protected by session/role checks.
       return env.ASSETS.fetch(req);
     }catch(e){
       const message=e.status?e.message:e.message?.includes('UNIQUE constraint')?'记录已经存在':'请求失败';

@@ -94,3 +94,13 @@ test('review sheet supports shift-range selection, all, approval ticks and only 
   assert.match(review,/window\.confirm/);
   assert.doesNotMatch(review,/innerHTML\s*=/);
 });
+
+test('Cloudflare clean staff and one-code routes reach ASSETS unchanged to avoid .html redirect loops',async()=>{
+  const api=(await import('../cloudflare-live/worker.mjs')).default;
+  const env={ASSETS:{fetch:async req=>new Response(new URL(req.url).pathname)}};
+  for(const route of ['/adminlogin','/admin','/my','/']){
+    const response=await api.fetch(new Request('https://activity-stage.10273055.xyz'+route),env);
+    assert.equal(response.status,200);
+    assert.equal(await response.text(),route,'must not internally request *.html (Cloudflare redirects to clean URL)');
+  }
+});
