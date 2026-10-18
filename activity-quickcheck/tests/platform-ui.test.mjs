@@ -13,6 +13,9 @@ test('student homepage is a first-screen banner card catalog; admin lives at sep
   assert.match(index,/href="\/my"/);
   assert.doesNotMatch(index,/<input|工作人员登录|admin-login-frame|<form/);
   assert.match(index,/href="\/platform.css"/);
+  const css=load('platform.css');
+  assert.match(css,/body:has\(\.public-headline\) #notice:not\(\.error\)/,
+    'public cards remain the visual focus; errors stay visible');
   assert.match(index,/src="\/review-grid.js"/);
   assert.match(adminLogin,/工作人员登录/);
   assert.match(admin,/活动管理后台/);
