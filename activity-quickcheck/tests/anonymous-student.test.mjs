@@ -13,7 +13,7 @@ const testPassword='OrganizerStageTestPassword12345!';
 function makeFixture(){
   const sqlite=new DatabaseSync(':memory:');
   sqlite.exec('PRAGMA foreign_keys=ON');
-  for(const file of ['0001_init.sql','0002_password_iterations.sql','0003_guest_access.sql']){
+  for(const file of ['0001_init.sql','0002_password_iterations.sql','0003_guest_access.sql','0004_join_window.sql']){
     sqlite.exec(readFileSync(new URL('../cloudflare-live/migrations/'+file,import.meta.url),'utf8'));
   }
   const db={
@@ -30,8 +30,10 @@ function makeFixture(){
     async batch(statements){
       sqlite.exec('BEGIN');
       try {
-        for(const statement of statements) await statement.run();
+        const results=[];
+        for(const statement of statements) results.push(await statement.run());
         sqlite.exec('COMMIT');
+        return results;
       }catch(error){sqlite.exec('ROLLBACK');throw error;}
     }
   };
@@ -59,12 +61,12 @@ function makeFixture(){
     );
   }
   addAccount('demo_owner');addAccount('demo_reviewer');addAccount('demo_scanner');addAccount('demo_legacy_student','student');
-  async function api(path,{method='GET',data,raw,cookie='',originHeader=true,limit=true}={}){
+  async function api(path,{method='GET',data,raw,cookie='',originHeader=true,limit=true,contentType='image/png'}={}){
     const headers={'CF-Connecting-IP':'127.0.0.1'};
     if(cookie)headers.Cookie=cookie;
     if(method!=='GET'&&originHeader){headers.Origin=origin;headers['X-Bombax-Action']='1';}
     if(data!==undefined)headers['Content-Type']='application/json';
-    if(raw!==undefined)headers['Content-Type']='image/png';
+    if(raw!==undefined)headers['Content-Type']=contentType;
     const request=new Request(origin+path,{method,headers,body:data===undefined?raw:JSON.stringify(data)});
     return backend.fetch(request,limit?env:{...env,AUTH_RATE_LIMIT:undefined});
   }
@@ -295,4 +297,135 @@ test('one-code remains unchanged through manual arrival, late evidence and appro
   const restore=await f.api('/api/pass/restore',{method:'POST',data:{token:pass}});
   assert.equal(restore.status,200);
   assert.equal((await restore.json()).eventId,eid);
+});
+
+test('public activity gallery provides independent registration window and approved first-party SVG',async t=>{
+  const f=makeFixture();t.after(()=>f.close());
+  const presets=await f.api('/api/banner-presets');
+  assert.equal(presets.status,200);
+  assert.equal((await presets.json()).presets.length,5);
+  const catalog=await f.api('/api/banner-presets/concert');
+  assert.match(await catalog.text(),/viewBox="0 0 1050 450"/);
+  assert.match(catalog.headers.get('Content-Security-Policy'),/sandbox/);
+  const owner=await f.signIn('demo_owner');
+  assert.equal((await f.api('/api/admin/events')).status,403);
+  const initial=now(),id=await f.createEvent(owner,'招新音乐会'),route='/api/events/'+id;
+  const listed=(await(await f.api('/api/events')).json()).events.find(e=>e.id===id);
+  assert.ok(listed.join_starts_at<=now()&&listed.join_ends_at>now());
+  assert.ok(listed.join_ends_at>=listed.starts_at);
+  assert.equal((await f.api(route+'/banner')).status,200);
+  const banner=await(await f.api(route+'/banner')).text();
+  assert.match(banner,/1050 450/);
+  assert.doesNotMatch(banner,/script|foreignObject|href=/i);
+  const custom='<svg viewBox="0 0 1050 450"><rect x="0" y="0" width="1050" height="450" fill="#bbccdd"/><text x="70" y="100">活动主题</text></svg>';
+  assert.equal((await f.api(route+'/banner',{method:'POST',raw:Buffer.from(custom),
+    contentType:'image/svg+xml'})).status,403,'anonymous student cannot upload');
+  assert.equal((await f.api(route+'/banner',{method:'POST',cookie:owner,raw:Buffer.from(custom),
+    contentType:'image/svg+xml'})).status,200);
+  const result=await(await f.api(route+'/banner')).text();
+  assert.match(result,/<rect/);
+  assert.match(result,/活动主题/);
+  assert.match(result,/xmlns="http:\/\/www.w3.org\/2000\/svg"/);
+  assert.doesNotMatch(result,/script|href|style=/i);
+  const rejected=[
+    '<svg viewBox="0 0 1050 450" onload="alert(1)"></svg>',
+    '<svg viewBox="0 0 1050 450"><foreignObject><p>bad</p></foreignObject></svg>',
+    '<svg viewBox="0 0 1050 450"><image href="https://example.org/a.png"/></svg>',
+    '<svg viewBox="0 0 1050 450"><rect width="10" height="10" fill="url(#danger)"/></svg>',
+    '<svg viewBox="0 0 1024 600"><circle r="10"/></svg>',
+    '<!DOCTYPE svg><svg viewBox="0 0 1050 450"></svg>',
+    '<svg viewBox="0 0 1050 450"><script>1</script></svg>'
+  ];
+  for(const text of rejected){
+    const denial=await f.api(route+'/banner',{method:'POST',cookie:owner,
+      raw:Buffer.from(text),contentType:'image/svg+xml'});
+    assert.equal(denial.status,400,'must reject unsafe or non-21:9 SVG');
+  }
+  assert.equal((await f.api(route+'/banner',{method:'POST',cookie:owner,
+    raw:Buffer.alloc(100000,32),contentType:'image/svg+xml'})).status,413);
+  assert.equal((await f.api(route+'/banner-preset',{method:'POST',cookie:owner,
+    data:{preset:'sports'}})).status,200);
+  assert.match(await(await f.api(route+'/banner')).text(),/#126c68/);
+  assert.equal((await f.api(route+'/banner-preset',{method:'POST',cookie:owner,
+    data:{preset:'javascript:alert(1)'}})).status,400);
+  assert.equal((await f.api(route+'/banner')).status,200);
+  assert.equal((await f.api('/api/admin/events',{cookie:owner})).status,200);
+  assert.ok((await(await f.api('/api/admin/events',{cookie:owner})).json()).events.some(e=>e.id===id));
+});
+
+test('sign-up window is separate from on-site check-in time, preserving old events',async t=>{
+  const f=makeFixture();t.after(()=>f.close());
+  const owner=await f.signIn('demo_owner'),soon=now()+600000,late=now()+3600000;
+  const create=await f.api('/api/events',{method:'POST',cookie:owner,data:{
+    title:'测试未来报名',guidelines:'仅作测试',latitude:23.1,longitude:113.3,
+    radiusM:150,startsAt:now()+300000,endsAt:late,joinStartsAt:soon,
+    joinEndsAt:now()+1800000,requirePhoto:true,bannerPreset:'lecture'
+  }});
+  assert.equal(create.status,201);
+  const eid=(await create.json()).id;
+  const item=(await(await f.api('/api/events')).json()).events.find(x=>x.id===eid);
+  assert.equal(item.join_starts_at,soon);
+  assert.ok(item.join_ends_at<=late);
+  const denied=await f.api('/api/events/'+eid+'/join',{method:'POST',data:{
+    displayName:'测试报名',studentNumber:'TEST-FUTURE',privacyAcknowledged:true,aiConsent:false
+  }});
+  assert.equal(denied.status,409);
+  assert.match((await denied.json()).error,/未开始/);
+  assert.equal((await f.api('/api/events',{method:'POST',cookie:owner,data:{
+    title:'测试错误时间',guidelines:'测试',latitude:23.1,longitude:113.3,
+    radiusM:150,startsAt:now()+300000,endsAt:late,joinStartsAt:soon,
+    joinEndsAt:late+1000,requirePhoto:true
+  }})).status,400);
+});
+
+test('review sheet posts explicit mixed decisions with audit and permission checks',async t=>{
+  const f=makeFixture();t.after(()=>f.close());
+  const owner=await f.signIn('demo_owner');
+  const reviewer=await f.signIn('demo_reviewer');
+  const scanner=await f.signIn('demo_scanner');
+  const eid=await f.createEvent(owner),route='/api/events/'+eid;
+  assert.equal((await f.api(route+'/staff',{method:'POST',cookie:owner,
+    data:{username:'demo_reviewer',duty:'reviewer'}})).status,200);
+  assert.equal((await f.api(route+'/staff',{method:'POST',cookie:owner,
+    data:{username:'demo_scanner',duty:'scanner'}})).status,200);
+  const cookies=[],registrations=[];
+  for(const [index,number] of [1,2,3].entries()){
+    const join=await f.api(route+'/join',{method:'POST',data:{
+      displayName:'测试表格'+number,studentNumber:'TEST-REVIEW-'+number,
+      privacyAcknowledged:true,aiConsent:false
+    }});
+    assert.equal(join.status,201);
+    registrations.push((await join.json()).id);
+    cookies.push(join.headers.get('set-cookie').split(';')[0]);
+  }
+  assert.equal((await f.api(route+'/upload',{method:'POST',cookie:cookies[0],
+    raw:png})).status,201);
+  const mixed=[
+    {registrationId:registrations[0],state:'approved',reason:'测试材料通过'},
+    {registrationId:registrations[1],state:'rejected',reason:'缺少材料'}
+  ];
+  for(const credential of ['',scanner]){
+    assert.equal((await f.api(route+'/review-batch',{method:'POST',cookie:credential,
+      data:{decisions:mixed}})).status,403);
+  }
+  assert.equal((await f.api(route+'/review-batch',{method:'POST',cookie:reviewer,
+    data:{decisions:[...mixed,mixed[0]]}})).status,400);
+  assert.equal((await f.api(route+'/review-batch',{method:'POST',cookie:reviewer,
+    data:{decisions:[{registrationId:registrations[2],state:'approved'}]}})).status,409,
+    'do not approve applicants missing mandatory screenshots');
+  assert.equal(f.sqlite.prepare('SELECT state FROM activity_registrations WHERE id=?').get(registrations[2]).state,'pending');
+  const reviewed=await f.api(route+'/review-batch',{method:'POST',cookie:reviewer,
+    data:{decisions:mixed}});
+  assert.equal(reviewed.status,200,await reviewed.clone().text());
+  assert.equal((await reviewed.json()).reviewed,2);
+  assert.equal(f.sqlite.prepare('SELECT state FROM activity_registrations WHERE id=?').get(registrations[0]).state,'approved');
+  assert.equal(f.sqlite.prepare('SELECT state FROM activity_registrations WHERE id=?').get(registrations[1]).state,'rejected');
+  assert.equal(f.sqlite.prepare('SELECT state FROM activity_registrations WHERE id=?').get(registrations[2]).state,'pending');
+  const aud=f.sqlite.prepare("SELECT COUNT(*) AS total FROM activity_audit WHERE action LIKE 'registration.review.%'").get();
+  assert.equal(aud.total,2,'every reviewer decision has a separate audit event');
+  assert.equal((await f.api(route+'/review-batch',{method:'POST',cookie:reviewer,data:{decisions:mixed}})).status,409,
+    'already decided rows must be refreshed before another submission');
+  assert.equal((await f.api(route+'/review-batch',{method:'POST',cookie:reviewer,
+    data:{decisions:[{registrationId:registrations[2],state:'rejected'}]}})).status,200);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS total FROM activity_audit WHERE action LIKE 'registration.review.%'").get().total,3);
 });

@@ -1,0 +1,38 @@
+/* A spreadsheet-like 500-row operator review surface with an adjacent photo pane. */
+.review-workspace{display:grid;grid-template-columns:minmax(0,1fr) minmax(310px,360px);
+ align-items:start;gap:16px;min-width:0}
+.review-workspace:has(.review-preview[hidden]){grid-template-columns:minmax(0,1fr)}
+.review-sheet,.review-preview{border:1px solid #d5e4f2;background:#fff;border-radius:15px;min-width:0}
+.review-toolbar{padding:16px;border-bottom:1px solid #dfe9f4}
+.review-toolbar p{margin:5px 0 12px}
+.review-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.review-actions label{margin:0}
+.review-scroll{overflow:auto;max-height:72vh}
+.review-table{border-collapse:separate;border-spacing:0;table-layout:auto;min-width:1160px;width:100%;
+ font-size:12px;color:#163c58}
+.review-table th,.review-table td{padding:9px 8px;text-align:left;border-right:1px solid #e7edf3;
+ border-bottom:1px solid #e3eaf2;white-space:normal;vertical-align:middle}
+.review-table th{position:sticky;top:0;background:#eaf3ff;color:#184e76;z-index:2;
+ font-weight:750;white-space:nowrap}
+.review-table tr:nth-child(even){background:#f8fbff}
+.review-table tr:hover{background:#ecf6ff}
+.review-table tr.review-processed{opacity:.72}
+.review-line-number{font-weight:700}
+.review-note{max-width:220px;white-space:pre-wrap;overflow-wrap:anywhere}
+.review-reason{min-width:165px}
+.review-table .review-reason input{width:100%;min-width:150px;max-width:220px;min-height:32px}
+.review-table .review-view{white-space:nowrap;padding:6px 10px;min-height:32px}
+.review-table input[type=checkbox]{accent-color:#177ce8;width:19px;height:19px}
+.review-preview{position:sticky;top:12px;padding:16px;min-height:200px;box-shadow:0 9px 23px #18394e18}
+.review-preview[hidden]{display:none}
+.review-preview h3{margin:0}
+.review-preview-who{margin:9px 0}
+.review-preview-photo{display:block;width:100%;max-height:55vh;object-fit:contain;
+ background:#edf3fa;border-radius:10px;border:1px solid #d5e2ef}
+.review-preview .row{margin-top:10px}
+.review-preview button{font-size:12px;padding:8px}
+@media(max-width:960px){
+  .review-workspace{grid-template-columns:1fr}
+  .review-preview{position:static}
+  .review-scroll{max-height:58vh}
+}

@@ -1,0 +1,19 @@
+{
+  // This Worker must receive ONLY activity.10273055.xyz/__route/*.
+  // It must NOT replace /api/* or the normal activity HTML app Worker.
+  // Neither the production CIDRs nor the LAN hostname is assumed here.
+  "name": "scut-bombax-campus-route",
+  "main": "./smart-route/router.mjs",
+  "compatibility_date": "2026-10-12",
+  "routes": [{"pattern": "activity.10273055.xyz/__route/*", "zone_name": "10273055.xyz"}],
+  "vars": {
+    "CAMPUS_ROUTE_ENABLED": "false",
+    "CAMPUS_NODE_ID": "uc-ubuntu-01",
+    "CAMPUS_EGRESS_CIDRS": "",
+    "CAMPUS_LAN_ORIGIN": "https://activity-lan.10273055.xyz"
+  },
+  "kv_namespaces": [{
+    "binding": "CAMPUS_STATUS",
+    "id": "REPLACE_WITH_DEDICATED_KV_NAMESPACE_ID"
+  }]
+}

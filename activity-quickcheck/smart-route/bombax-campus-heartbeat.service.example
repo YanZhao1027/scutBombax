@@ -1,0 +1,17 @@
+[Unit]
+Description=Bombax campus node signed heartbeat
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=bombax
+Group=bombax
+WorkingDirectory=/opt/bombax-smart-route
+EnvironmentFile=/etc/bombax-campus-route.env
+ExecStart=/usr/bin/node /opt/bombax-smart-route/heartbeat.mjs
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/tmp

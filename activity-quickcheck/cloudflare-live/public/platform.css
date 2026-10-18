@@ -1,0 +1,47 @@
+/* First-screen, student-first public activity gallery (21:9 responsive SVG). */
+.hero-inner{max-width:1320px;align-items:center}
+.shell{max-width:1320px}
+.hero-inner .hero-nav{display:flex;align-items:center;gap:10px;margin-left:auto;flex-shrink:0}
+.hero-nav a{font-size:13px;font-weight:750;color:#195a87;padding:9px 13px;
+ text-decoration:none;border:1px solid #94c7ea;border-radius:999px;background:#fff8}
+.hero-nav a:hover,.hero-nav a:focus-visible{background:#fff;outline-offset:3px}
+.public-headline{display:flex;align-items:center;justify-content:space-between;margin:0 0 18px;gap:14px}
+.public-headline h2{font-size:25px;margin:0}
+.activity-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,410px),1fr));gap:20px}
+.activity-tile{padding:0;overflow:hidden;min-width:0;border-radius:20px;box-shadow:0 12px 34px #103e7317;
+ background:#fff;border:1px solid #d4e5f5;transition:transform .2s ease,box-shadow .2s ease}
+.activity-tile:hover{transform:translateY(-3px);box-shadow:0 15px 38px #103e732b}
+.activity-tile .activity-banner{display:block;width:100%;aspect-ratio:21/9;object-fit:cover;background:#e7eef9}
+.activity-tile-body{padding:20px}
+.activity-tile-title{margin:0 0 10px;font-size:20px;line-height:1.4}
+.activity-tile-facts{display:grid;gap:5px;margin:12px 0 16px}
+.activity-tile-facts p{margin:0;font-size:13px;color:#3c627d}
+.activity-tile-requirements{margin:10px 0;white-space:pre-line;font-size:14px;line-height:1.7;
+ color:#405e79;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.activity-tile .button{display:inline-block;text-decoration:none;text-align:center;background:#0878ea;color:#fff}
+.activity-tile .action-row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.admin-shell{max-width:1300px}
+.admin-dashboard{display:grid;grid-template-columns:minmax(240px,340px) minmax(0,1fr);gap:18px}
+.admin-dashboard > .card{margin:0}
+.admin-selector{width:100%}
+.admin-illustration-preview{width:min(100%,525px);aspect-ratio:21/9;object-fit:cover;display:block;
+ border:1px solid #d4e3f3;border-radius:15px;margin:12px 0}
+.admin-login-frame{max-width:520px;margin:35px auto}
+.admin-login-frame .card{padding:32px}
+.admin-panel-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+@media(max-width:780px){
+  .hero-inner .hero-nav{flex-wrap:wrap;justify-content:flex-end;max-width:170px}
+  .hero-nav a{font-size:11px;padding:7px 9px}
+  .activity-card-grid{grid-template-columns:1fr}
+  .admin-dashboard{grid-template-columns:1fr}
+  .admin-login-frame{margin:16px auto}
+}
+@media(prefers-reduced-motion:reduce){.activity-tile{transition:none}.activity-tile:hover{transform:none}}
+
+/* The public landing page is ONLY the activity gallery. Keep normal network
+ * notices accessible to screen readers but do not let them push cards down.
+ * Errors remain visible. Other routes still show their status messages. */
+body:has(.public-headline) #notice:not(.error){
+  position:absolute;width:1px;height:1px;padding:0;margin:0;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;
+}

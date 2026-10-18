@@ -1,0 +1,200 @@
+/* Authorized staff-only evidence review sheet. All text uses textContent:
+ * never place self-declared student content in innerHTML or analytics. */
+(function(root){
+  'use strict';
+  const node=(tag,className='',text='')=>{
+    const n=document.createElement(tag);
+    if(className)n.className=className;
+    if(text!==undefined)n.textContent=String(text);
+    return n;
+  };
+  function createSelection(ids=[]){
+    const selected=new Set(),approved=new Set();
+    let last=-1;
+    const exists=new Set(ids);
+    function choose(index,checked,shift=false){
+      if(index<0||index>=ids.length)return;
+      const begin=shift&&last>=0?Math.min(index,last):index;
+      const end=shift&&last>=0?Math.max(index,last):index;
+      for(let i=begin;i<=end;i++){
+        const id=ids[i];
+        if(checked)selected.add(id);
+        else {selected.delete(id);approved.delete(id);}
+      }
+      last=index;
+    }
+    function all(value){
+      selected.clear();if(!value)approved.clear();
+      else ids.forEach(id=>selected.add(id));
+      last=-1;
+    }
+    function setApproval(id,value){
+      if(!exists.has(id))return;
+      if(value){selected.add(id);approved.add(id);}
+      else approved.delete(id);
+    }
+    return Object.freeze({
+      choose,all,setApproval,
+      get selected(){return new Set(selected);},
+      get approved(){return new Set(approved);},
+      get length(){return selected.size;},
+      decisions(reasonFor){
+        return ids.filter(id=>selected.has(id)).map(id=>({
+          registrationId:id,state:approved.has(id)?'approved':'rejected',
+          reason:String(reasonFor(id)||'').slice(0,300)
+        }));
+      }
+    });
+  }
+  function mount({root:target,rows,eventId,request,notify,onCommitted}){
+    const pending=rows.filter(r=>r.state==='pending');
+    const selectable=pending.map(r=>r.id);
+    const selection=createSelection(selectable);
+    const reasonInputs=new Map(),selectorInputs=new Map(),approvedInputs=new Map();
+    const materialCache=new Map(),ordered=rows.filter(r=>r.material_count>0);
+    let paneIndex=-1,imageIndex=0,closed=false;
+    const shell=node('div','review-workspace');
+    const sheet=node('section','review-sheet');
+    const title=node('div','review-toolbar');
+    title.append(node('h3','', '报名材料审核总表'),
+      node('p','muted','点击图片在右侧预览；Shift+点击可连续多选。先选中待处理行，再勾选「通过」；选中但未勾通过的行将驳回。'));
+    const toolbar=node('div','review-actions');
+    const allBox=node('input');allBox.type='checkbox';allBox.setAttribute('aria-label','全选待审');
+    const selectLabel=node('label','check');selectLabel.append(allBox,node('span','','全选待审'));
+    const count=node('span','tag','本次待处理 0');
+    toolbar.append(selectLabel,count);
+    const markGood=node('button','secondary','所选设为通过');
+    const markBad=node('button','secondary','所选设为驳回');
+    const submit=node('button','','确认提交审核结果');
+    const refresh=node('button','secondary','刷新表格');
+    toolbar.append(markGood,markBad,submit,refresh);
+    title.append(toolbar);
+    const frame=node('div','review-scroll');
+    const table=node('table','review-table');
+    const head=node('thead');const headRow=node('tr');
+    for(const t of ['选中','序号','报名者（自填）','自填学号','审核状态','材料','到场','报名说明','通过 ✓','驳回原因'])headRow.append(node('th','',t));
+    head.append(headRow);table.append(head);
+    const body=node('tbody');table.append(body);frame.append(table);
+    sheet.append(title,frame);
+    const pane=node('aside','review-preview');
+    const caption=node('h3','','图片证据预览');
+    const close=node('button','secondary','× 关闭');close.setAttribute('aria-label','关闭图片预览');
+    const previewBar=node('div','row between');previewBar.append(caption,close);
+    const who=node('p','review-preview-who muted','点击材料列查看图片');
+    const photo=node('img','review-preview-photo');photo.alt='供审核员核对的材料截图';
+    const footer=node('div','row between');
+    const prev=node('button','secondary','← 上一张'),next=node('button','secondary','下一张 →');
+    const progress=node('span','tag','0 / 0');
+    footer.append(prev,progress,next);
+    pane.append(previewBar,who,photo,footer);
+    pane.hidden=true;
+    shell.append(sheet,pane);target.append(shell);
+    function update(){
+      const ids=selection.selected,approved=selection.approved;
+      count.textContent='本次待处理 '+ids.size+'，通过 '+[...ids].filter(id=>approved.has(id)).length+
+        '，驳回 '+[...ids].filter(id=>!approved.has(id)).length;
+      allBox.checked=ids.size===selectable.length&&ids.size>0;
+      allBox.indeterminate=ids.size>0&&ids.size<selectable.length;
+      for(const [id,input] of selectorInputs)input.checked=ids.has(id);
+      for(const [id,input] of approvedInputs)input.checked=approved.has(id);
+      submit.disabled=!ids.size;
+      markGood.disabled=!ids.size;markBad.disabled=!ids.size;
+    }
+    pending.forEach((r,index)=>{selectorInputs.set(r.id,null);});
+    for(let i=0;i<rows.length;i++){
+      const r=rows[i],tr=node('tr',r.state==='pending'?'':'review-processed');
+      const cell=(value,cls='')=>{const td=node('td',cls);if(value instanceof Node)td.append(value);else td.textContent=String(value??'');tr.append(td);return td;};
+      if(r.state==='pending'){
+        const select=node('input');select.type='checkbox';select.setAttribute('aria-label','选择第 '+(i+1)+' 行 '+r.display_name);
+        const index=selectable.indexOf(r.id);
+        select.addEventListener('click',event=>{selection.choose(index,select.checked,event.shiftKey);update();});
+        selectorInputs.set(r.id,select);cell(select);
+      }else cell('—');
+      cell(i+1,'review-line-number');cell(r.display_name);cell(r.student_number);
+      cell(r.state==='pending'?'待审核':r.state==='approved'?'已通过':'已驳回');
+      const view=node('button','secondary review-view',r.material_count?'图片 '+r.material_count+' 张':'无材料');
+      view.disabled=!r.material_count;
+      view.addEventListener('click',()=>{void showFor(r.id).catch(error=>notify(error.message,'error'));});
+      cell(view);cell(r.attended_at?'已到场'+(r.channel==='manual'?'（人工）':''):'未到场');
+      cell(r.note||'—','review-note');
+      if(r.state==='pending'){
+        const approval=node('input');approval.type='checkbox';approval.setAttribute('aria-label','通过第 '+(i+1)+' 行');
+        approval.addEventListener('change',()=>{selection.setApproval(r.id,approval.checked);update();});
+        approvedInputs.set(r.id,approval);cell(approval);
+        const reason=node('input');reason.type='text';reason.maxLength=300;
+        reason.placeholder='选中且不通过时填写';
+        reason.setAttribute('aria-label','第 '+(i+1)+' 行驳回原因');
+        reasonInputs.set(r.id,reason);cell(reason,'review-reason');
+      }else{cell('—');cell('—');}
+      body.append(tr);
+    }
+    async function materials(row){
+      if(!materialCache.has(row.id)){
+        const result=await request('/api/events/'+eventId+'/materials?registrationId='+encodeURIComponent(row.id));
+        materialCache.set(row.id,result.materials||[]);
+      }
+      return materialCache.get(row.id);
+    }
+    async function showFor(id){
+      const idx=ordered.findIndex(x=>x.id===id);
+      if(idx<0)return;
+      paneIndex=idx;imageIndex=0;pane.hidden=false;
+      await show();
+    }
+    async function show(){
+      if(closed||paneIndex<0||paneIndex>=ordered.length)return;
+      const row=ordered[paneIndex],images=await materials(row);
+      if(!images.length){who.textContent=row.display_name+'：暂无有效材料';photo.removeAttribute('src');return;}
+      imageIndex=Math.min(images.length-1,Math.max(0,imageIndex));
+      const pic=images[imageIndex];
+      who.textContent='第 '+(rows.indexOf(row)+1)+' 行 · '+row.display_name+' · 自填学号 '+row.student_number;
+      progress.textContent=(imageIndex+1)+' / '+images.length+' · 可切换报名者';
+      photo.src='/api/materials/'+encodeURIComponent(pic.id);
+    }
+    async function advance(dir){
+      if(!ordered.length||paneIndex<0)return;
+      const here=await materials(ordered[paneIndex]);
+      if(imageIndex+dir>=0&&imageIndex+dir<here.length){imageIndex+=dir;return show();}
+      for(let tries=0;tries<ordered.length;tries++){
+        paneIndex=(paneIndex+dir+ordered.length)%ordered.length;
+        const list=await materials(ordered[paneIndex]);
+        if(list.length){imageIndex=dir>0?0:list.length-1;return show();}
+      }
+    }
+    prev.addEventListener('click',()=>advance(-1).catch(e=>notify(e.message,'error')));
+    next.addEventListener('click',()=>advance(1).catch(e=>notify(e.message,'error')));
+    close.addEventListener('click',()=>{pane.hidden=true;paneIndex=-1;photo.removeAttribute('src');});
+    const keys=event=>{
+      if(pane.hidden||closed)return;
+      if(['INPUT','TEXTAREA'].includes(document.activeElement?.tagName))return;
+      if(event.key==='ArrowRight'){event.preventDefault();void advance(1).catch(e=>notify(e.message,'error'));}
+      if(event.key==='ArrowLeft'){event.preventDefault();void advance(-1).catch(e=>notify(e.message,'error'));}
+      if(event.key==='Escape')close.click();
+    };
+    document.addEventListener('keydown',keys);
+    allBox.addEventListener('change',()=>{selection.all(allBox.checked);update();});
+    markGood.addEventListener('click',()=>{for(const id of selection.selected)selection.setApproval(id,true);update();});
+    markBad.addEventListener('click',()=>{for(const id of selection.selected)selection.setApproval(id,false);update();});
+    submit.addEventListener('click',async()=>{
+      const decisions=selection.decisions(id=>reasonInputs.get(id)?.value);
+      if(!decisions.length)return;
+      const approves=decisions.filter(x=>x.state==='approved').length;
+      const rejects=decisions.length-approves;
+      if(!window.confirm('确认提交 '+decisions.length+' 条审核结果？通过 '+approves+' 条，驳回 '+rejects+' 条。提交后将立即生效。'))return;
+      submit.disabled=true;
+      try{
+        const result=await request('/api/events/'+eventId+'/review-batch',{method:'POST',data:{decisions}});
+        notify('已完成 '+result.reviewed+' 条审核，逐条写入审计记录。','success');
+        closed=true;document.removeEventListener('keydown',keys);
+        await onCommitted();
+      }catch(e){notify(e.message||'提交失败，请刷新核对','error');update();}
+    });
+    refresh.addEventListener('click',()=>{
+      if(selection.length&&!window.confirm('尚有未提交的勾选。确定放弃并刷新审核队列？'))return;
+      closed=true;document.removeEventListener('keydown',keys);onCommitted();
+    });
+    update();
+    return ()=>{closed=true;document.removeEventListener('keydown',keys);};
+  }
+  root.BombaxReviewGrid=Object.freeze({createSelection,mount});
+})(window);
