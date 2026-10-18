@@ -28,6 +28,8 @@ test('student homepage is a first-screen banner card catalog; admin lives at sep
   assert.match(app,/page\(\)==='public'\|\|page\(\)==='my'/);
   assert.match(app,/location\.assign\('\/admin'\)/);
   assert.match(app,/location\.replace\('\/adminlogin'\)/);
+  assert.match(app,/const adminMode=page\(\)==='admin'&&app.me\?\.role==='organizer'/);
+  assert.match(app,/if\(adminMode\)await organizerView\(event,root\)/);
   assert.doesNotMatch(index,/<details[^>]*>.*登录/s);
 });
 test('all five built-in cartoons are original first-party 21:9 SVG vectors',()=>{

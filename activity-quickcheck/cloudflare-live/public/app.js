@@ -341,10 +341,15 @@ async function renderStudentPassDesk(root){
 async function viewEvent(event){
   clean();app.active=event.id;
   const root=$('content');root.replaceChildren();
-  const head=card(event.title,button('← 返回'+(app.me?.role==='organizer'?'管理后台':'活动列表'),()=>{location.assign(app.me?.role==='organizer'?'/admin':'/');},'secondary'),
-    text('活动期间新报名与新上传材料仍可由后台实时审核；最终名单必须同时满足材料通过与到场。'));
+  // A staff member visiting the student homepage must still see the student
+  // event experience; privileged tools appear ONLY under the /admin route.
+  const adminMode=page()==='admin'&&app.me?.role==='organizer';
+  const head=card(event.title,button('← 返回'+(adminMode?'管理后台':'活动列表'),
+    ()=>{location.assign(adminMode?'/admin':'/');},'secondary'),
+    text(adminMode?'活动工作人员操作台：资料审核与现场签到分别记录。':
+      '无需登录：报名后可用同一个一码通查询审核及签到状态。'));
   root.append(head);
-  if(app.me?.role==='organizer')await organizerView(event,root);
+  if(adminMode)await organizerView(event,root);
   else await studentView(event,root);
 }
 async function studentView(event,root){
