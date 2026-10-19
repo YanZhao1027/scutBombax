@@ -166,6 +166,106 @@ async function main(){
   assert(exported.includes('scan'));
   assert(!exported.includes('bqx_'));
   console.log('Manual-first late-upload route, role separation, and CSV export passed');
+
+  // PR #17: multiple duties can be granted and revoked independently.
+  const roleTable=assertStatus(await request('GET',root+'/staff-roles','demo_owner'),200);
+  const staffId=username=>{
+    const account=roleTable.accounts.find(x=>x.username===username);
+    assert.ok(account,'expected synthetic staff account '+username);
+    assert.notEqual(account.id,roleTable.ownerId,'never modify the activity owner');
+    return account.id;
+  };
+  const reviewerId=staffId('demo_review'),scannerId=staffId('demo_scan'),manualId=staffId('demo_manual');
+  assert.equal(assertStatus(await request('POST',root+'/staff-roles','demo_owner',{
+    assignments:[
+      {userId:reviewerId,duties:['reviewer','scanner']},
+      {userId:scannerId,duties:['manual']},
+      {userId:manualId,duties:[]}
+    ]
+  }),200).updated,3);
+  assertStatus(await request('GET',root+'/queue?duty=reviewer','demo_review'),200);
+  assertStatus(await request('GET',root+'/queue?duty=scanner','demo_review'),200);
+  assertStatus(await request('GET',root+'/queue?duty=manual','demo_review'),403);
+  assert.equal(assertStatus(await request('POST',root+'/staff-roles','demo_owner',{
+    assignments:[{userId:reviewerId,duties:['scanner']}]
+  }),200).updated,1);
+  assertStatus(await request('GET',root+'/queue?duty=reviewer','demo_review'),403);
+  assertStatus(await request('GET',root+'/queue?duty=scanner','demo_review'),200);
+  assert.equal(assertStatus(await request('POST',root+'/staff-roles','demo_owner',{
+    assignments:[{userId:reviewerId,duties:['reviewer','scanner']}]
+  }),200).updated,1);
+  console.log('PR #17 multi-role grants and immediate reviewer revocation passed');
+
+  // PR #17: real Stage mixed batch review and conflict guards.
+  const batchRows=[];
+  for(let i=0;i<3;i++){
+    const role='batchGuest'+(i+1);
+    const joined=assertStatus(await request('POST',root+'/join',role,{
+      displayName:'测试批量审核'+(i+1),studentNumber:'TEST-BATCH-'+(i+1)+'-'+id.toUpperCase(),
+      privacyAcknowledged:true,aiConsent:false,note:'TEST ONLY batch review'
+    }),201);
+    batchRows.push({role,id:joined.id});
+  }
+  assertStatus(await request('POST',root+'/upload',batchRows[0].role,dummy,{upload:true}),201);
+  const decisions=[
+    {registrationId:batchRows[0].id,state:'approved',reason:'TEST ONLY fixture accepted'},
+    {registrationId:batchRows[1].id,state:'rejected',reason:'TEST ONLY missing evidence'}
+  ];
+  assert.equal(assertStatus(await request('POST',root+'/review-batch','demo_review',{
+    decisions
+  }),200).reviewed,2);
+  assert.equal((await request('POST',root+'/review-batch','demo_review',{decisions})).status,409,
+    'already reviewed rows must not be silently reviewed again');
+  assert.equal(assertStatus(await request('POST',root+'/review-batch','demo_review',{
+    decisions:[{registrationId:batchRows[2].id,state:'rejected',reason:'TEST ONLY batch rejection'}]
+  }),200).reviewed,1);
+  console.log('PR #17 mixed batch review, material gate, and conflict guard passed');
+
+  // PR #17: reapply must issue a new bearer and permanently revoke the old one.
+  const reapplyRole='reapplyGuest';
+  const original=assertStatus(await request('POST',root+'/join',reapplyRole,{
+    displayName:'测试重新报名甲',studentNumber:'TEST-REAPPLY-A-'+id.toUpperCase(),
+    privacyAcknowledged:true,aiConsent:false,note:'TEST ONLY original submission'
+  }),201);
+  const oldCookie=clients.get(reapplyRole),oldToken=oldCookie.split('=')[1];
+  assert.match(oldCookie,/^bqx_g_[a-f0-9]{32}=bqx_[a-f0-9]{64}$/);
+  const oldSvg=assertStatus(await request('POST',root+'/pass-qr',reapplyRole,{}),200);
+  assert.match(oldSvg,/<svg/);
+  assertStatus(await request('POST',root+'/review','demo_review',{
+    registrationId:original.id,state:'rejected',reason:'TEST ONLY: replace the evidence'
+  }),200);
+  assert.equal(assertStatus(await request('GET',root,reapplyRole),200).registration.state,'rejected');
+  const renewed=assertStatus(await request('POST',root+'/reapply',reapplyRole,{
+    displayName:'测试重新报名乙',studentNumber:'TEST-REAPPLY-B-'+id.toUpperCase(),
+    privacyAcknowledged:true,aiConsent:false,note:'TEST ONLY revised submission'
+  }),201);
+  assert.equal(renewed.oldReceiptRevoked,true);
+  assert.equal(renewed.newPassIssued,true);
+  assert.notEqual(renewed.id,original.id);
+  const newCookie=clients.get(reapplyRole),newToken=newCookie.split('=')[1];
+  assert.notEqual(newToken,oldToken);
+  const newSvg=assertStatus(await request('POST',root+'/pass-qr',reapplyRole,{}),200);
+  assert.notEqual(newSvg,oldSvg);
+  clients.set('reapplyGuestOld',oldCookie);
+  assert.equal((await request('POST','/api/pass/restore','restoreOld',{token:oldToken})).status,410);
+  assert.equal(assertStatus(await request('POST','/api/pass/restore','restoreNew',{token:newToken}),200).eventId,event.id);
+  assert.equal((await request('POST',root+'/upload','reapplyGuestOld',dummy,{upload:true})).status,403);
+  assert.equal((await request('POST',root+'/reapply','reapplyGuestOld',{
+    displayName:'测试旧码重报',studentNumber:'TEST-REAPPLY-OLD-'+id.toUpperCase(),
+    privacyAcknowledged:true,aiConsent:false,note:'must be rejected'
+  })).status,403);
+  const reissuedPage=assertStatus(await request('GET',root,reapplyRole),200);
+  assert.equal(reissuedPage.registration.id,renewed.id);
+  assert.equal(reissuedPage.reissued,true);
+  assert.equal(assertStatus(await request('GET',root+'/materials',reapplyRole),200).materials.length,0,
+    'new application must not inherit rejected evidence');
+  assertStatus(await request('POST',root+'/upload',reapplyRole,dummy,{upload:true}),201);
+  assertStatus(await request('POST',root+'/review','demo_review',{
+    registrationId:renewed.id,state:'approved',reason:'TEST ONLY fresh evidence accepted'
+  }),200);
+  assert.equal((await request('POST',root+'/redeem','demo_review',{token:oldToken})).status,409);
+  assertStatus(await request('POST',root+'/redeem','demo_review',{token:newToken}),200);
+  console.log('PR #17 reapply, permanent old-pass revocation, fresh evidence and new-pass check-in passed');
   console.log('PASS:',requests,'synthetic-only real HTTPS requests, event=',event.id);
   console.log('NOTE: physical QR scan and identity verification remain separate device-level checks.');
 }
