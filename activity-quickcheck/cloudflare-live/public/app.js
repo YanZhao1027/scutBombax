@@ -392,6 +392,68 @@ async function viewEvent(event){
   if(adminMode)await organizerView(event,root);
   else await studentView(event,root);
 }
+const MAX_EVIDENCE_SOURCE_BYTES=12*1024*1024;
+const MAX_EVIDENCE_BYTES=3*1024*1024;
+const MAX_EVIDENCE_SOURCE_PIXELS=12_000_000;
+const MAX_EVIDENCE_EDGE=3200;
+const MAX_EVIDENCE_OUTPUT_PIXELS=8_000_000;
+async function compressEvidenceImage(file){
+  if(!file||!['image/png','image/jpeg'].includes(file.type))
+    throw new Error('请选择 PNG 或 JPEG 格式的截图');
+  if(!Number.isFinite(file.size)||file.size<16||file.size>MAX_EVIDENCE_SOURCE_BYTES)
+    throw new Error('原始截图必须小于 12 MB');
+  let decoded=null,canvas=null,release=()=>{};
+  try{
+    let source;
+    // Use the browser/WebView's native image decoder. No extra JS decoder is loaded.
+    if(typeof window.createImageBitmap==='function'){
+      decoded=await window.createImageBitmap(file);
+      source=decoded;
+      release=()=>{try{decoded?.close();}catch{}};
+    }else{
+      const objectUrl=URL.createObjectURL(file),image=new Image();
+      try{
+        await new Promise((resolve,reject)=>{
+          image.onload=resolve;
+          image.onerror=()=>reject(new Error('手机无法解码这张截图，请换一张 PNG/JPEG 图片'));
+          image.src=objectUrl;
+        });
+      }catch(error){URL.revokeObjectURL(objectUrl);throw error;}
+      source=image;
+      release=()=>{image.src='';URL.revokeObjectURL(objectUrl);};
+    }
+    const width=Number(source.width||source.naturalWidth);
+    const height=Number(source.height||source.naturalHeight);
+    if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1)
+      throw new Error('无法读取截图尺寸，请重新选择图片');
+    if(width*height>MAX_EVIDENCE_SOURCE_PIXELS)
+      throw new Error('截图分辨率过高，请先在手机相册中裁剪后再上传');
+    const scale=Math.min(1,MAX_EVIDENCE_EDGE/Math.max(width,height),
+      Math.sqrt(MAX_EVIDENCE_OUTPUT_PIXELS/(width*height)));
+    const outputWidth=Math.max(1,Math.round(width*scale));
+    const outputHeight=Math.max(1,Math.round(height*scale));
+    canvas=document.createElement('canvas');
+    canvas.width=outputWidth;canvas.height=outputHeight;
+    const context=canvas.getContext('2d',{alpha:false});
+    if(!context)throw new Error('当前浏览器无法处理图片，请更新浏览器后重试');
+    // Screenshots are opaque; flatten any transparency onto white before JPEG encoding.
+    context.fillStyle='#fff';context.fillRect(0,0,outputWidth,outputHeight);
+    context.drawImage(source,0,0,outputWidth,outputHeight);
+    const blob=await new Promise((resolve,reject)=>{
+      canvas.toBlob(result=>{
+        if(!result||result.type!=='image/jpeg'||result.size<16)
+          reject(new Error('手机无法生成 JPEG 压缩图，请重新选择截图'));
+        else resolve(result);
+      },'image/jpeg',0.75);
+    });
+    if(blob.size>MAX_EVIDENCE_BYTES)
+      throw new Error('压缩后仍超过 3 MB，请在手机相册中裁剪截图后重试');
+    return {blob,width:outputWidth,height:outputHeight,originalBytes:file.size,compressedBytes:blob.size};
+  }finally{
+    try{release();}catch{}
+    if(canvas){canvas.width=0;canvas.height=0;}
+  }
+}
 async function studentView(event,root){
   const snapshot=await request('/api/events/'+event.id);
   const reg=snapshot.registration;
@@ -489,7 +551,7 @@ async function studentView(event,root){
     text('已上传 '+f.mime+' · '+Math.ceil(f.length/1024)+' KB')));
   if(reg.state!=='rejected'&&(!attendance||attendance.channel==='manual')){
     box.append(el('h3',{text:'证明截图上传'}),
-      text(app.syntheticOnly?'只允许使用本站内置的虚构图片。Worker 会校验文件 SHA-256；真实图片会被拒绝。':'最多三张 PNG/JPEG，每张不超过 3MB。'));
+      text(app.syntheticOnly?'只允许使用本站内置的虚构图片。Worker 会校验文件 SHA-256；真实图片会被拒绝。':'最多三张 PNG/JPEG。手机会先在本机以 JPEG 质量 75% 压缩，原图上限 12 MB，上传文件上限 3 MB。'));
     if(app.syntheticOnly)box.append(el('img',{class:'qr',src:'/demo-proof.png',alt:'系统内置、标注 TEST ONLY 的虚构点赞截图'}));
     box.append(button('真正上传内置模拟截图至私有 R2',async()=>{
       const source=await fetch('/demo-proof.png',{credentials:'same-origin'});
@@ -500,12 +562,26 @@ async function studentView(event,root){
     },'secondary'));
     if(!app.syntheticOnly){
       const fileInput=el('input',{type:'file',accept:'image/png,image/jpeg'});
-      box.append(fileInput,button('上传选中的真实证明材料',async()=>{
+      let uploading=false;
+      const uploadButton=button('本机压缩并上传截图（JPEG 75%）',async()=>{
+        if(uploading)return;
         const f=fileInput.files?.[0];if(!f)throw new Error('请选择截图');
-        if(f.size>3*1024*1024)throw new Error('文件超过 3MB');
-        await request('/api/events/'+event.id+'/upload',{method:'POST',raw:f,headers:{'Content-Type':f.type}});
-        notice('证明材料已提交。','success');await studentViewReload(event);
-      }));
+        uploading=true;fileInput.disabled=true;uploadButton.disabled=true;
+        try{
+          notice('正在手机本机压缩截图；原图不会先上传或发送给第三方。');
+          const compressed=await compressEvidenceImage(f);
+          await request('/api/events/'+event.id+'/upload',{
+            method:'POST',raw:compressed.blob,headers:{'Content-Type':'image/jpeg'}
+          });
+          await studentViewReload(event);
+          notice('截图已压缩为 JPEG（质量 75%）并提交：'+
+            Math.ceil(compressed.originalBytes/1024)+' KB → '+
+            Math.ceil(compressed.compressedBytes/1024)+' KB。','success');
+        }finally{
+          uploading=false;fileInput.disabled=false;uploadButton.disabled=false;
+        }
+      });
+      box.append(fileInput,uploadButton);
     }
   }
   if(!attendance){

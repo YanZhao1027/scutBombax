@@ -70,6 +70,69 @@ test('backend SVG sanitizer only returns static graphics, with strict 21:9 root'
   ])assert.throws(()=>sanitizeUploadedSvg(attack));
   assert.throws(()=>sanitizeUploadedSvg('<svg viewBox="0 0 1050 450"></svg>'+' '.repeat(100000)));
 });
+test('real evidence uploads use native image decoding and JPEG quality 75 with bounded canvas memory',async()=>{
+  const start=app.indexOf('const MAX_EVIDENCE_SOURCE_BYTES=');
+  const end=app.indexOf('\nasync function studentView(',start);
+  assert.ok(start>=0&&end>start,'compression helper must remain isolated and testable');
+  const helper=app.slice(start,end);
+  let closed=0,canvasCreated=0,encoding=null,drawn=null;
+  const canvas={width:0,height:0,
+    getContext(kind,options){
+      assert.equal(kind,'2d');assert.deepEqual({...options},{alpha:false});
+      return {fillStyle:'',fillRect(){},drawImage(_source,_x,_y,width,height){drawn={width,height};}};
+    },
+    toBlob(callback,type,quality){encoding={type,quality};callback({type:'image/jpeg',size:512});}
+  };
+  const sandbox={
+    window:{createImageBitmap:async()=>({width:2000,height:4000,close(){closed++;}})},
+    document:{createElement(tag){canvasCreated++;assert.equal(tag,'canvas');return canvas;}},
+    URL:{createObjectURL(){throw new Error('native bitmap path should not create an object URL');},revokeObjectURL(){}},
+    Image:function Image(){}
+  };
+  vm.runInNewContext(helper+'\nthis.__compressEvidenceImage=compressEvidenceImage;',sandbox);
+  const result=await sandbox.__compressEvidenceImage({type:'image/png',size:1200000});
+  assert.equal(encoding.type,'image/jpeg');
+  assert.equal(encoding.quality,0.75);
+  assert.deepEqual(drawn,{width:1600,height:3200},'very large screenshots should be downscaled before encoding');
+  assert.equal(result.width,1600);assert.equal(result.height,3200);
+  assert.equal(result.blob.type,'image/jpeg');assert.equal(result.compressedBytes,512);
+  assert.equal(closed,1,'native ImageBitmap must be released');
+  assert.equal(canvas.width,0);assert.equal(canvas.height,0,'canvas backing memory must be released');
+  assert.equal(canvasCreated,1);
+  assert.match(app,/compressEvidenceImage\(f\)/);
+  assert.match(app,/raw:compressed\.blob,headers:\{'Content-Type':'image\/jpeg'\}/);
+  assert.match(app,/原图不会先上传或发送给第三方/);
+  assert.match(app,/if\(app\.syntheticOnly\)box\.append\(el\('img'/,
+    'synthetic Stage continues to use the marked built-in fixture');
+  assert.match(app,/if\(!app\.syntheticOnly\)\{\s*const fileInput/);
+  assert.doesNotMatch(helper,/import\s+.*(?:sharp|jimp|pica|browser-image-compression)/i,
+    'no extra image-decoder/compression package should be loaded');
+});
+
+test('evidence compression rejects oversized source files before decoding and releases oversized bitmaps',async()=>{
+  const start=app.indexOf('const MAX_EVIDENCE_SOURCE_BYTES=');
+  const end=app.indexOf('\nasync function studentView(',start);
+  const helper=app.slice(start,end);
+  let decodeCalls=0,closed=0,canvasCalls=0;
+  const sandbox={
+    window:{createImageBitmap:async()=>{decodeCalls++;return {width:6000,height:3000,close(){closed++;}};}},
+    document:{createElement(){canvasCalls++;return {width:0,height:0};}},
+    URL:{createObjectURL(){return 'blob:test';},revokeObjectURL(){}},Image:function Image(){}
+  };
+  vm.runInNewContext(helper+'\nthis.__compressEvidenceImage=compressEvidenceImage;',sandbox);
+  let oversized;
+  try{await sandbox.__compressEvidenceImage({type:'image/png',size:13*1024*1024});}
+  catch(error){oversized=error;}
+  assert.match(oversized?.message||'',/12 MB/);
+  assert.equal(decodeCalls,0,'oversized input must be rejected before decoding');
+  let dimensions;
+  try{await sandbox.__compressEvidenceImage({type:'image/jpeg',size:1000});}
+  catch(error){dimensions=error;}
+  assert.match(dimensions?.message||'',/分辨率过高/);
+  assert.equal(decodeCalls,1);assert.equal(closed,1);
+  assert.equal(canvasCalls,0,'overlarge decoded dimensions must be rejected before canvas allocation');
+});
+
 test('review sheet supports shift-range selection, all, approval ticks and only chosen submissions',()=>{
   const window={};
   vm.runInNewContext(review,{window,document:{},Node:Object});
