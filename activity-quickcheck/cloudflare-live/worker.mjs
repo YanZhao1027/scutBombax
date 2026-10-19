@@ -73,21 +73,32 @@ function mutation(req,env){
 }
 async function readBounded(req,max){
   const declared=req.headers.get('Content-Length');
-  if(declared!==null)need(/^\d+$/.test(declared)&&Number(declared)<=max,413,'请求过大');
+  let expected=null;
+  if(declared!==null){
+    need(/^\d+$/.test(declared)&&Number(declared)<=max,413,'请求过大');
+    expected=Number(declared);
+  }
   if(!req.body)return new Uint8Array(0);
-  const reader=req.body.getReader(),chunks=[];let n=0;
+  const reader=req.body.getReader();
+  let result=expected===null?new Uint8Array(Math.min(max,65536)):new Uint8Array(expected);
+  let n=0;
   try{
     while(true){
       const {done,value}=await reader.read();
       if(done)break;
-      n+=value.byteLength;
-      if(n>max){await reader.cancel();err(413,'请求过大');}
-      chunks.push(value);
+      const next=n+value.byteLength;
+      if(next>max||(expected!==null&&next>expected)){
+        await reader.cancel();err(413,'请求过大或长度不匹配');
+      }
+      if(next>result.byteLength){
+        const capacity=Math.min(max,Math.max(next,Math.max(65536,result.byteLength*2)));
+        const grown=new Uint8Array(capacity);grown.set(result.subarray(0,n));result=grown;
+      }
+      result.set(value,n);n=next;
     }
   }finally{reader.releaseLock();}
-  const result=new Uint8Array(n);let at=0;
-  for(const chunk of chunks){result.set(chunk,at);at+=chunk.byteLength;}
-  return result;
+  if(expected!==null)need(n===expected,400,'请求长度与声明不符');
+  return n===result.byteLength?result:result.slice(0,n);
 }
 async function body(req,max=32768){
   const buf=await readBounded(req,max);
@@ -97,10 +108,16 @@ async function access(db,user,eid,roles=['owner','reviewer','scanner','manual'])
   need(user?.role==='organizer',403,'不是工作人员');
   const event=await db.prepare('SELECT * FROM activity_events WHERE id=?').bind(eid).first();
   need(event,404,'活动不存在');
-  const duty=event.owner_id===user.id?'owner':
-    (await db.prepare('SELECT duty FROM activity_staff WHERE event_id=? AND user_id=?').bind(eid,user.id).first())?.duty;
-  need(duty&&roles.includes(duty),403,'不属于此活动岗位');
-  return {...event,duty};
+  if(event.owner_id===user.id){
+    need(roles.includes('owner')||roles.some(r=>['reviewer','scanner','manual'].includes(r)),403,'不属于此活动岗位');
+    return {...event,duty:'owner',duties:['reviewer','scanner','manual']};
+  }
+  const assignments=await db.prepare('SELECT duty FROM activity_staff_grants WHERE event_id=? AND user_id=?')
+    .bind(eid,user.id).all();
+  const duties=assignments.results.map(x=>x.duty);
+  const duty=duties.find(x=>roles.includes(x));
+  need(duty,403,'不属于此活动岗位');
+  return {...event,duty,duties};
 }
 function geo(event,point){
   const lat=point.latitude,lon=point.longitude,accuracy=point.accuracyM;
@@ -152,7 +169,7 @@ async function api(req,env,url){
   const db=env.DB,method=req.method,p=url.pathname;
   const syntheticOnly=env.SYNTHETIC_ONLY==='true';
   const ready=env.ENABLE_LIVE==='true'&&syntheticOnly;
-  if(method==='GET'&&p==='/api/health')return json({ok:true,product:'Activity QuickCheck Cloudflare',ready,syntheticOnly});
+  if(method==='GET'&&p==='/api/health')return json({ok:true,product:'Activity QuickCheck Cloudflare',ready,syntheticOnly,allowTestImageUpload:syntheticOnly&&env.ALLOW_TEST_IMAGE_UPLOAD==='true'});
   // Fail closed before any session/database lookup. This codebase has ONLY
   // self-declared, shared-password synthetic accounts: it is not a production identity provider.
   // ENABLE_LIVE is a staging traffic switch, NOT permission to process real student data.
@@ -167,7 +184,7 @@ async function api(req,env,url){
   }
   if(method==='GET'&&p==='/api/me')return json({user:safeUser(user)});
   if(method!=='GET')mutation(req,env);
-  if(method==='POST'&&(p==='/api/login'||p==='/api/pass/restore'||/\/join$/.test(p))){
+  if(method==='POST'&&(p==='/api/login'||p==='/api/pass/restore'||/\/(?:join|reapply)$/.test(p))){
     need(env.AUTH_RATE_LIMIT?.limit,503,'认证安全限流尚未配置，暂不能接收真实报名');
     const key=req.headers.get('CF-Connecting-IP');
     need(key,403,'请求来源未通过 Cloudflare 验证');
@@ -189,7 +206,12 @@ async function api(req,env,url){
     need(/^bqx_[a-f0-9]{64}$/.test(token),400,'一码通凭证格式无效');
     const receipt=await db.prepare('SELECT event_id,registration_id,expires_at FROM activity_guest_access WHERE token_digest=? AND expires_at>?')
       .bind(await sha(token),epoch()).first();
-    need(receipt,403,'一码通凭证已失效或不存在');
+    if(!receipt){
+      const expired=await db.prepare('SELECT old_registration_id FROM activity_revoked_receipts WHERE token_digest=?')
+        .bind(await sha(token)).first();
+      need(!expired,410,'原一码通已作废：该申请已重新填报，请使用全新二维码');
+      err(403,'一码通凭证已失效或不存在');
+    }
     return json({ok:true,eventId:receipt.event_id},200,{
       'Set-Cookie':guestSetCookie(receipt.event_id,token,receipt.expires_at)
     });
@@ -217,11 +239,11 @@ async function api(req,env,url){
   }
   if(method==='GET'&&p==='/api/events'){
     const rows=await db.prepare('SELECT id,title,guidelines,lat,lon,radius_m,starts_at,ends_at,require_photo,COALESCE(join_starts_at,created_at) AS join_starts_at,COALESCE(join_ends_at,ends_at) AS join_ends_at FROM activity_events ORDER BY starts_at DESC LIMIT 100').all();
-    return json({events:rows.results});
+    return json({events:rows.results},200,{'Cache-Control':'public, max-age=15, stale-while-revalidate=20'});
   }
   if(method==='GET'&&p==='/api/admin/events'){
     need(user?.role==='organizer',403,'工作人员需先登录');
-    const events=await db.prepare('SELECT e.id,e.title,e.starts_at,e.ends_at FROM activity_events e LEFT JOIN activity_staff s ON s.event_id=e.id AND s.user_id=? WHERE e.owner_id=? OR s.user_id IS NOT NULL ORDER BY e.starts_at DESC LIMIT 100').bind(user.id,user.id).all();
+    const events=await db.prepare('SELECT e.id,e.title,e.starts_at,e.ends_at FROM activity_events e WHERE e.owner_id=? OR EXISTS (SELECT 1 FROM activity_staff_grants s WHERE s.event_id=e.id AND s.user_id=?) ORDER BY e.starts_at DESC LIMIT 100').bind(user.id,user.id).all();
     return json({events:events.results});
   }
   if(method==='POST'&&p==='/api/events'){
@@ -285,7 +307,13 @@ async function api(req,env,url){
     if(method==='GET'&&action===''){
       const reg=await guestFor(db,req,eid);
       const attendance=reg?await db.prepare('SELECT attended_at,channel FROM activity_attendance WHERE registration_id=?').bind(reg.id).first():null;
-      return json({event,registration:reg?{id:reg.id,state:reg.state,reviewReason:reg.review_reason,
+      const oldToken=!reg?guestCookie(req,eid):null;
+      const revoked=oldToken?await db.prepare('SELECT 1 AS revoked FROM activity_revoked_receipts WHERE token_digest=? AND event_id=?')
+        .bind(await sha(oldToken),eid).first():null;
+      const reissued=reg?await db.prepare('SELECT 1 AS reissued FROM activity_revoked_receipts WHERE new_registration_id=? AND event_id=?')
+        .bind(reg.id,eid).first():null;
+      return json({event,receiptRevoked:Boolean(revoked),reissued:Boolean(reissued),
+        registration:reg?{id:reg.id,state:reg.state,reviewReason:reg.review_reason,
         aiConsent:Boolean(reg.ai_consent),attendance}:null});
     }
     if(method==='POST'&&action==='join'){
@@ -311,6 +339,43 @@ async function api(req,env,url){
       ]);
       return json({id:registrationId,state:'pending',receiptStored:true,expiresAt},201,{'Set-Cookie':guestSetCookie(eid,token,expiresAt)});
     }
+    if(method==='POST'&&action==='reapply'){
+      const old=await guestFor(db,req,eid);
+      need(old,403,'重新填报需要原报名的有效一码通；请先导入原截图');
+      need(old.state==='rejected',409,'只有审核驳回后才能重新填报');
+      need(epoch()<=event.ends_at,409,'活动已结束，无法重新填报');
+      const attendance=await db.prepare('SELECT channel FROM activity_attendance WHERE registration_id=?')
+        .bind(old.id).first();
+      need(!attendance,409,'已有到场记录，请联系工作人员处理，不能直接换码');
+      const x=await body(req),name=str(x.displayName,40),number=str(x.studentNumber,32);
+      need(x.privacyAcknowledged===true,400,'须同意虚构数据测试声明');
+      need(/^TEST-[A-Za-z0-9-]{1,27}$/.test(number)&&name.startsWith('测试'),403,
+        '演练站只接受 TEST- 虚构学号与“测试”开头的姓名');
+      need(x.aiConsent!==true,400,'测试站不向第三方 AI 发送材料');
+      const oldToken=guestCookie(req,eid),oldDigest=await sha(oldToken);
+      const newToken='bqx_'+hex(bytes(32)),newDigest=await sha(newToken);
+      const now=epoch(),newUser=uuid(),newRegistration=uuid();
+      const expiresAt=event.ends_at+GUEST_AFTER_EVENT_MS;
+      // All writes are ONE transaction. The revoked digest is unique, so two
+      // racing reapplications cannot both reissue. Old materials remain only
+      // as audited history; no materials or check-in carry over to new entry.
+      await db.batch([
+        db.prepare('INSERT INTO activity_users(id,username,password_salt,password_digest,password_iterations,role,student_number,display_name,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+          .bind(newUser,'guest_'+newUser.replaceAll('-',''),hex(bytes(16)),hex(bytes(32)),STAGE_PBKDF2_ITERATIONS,'student',null,name,now),
+        db.prepare('INSERT INTO activity_registrations(id,event_id,user_id,note,created_at,updated_at,ai_consent) VALUES (?,?,?,?,?,?,0)')
+          .bind(newRegistration,eid,newUser,String(x.note||'').slice(0,500),now,now),
+        db.prepare('INSERT INTO activity_guest_access(registration_id,event_id,student_number,token_digest,expires_at,created_at) VALUES (?,?,?,?,?,?)')
+          .bind(newRegistration,eid,number,newDigest,expiresAt,now),
+        db.prepare('INSERT INTO activity_revoked_receipts(token_digest,event_id,old_registration_id,new_registration_id,revoked_at) VALUES (?,?,?,?,?)')
+          .bind(oldDigest,eid,old.id,newRegistration,now),
+        db.prepare('DELETE FROM activity_guest_access WHERE registration_id=? AND token_digest=?')
+          .bind(old.id,oldDigest),
+        db.prepare('INSERT INTO activity_audit(id,event_id,actor_id,action,subject_id,occurred_at) VALUES (?,?,?,?,?,?)')
+          .bind(uuid(),eid,null,'registration.reapplied',old.id,now)
+      ]);
+      return json({id:newRegistration,state:'pending',oldReceiptRevoked:true,newPassIssued:true,
+        mustSaveScreenshot:true,expiresAt},201,{'Set-Cookie':guestSetCookie(eid,newToken,expiresAt)});
+    }
     if(method==='POST'&&action==='consent'){
       const r=await guestFor(db,req,eid);need(r,403,'本机没有此活动的有效报名凭证');
       const x=await body(req);need(typeof x.aiConsent==='boolean',400,'需要明确选择');
@@ -319,24 +384,35 @@ async function api(req,env,url){
       return json({ok:true});
     }
     if(method==='POST'&&action==='upload'){
+      const uploadTiming=env.ALLOW_TEST_IMAGE_UPLOAD==='true'?{start:Date.now()}:null;
+      if(env.ALLOW_TEST_IMAGE_UPLOAD==='true'){
+        need(typeof env.UPLOAD_TEST_KEY==='string'&&env.UPLOAD_TEST_KEY.length>=32&&
+          req.headers.get('X-Bombax-Upload-Test-Key')===env.UPLOAD_TEST_KEY,
+          403,'缺少有效的隔离上传测试访问码');
+      }
       const r=await guestFor(db,req,eid);
       need(r,403,'本机没有此活动的有效报名凭证');need(epoch()<event.ends_at,409,'活动结束');
+      need(r.state!=='rejected',409,'原报名已驳回；请重新填报，生成新二维码后重新提交材料');
       const checkin=await db.prepare('SELECT channel FROM activity_attendance WHERE registration_id=?').bind(r.id).first();
       need(!checkin||checkin.channel==='manual',409,'扫码已核销，不得补传材料');
       const files=await db.prepare('SELECT COUNT(*) AS total FROM activity_files WHERE registration_id=?').bind(r.id).first();
       need(files.total<3,409,'材料份数达到上限');
+      const beforeBody=uploadTiming?Date.now():0;
       const mime=req.headers.get('Content-Type');
       need(['image/png','image/jpeg'].includes(mime),415,'仅允许 PNG/JPEG');
       need(Number(req.headers.get('Content-Length'))<=MAX_IMAGE,413,'图片过大');
       const array=await readBounded(req,MAX_IMAGE);
       need(array.byteLength>=16&&array.byteLength<=MAX_IMAGE,413,'材料过大或无效');
       need(mime==='image/png'?pngValid(array):jpegValid(array),415,'图片格式和内容不匹配');
-      if(env.SYNTHETIC_ONLY==='true'){
+      if(env.SYNTHETIC_ONLY==='true'&&env.ALLOW_TEST_IMAGE_UPLOAD!=='true'){
         const digest=hex(new Uint8Array(await crypto.subtle.digest('SHA-256',array)));
         need(mime==='image/png'&&digest===env.SYNTHETIC_IMAGE_SHA256,403,'演练站只允许上传内置模拟截图；不得上传真实个人资料');
       }
+      const beforeR2=uploadTiming?Date.now():0;
       const id=uuid(),key='evidence/'+eid+'/'+r.id+'/'+id;
       await env.MATERIALS.put(key,array,{httpMetadata:{contentType:mime}});
+      const afterR2=uploadTiming?Date.now():0;
+      let afterD1=afterR2;
       try{
         await db.batch([
           db.prepare('INSERT INTO activity_files(id,registration_id,object_key,mime,length,added_at) VALUES (?,?,?,?,?,?)')
@@ -344,8 +420,13 @@ async function api(req,env,url){
           db.prepare("UPDATE activity_registrations SET state='pending',review_reason='',reviewed_by=NULL,reviewed_at=NULL,updated_at=? WHERE id=?").bind(epoch(),r.id),
           db.prepare('DELETE FROM activity_tickets WHERE registration_id=?').bind(r.id)
         ]);
+        if(uploadTiming)afterD1=Date.now();
       }catch(e){await env.MATERIALS.delete(key);throw e;}
-      return json({id,mime,bytes:array.byteLength},201);
+      const responseHeaders=uploadTiming?{'Server-Timing':
+        'preflight;dur='+(beforeBody-uploadTiming.start)+', body-and-validate;dur='+(beforeR2-beforeBody)+
+        ', r2-put;dur='+(afterR2-beforeR2)+', d1-commit;dur='+(afterD1-afterR2)+
+        ', worker-total;dur='+(afterD1-uploadTiming.start)}:{};
+      return json({id,mime,bytes:array.byteLength},201,responseHeaders);
     }
     if(method==='GET'&&action==='materials'){
       const rid=url.searchParams.get('registrationId');
@@ -375,21 +456,80 @@ async function api(req,env,url){
     if(method==='POST'&&action==='ticket'){
       err(410,'无需现场生成新码；请使用报名时保存的一码通二维码');
     }
+    if(method==='GET'&&action==='staff-roles'){
+      await access(db,user,eid,['owner']);
+      const users=await db.prepare("SELECT id,username,display_name FROM activity_users WHERE role='organizer' ORDER BY username LIMIT 100").all();
+      const grants=await db.prepare('SELECT user_id,duty FROM activity_staff_grants WHERE event_id=? ORDER BY user_id,duty')
+        .bind(eid).all();
+      return json({ownerId:event.owner_id,accounts:users.results.map(a=>({
+        ...a,owner:a.id===event.owner_id,
+        duties:grants.results.filter(g=>g.user_id===a.id).map(g=>g.duty)
+      }))});
+    }
+    if(method==='POST'&&action==='staff-roles'){
+      await access(db,user,eid,['owner']);
+      const x=await body(req,32768),list=x.assignments;
+      need(Array.isArray(list)&&list.length>0&&list.length<=100,400,'每次可更新1至100名工作人员');
+      const unique=new Set(),allowed=['reviewer','scanner','manual'];
+      for(const item of list){
+        need(item&&typeof item.userId==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(item.userId)&&
+          !unique.has(item.userId),400,'工作人员ID无效或重复');
+        need(Array.isArray(item.duties)&&item.duties.length<=3&&
+          item.duties.every(d=>allowed.includes(d))&&new Set(item.duties).size===item.duties.length,
+          400,'不允许的岗位组合');
+        need(item.userId!==event.owner_id,403,'不能取消或修改活动负责人权限');
+        unique.add(item.userId);
+      }
+      const known=await db.prepare("SELECT id FROM activity_users WHERE role='organizer' AND id IN ("+
+        list.map(()=>'?').join(',')+')').bind(...list.map(x=>x.userId)).all();
+      need(known.results.length===list.length,404,'工作人员账号不存在');
+      const changedAt=epoch(),tasks=[];
+      for(const item of list){
+        tasks.push(db.prepare('DELETE FROM activity_staff_grants WHERE event_id=? AND user_id=?')
+          .bind(eid,item.userId));
+        // Single-duty legacy compatibility mirror must not retain revoked
+        // rights. The new grants table is the ONLY source of authorization.
+        tasks.push(db.prepare('DELETE FROM activity_staff WHERE event_id=? AND user_id=?')
+          .bind(eid,item.userId));
+        for(const duty of item.duties)tasks.push(db.prepare(
+          'INSERT INTO activity_staff_grants(event_id,user_id,duty,updated_at,granted_by) VALUES (?,?,?,?,?)'
+        ).bind(eid,item.userId,duty,changedAt,user.id));
+        if(item.duties.length)tasks.push(db.prepare(
+          'INSERT INTO activity_staff(event_id,user_id,duty) VALUES (?,?,?)'
+        ).bind(eid,item.userId,item.duties[0]));
+        tasks.push(db.prepare('INSERT INTO activity_audit(id,event_id,actor_id,action,subject_id,occurred_at) VALUES (?,?,?,?,?,?)')
+          .bind(uuid(),eid,user.id,'staff.roles.updated',item.userId,changedAt));
+      }
+      await db.batch(tasks);
+      return json({ok:true,updated:list.length});
+    }
     if(method==='POST'&&action==='staff'){
       await access(db,user,eid,['owner']);
       const x=await body(req),duty=x.duty;
       need(['reviewer','scanner','manual'].includes(duty),400,'岗位无效');
-      const target=await db.prepare("SELECT id FROM activity_users WHERE username=? AND role='organizer'").bind(str(x.username,32)).first();
+      const target=await db.prepare("SELECT id FROM activity_users WHERE username=? AND role='organizer'")
+        .bind(str(x.username,32)).first();
       need(target,404,'找不到工作人员账号');
-      await db.prepare('INSERT INTO activity_staff(event_id,user_id,duty) VALUES (?,?,?) ON CONFLICT(event_id,user_id) DO UPDATE SET duty=excluded.duty').bind(eid,target.id,duty).run();
+      need(target.id!==event.owner_id,403,'负责人权限不能被替换');
+      await db.batch([
+        db.prepare('DELETE FROM activity_staff_grants WHERE event_id=? AND user_id=?').bind(eid,target.id),
+        db.prepare('INSERT INTO activity_staff_grants(event_id,user_id,duty,updated_at,granted_by) VALUES (?,?,?,?,?)')
+          .bind(eid,target.id,duty,epoch(),user.id),
+        db.prepare('INSERT INTO activity_staff(event_id,user_id,duty) VALUES (?,?,?) ON CONFLICT(event_id,user_id) DO UPDATE SET duty=excluded.duty')
+          .bind(eid,target.id,duty)
+      ]);
       await audit(db,eid,user.id,'staff.updated',target.id);return json({ok:true});
     }
     if(method==='GET'&&action==='queue'){
       const a=await access(db,user,eid);
+      const selected=url.searchParams.get('duty')||a.duty;
+      need(selected==='owner'&&a.duty==='owner'||
+        ['reviewer','scanner','manual'].includes(selected)&&
+        (a.duty==='owner'||a.duties.includes(selected)),403,'不是所选岗位的工作人员');
       const rows=await db.prepare("SELECT r.id,r.state,r.review_reason,r.updated_at,r.note,u.display_name,COALESCE(g.student_number,u.student_number) AS student_number,t.channel,t.attended_at,(SELECT COUNT(*) FROM activity_files f WHERE f.registration_id=r.id) material_count FROM activity_registrations r JOIN activity_users u ON u.id=r.user_id LEFT JOIN activity_guest_access g ON g.registration_id=r.id LEFT JOIN activity_attendance t ON t.registration_id=r.id WHERE r.event_id=? ORDER BY CASE WHEN r.state='pending' AND t.channel='manual' THEN 0 WHEN r.state='pending' THEN 1 ELSE 2 END,r.updated_at DESC LIMIT 500").bind(eid).all();
-      return json({duty:a.duty,registrations:rows.results.map(r=>{
-        if(a.duty==='scanner')return {id:r.id,state:r.state,attendedAt:r.attended_at};
-        if(a.duty==='manual')return {id:r.id,displayName:r.display_name,studentNumber:r.student_number,attendedAt:r.attended_at,state:r.state};
+      return json({duty:selected,duties:a.duties,registrations:rows.results.map(r=>{
+        if(selected==='scanner')return {id:r.id,state:r.state,attendedAt:r.attended_at};
+        if(selected==='manual')return {id:r.id,displayName:r.display_name,studentNumber:r.student_number,attendedAt:r.attended_at,state:r.state};
         return r;
       })});
     }

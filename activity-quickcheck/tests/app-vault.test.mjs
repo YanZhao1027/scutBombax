@@ -74,7 +74,7 @@ test('Android same-page #event navigation triggers server revalidation; other ha
       assert.equal(name,'hashchange');handler=fn;
     }},
     location:{hash:''},
-    safe:fn=>calls.push(fn),
+    launchStart:()=>calls.push('revalidate'),
     start:()=>{}
   };
   vm.runInNewContext(snippet[0],ctx);

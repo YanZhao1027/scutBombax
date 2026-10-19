@@ -8,3 +8,5 @@ var/
 cloudflare-live/public/zxing.js
 wrangler.stage.jsonc
 wrangler.local.jsonc
+
+wrangler.upload-test.jsonc

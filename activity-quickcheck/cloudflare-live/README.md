@@ -26,6 +26,23 @@
 - **强制提醒截图独立备份**：按用户习惯，把“清除应用数据缓存”明确视为系统设置里的「清除应用数据／清除存储」（含本机数据及缓存），**会清除本机加密票夹和 Cookie**；卸载或换机亦然。仅删除临时缓存与清除全部应用数据是不同操作，但绝不能把本机记录当作唯一备份。换机后需用原截图由服务器查验一码通。截图本身可能被复制，工作人员必须现场核对身份。
 - 只在 \`SYNTHETIC_ONLY=true\` 的隔离测试站演练，本阶段**没有**任何学校或花工木棉学生用户系统，也没有启用真实学生数据、挂失/重签和跨平台同步。
 
+## 截图上传与本机压缩（非 synthetic-only 客户端路径）
+
+- 选择 PNG/JPEG 后，先使用浏览器或 Android WebView 自带的 `createImageBitmap` / `Image`、Canvas 与 JPEG 编码器在本机处理，再把 JPEG 以同源 HTTPS 上传；不引入额外的 JavaScript 图片解码器或压缩依赖，也不先上传原图。
+- JPEG 编码质量为 75%；原图最多 12 MB、解码后最多 1200 万像素，输出长边最多 3200 px、最多 800 万像素，压缩文件不超过 3 MB。处理后关闭 ImageBitmap 并清空 Canvas，避免长时间占用图片缓冲区。
+- Canvas 重编码会去掉原图 EXIF 元数据。对超大图或压缩后仍超过 3 MB 的截图，提示用户先在手机相册中裁剪，不会绕过压缩直接上传大文件。
+- **隔离 Stage 仍保持 synthetic-only：** 只能上传内置 `demo-proof.png`，后端继续按 SHA-256 拒绝真实截图。此客户端压缩路径不等于批准开放真实学生资料；正式开放前仍须完成隐私告知、保留/删除流程、身份与授权边界及人工验收。
+
+## 独立真实图片上传测试环境（2026-10-19）
+
+- 上传测试站：`https://activity-upload-test.10273055.xyz/`。它使用单独的 `scut-bombax-activity-upload-test` D1 和 `scut-bombax-activity-upload-test-private` 私有 R2，不复用活动 Stage、正式数据库或 audition 数据。
+- `SYNTHETIC_ONLY=true` 仍然保持开启：报名姓名必须以“测试”开头，学号必须以 `TEST-` 开头，AI 处理关闭。只有明确设置 `ALLOW_TEST_IMAGE_UPLOAD=true` 才允许测试图片不受内置 PNG SHA-256 限制；每次图片上传还必须携带独立 `UPLOAD_TEST_KEY` 请求头。缺少密钥会返回 403。
+- `UPLOAD_TEST_KEY` 至少 32 字节，仅通过 Wrangler Secret 配置；不能写入 vars、前端代码、Git 或日志。手机上传页会要求输入一次性测试访问码，访问码只留在当前页面内存，不写入 localStorage。
+- 上传的真实截图会进入独立私有 R2，D1 只保存文件类型、长度和对象键等元数据。仅上传自己有权提交的图片；如截图包含其他人的头像、昵称或评论，应先裁剪/遮挡。测试完成后按测试活动 ID 清理对应对象与 D1 记录。
+- 普通 `wrangler.stage.jsonc` 不设置 `ALLOW_TEST_IMAGE_UPLOAD`，Stage 继续只接受内置 `demo-proof.png` 的固定 SHA-256；不要把上传测试配置用于正式生产。
+- 本地压力脚本：`node scripts/upload-load-test.mjs`，支持 `BOMBAX_LOAD_COUNT`、`BOMBAX_LOAD_CONCURRENCY`、`BOMBAX_LOAD_IMAGE` 和 `BOMBAX_LOAD_REQUEST_TIMEOUT_MS`。它会创建一个带“测试上传压测”前缀的虚构活动及 TEST- 报名，实际向隔离 R2 上传本地 JPEG，并在上传期间持续读取活动目录测量是否卡顿；执行后应清理脚本输出的 `cleanupEventId`。
+- 模板配置为 `wrangler.upload-test.example.jsonc`；真实账号的 `wrangler.upload-test.jsonc` 与 `UPLOAD_TEST_KEY` Secret 只保存在 Ubuntu 本机。
+
 ## 已编写的后端
 
 - D1：工作人员独立账户和 12 小时 Session、活动/岗位分工、学生一码通报名与摘要校验、审核/审计、唯一签到和人工到场。原短时码表作为历史兼容保留。
