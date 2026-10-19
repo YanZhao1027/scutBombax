@@ -465,6 +465,9 @@ test('rejected guest can reapply with a brand-new QR, while old bearer is irreve
   const oldPage=await(await f.api(base,{cookie:oldCookie})).json();
   assert.equal(oldPage.registration,null);
   assert.equal(oldPage.receiptRevoked,true);
+  const newPage=await(await f.api(base,{cookie:nextCookie})).json();
+  assert.equal(newPage.registration.id,result.id);
+  assert.equal(newPage.reissued,true,'new receipt must permanently show old pass was revoked');
   assert.equal((await f.api(base+'/upload',{method:'POST',cookie:oldCookie,raw:png})).status,403);
   assert.equal((await f.api(base+'/reapply',{method:'POST',cookie:oldCookie,data:details})).status,403);
   const restored=await f.api('/api/pass/restore',{method:'POST',data:{token:nextToken}});

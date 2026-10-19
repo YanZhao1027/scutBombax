@@ -299,7 +299,10 @@ async function api(req,env,url){
       const oldToken=!reg?guestCookie(req,eid):null;
       const revoked=oldToken?await db.prepare('SELECT 1 AS revoked FROM activity_revoked_receipts WHERE token_digest=? AND event_id=?')
         .bind(await sha(oldToken),eid).first():null;
-      return json({event,receiptRevoked:Boolean(revoked),registration:reg?{id:reg.id,state:reg.state,reviewReason:reg.review_reason,
+      const reissued=reg?await db.prepare('SELECT 1 AS reissued FROM activity_revoked_receipts WHERE new_registration_id=? AND event_id=?')
+        .bind(reg.id,eid).first():null;
+      return json({event,receiptRevoked:Boolean(revoked),reissued:Boolean(reissued),
+        registration:reg?{id:reg.id,state:reg.state,reviewReason:reg.review_reason,
         aiConsent:Boolean(reg.ai_consent),attendance}:null});
     }
     if(method==='POST'&&action==='join'){

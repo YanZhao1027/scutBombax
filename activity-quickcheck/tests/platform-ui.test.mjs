@@ -153,4 +153,7 @@ test('rejected student reapply renders without a temporal dead zone for attendan
   assert.match(student,/oldReceiptRevoked/);
   assert.match(student,/newPassIssued/);
   assert.match(student,/报名已驳回/);
+  assert.match(student,/if\(snapshot\.reissued\)/);
+  assert.match(student,/旧二维码已永久作废/);
+  assert.match(student,/receipt-rejected-banner/);
 });

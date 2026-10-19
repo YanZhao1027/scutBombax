@@ -409,9 +409,10 @@ async function studentView(event,root){
   root.append(box);
   if(!reg){
     if(snapshot.receiptRevoked){
-      box.append(el('h3',{text:'原二维码已经作废'}),
+      box.append(el('div',{class:'receipt-rejected-banner',role:'alert'},
+        el('h3',{text:'原二维码已永久作废'}),
         text('这张二维码对应的报名已被驳回并重新提交。旧二维码不可用于查询或签到。请导入重新填报后保存的新二维码截图。'),
-        el('a',{href:'/my',text:'导入新的有效一码通截图'}));
+        el('a',{href:'/my',text:'导入新的有效一码通截图'})));
       return;
     }
     const privacy=el('input',{type:'checkbox',name:'privacyAcknowledged',value:'yes'});
@@ -433,6 +434,11 @@ async function studentView(event,root){
     return;
   }
   const attendance=reg.attendance;
+  if(snapshot.reissued){
+    box.append(el('div',{class:'receipt-rejected-banner',role:'status'},
+      el('h3',{text:'旧二维码已永久作废 · 当前是全新一码通'}),
+      text('你正在查看重新填报后的新凭证。此前保存的全部旧二维码截图均无效。请立即截图保存下方新二维码，之后只使用新码查状态和签到。')));
+  }
   if(reg.state==='rejected'&&!attendance){
     const privacy=el('input',{type:'checkbox',name:'privacyAcknowledged',value:'yes'});
     const rejoin=form([
