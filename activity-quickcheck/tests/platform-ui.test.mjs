@@ -141,3 +141,16 @@ test('campus read-only origin never accepts receipts or user data and binds loop
   assert.match(file,/activity-stage\.10273055\.xyz/);
   assert.match(file,/old|cache/);
 });
+
+test('rejected student reapply renders without a temporal dead zone for attendance',()=>{
+  const student=app.slice(app.indexOf('async function studentView(event,root){'),
+    app.indexOf('async function studentViewReload(',app.indexOf('async function studentView(event,root){')));
+  const declared=student.indexOf('const attendance=reg.attendance;');
+  const condition=student.indexOf("if(reg.state==='rejected'&&!attendance)");
+  assert.ok(declared>=0&&condition>declared,
+    'attendance must be read before rejected-state reapply controls use it');
+  assert.equal((student.match(/const attendance=reg.attendance;/g)||[]).length,1);
+  assert.match(student,/oldReceiptRevoked/);
+  assert.match(student,/newPassIssued/);
+  assert.match(student,/报名已驳回/);
+});

@@ -432,6 +432,7 @@ async function studentView(event,root){
     box.append(text('无需登录。演练环境仅接受 TEST- 虚构学号及“测试”开头的姓名；同一设备报名后可再次打开本活动查看状态。'),join);
     return;
   }
+  const attendance=reg.attendance;
   if(reg.state==='rejected'&&!attendance){
     const privacy=el('input',{type:'checkbox',name:'privacyAcknowledged',value:'yes'});
     const rejoin=form([
@@ -457,7 +458,6 @@ async function studentView(event,root){
       text('选择重新填报后将生成完全不同的一码通。旧二维码将永久作废，旧材料不自动继承。'),
       rejoin));
   }
-  const attendance=reg.attendance;
   box.append(el('div',{class:'row'},
     el('span',{class:'tag',text:reg.state==='approved'?'审核通过 · 可参加现场签到':reg.state==='pending'?'审核中 · 暂不可签到':'需补充材料 · 暂不可签到'}),
     el('span',{class:'tag '+(attendance?'green':''),text:attendance?'已签到（'+(attendance.channel==='manual'?'人工通道':'扫码')+'）':'尚未签到'})));
