@@ -61,12 +61,13 @@ function makeFixture(){
     );
   }
   addAccount('demo_owner');addAccount('demo_reviewer');addAccount('demo_scanner');addAccount('demo_legacy_student','student');
-  async function api(path,{method='GET',data,raw,cookie='',originHeader=true,limit=true,contentType='image/png'}={}){
+  async function api(path,{method='GET',data,raw,cookie='',originHeader=true,limit=true,contentType='image/png',uploadTestKey}={}){
     const headers={'CF-Connecting-IP':'127.0.0.1'};
     if(cookie)headers.Cookie=cookie;
     if(method!=='GET'&&originHeader){headers.Origin=origin;headers['X-Bombax-Action']='1';}
     if(data!==undefined)headers['Content-Type']='application/json';
     if(raw!==undefined)headers['Content-Type']=contentType;
+    if(uploadTestKey!==undefined)headers['X-Bombax-Upload-Test-Key']=uploadTestKey;
     const request=new Request(origin+path,{method,headers,body:data===undefined?raw:JSON.stringify(data)});
     return backend.fetch(request,limit?env:{...env,AUTH_RATE_LIMIT:undefined});
   }
@@ -260,6 +261,42 @@ test('separate guests in the same activity cannot access each other or enable th
   assert.equal((await f.api('/api/pass/restore',{method:'POST',data:{token:pass}})).status,403);
   assert.equal((await f.api(route+'/redeem',{method:'POST',data:{token:pass},cookie:owner})).status,409);
   assert.equal((await f.api(route+'/upload',{method:'POST',cookie:first.cookie,raw:png})).status,403);
+});
+
+test('synthetic Stage rejects real screenshots by default; isolated upload-test flag allows JPEG while keeping synthetic records',async t=>{
+  const f=makeFixture();t.after(()=>f.close());
+  const owner=await f.signIn('demo_owner'),eid=await f.createEvent(owner,'虚构图片上传隔离测试');
+  const route='/api/events/'+eid;
+  const joined=await f.api(route+'/join',{method:'POST',data:{
+    displayName:'测试图片上传',studentNumber:'TEST-UPLOAD-GATE',
+    privacyAcknowledged:true,aiConsent:false
+  }});
+  assert.equal(joined.status,201);
+  const cookie=joined.headers.get('set-cookie').split(';')[0];
+  const jpeg=Buffer.concat([Buffer.from([0xff,0xd8]),Buffer.alloc(64,0x5a),Buffer.from([0xff,0xd9])]);
+  const defaultHealth=await f.api('/api/health');
+  assert.equal((await defaultHealth.json()).allowTestImageUpload,false);
+  assert.equal((await f.api(route+'/upload',{method:'POST',cookie,raw:jpeg,contentType:'image/jpeg'})).status,403,
+    'ordinary synthetic Stage must continue to reject arbitrary images');
+  f.env.ALLOW_TEST_IMAGE_UPLOAD='true';
+  f.env.UPLOAD_TEST_KEY='test-only-upload-key-0123456789abcdef';
+  const deniedNoKey=await f.api(route+'/upload',{method:'POST',cookie,raw:jpeg,contentType:'image/jpeg'});
+  assert.equal(deniedNoKey.status,403,'the upload-test opt-in must still require a private access key');
+  const testHealth=await f.api('/api/health');
+  const status=await testHealth.json();
+  assert.equal(status.ready,true);assert.equal(status.syntheticOnly,true);
+  assert.equal(status.allowTestImageUpload,true,'upload permission must be explicitly reported to the client');
+  const accepted=await f.api(route+'/upload',{method:'POST',cookie,raw:jpeg,contentType:'image/jpeg',uploadTestKey:f.env.UPLOAD_TEST_KEY});
+  assert.equal(accepted.status,201,await accepted.clone().text());
+  assert.match(accepted.headers.get('Server-Timing')||'',/r2-put;dur=[0-9.]+/,'isolated upload test exposes coarse server timings without image or identity data');
+  const uploaded=await accepted.json();
+  assert.equal(uploaded.mime,'image/jpeg');assert.equal(uploaded.bytes,jpeg.byteLength);
+  const listing=await f.api(route+'/materials',{cookie});
+  assert.equal(listing.status,200);
+  const files=(await listing.json()).materials;
+  assert.equal(files.length,1);assert.equal(files[0].mime,'image/jpeg');
+  assert.equal(files[0].length,jpeg.byteLength);
+  assert.equal([...f.files.keys()].filter(key=>key.startsWith('evidence/')).length,1,'the JPEG must reach the isolated private-object adapter');
 });
 
 test('one-code remains unchanged through manual arrival, late evidence and approval',async t=>{

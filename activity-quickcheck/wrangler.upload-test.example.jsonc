@@ -1,0 +1,33 @@
+{
+  "name": "scut-bombax-activity-upload-test",
+  "main": "./cloudflare-live/worker.mjs",
+  "compatibility_date": "2026-10-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "preview_urls": false,
+  "routes": [{"pattern": "activity-upload-test.10273055.xyz", "custom_domain": true}],
+  "vars": {
+    "PUBLIC_ORIGIN": "https://activity-upload-test.10273055.xyz",
+    "ENABLE_LIVE": "true",
+    "SYNTHETIC_ONLY": "true",
+    "ALLOW_TEST_IMAGE_UPLOAD": "true",
+    "SYNTHETIC_IMAGE_SHA256": "9e2fd9e3529f029eab940552a887d9154ed94799a8729596527288b82269cd08"
+  },
+  "assets": {
+    "directory": "./cloudflare-live/public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "scut-bombax-activity-upload-test",
+    "database_id": "REPLACE_WITH_ISOLATED_UPLOAD_TEST_D1_ID"
+  }],
+  "r2_buckets": [{
+    "binding": "MATERIALS",
+    "bucket_name": "scut-bombax-activity-upload-test-private"
+  }],
+  "ratelimits": [
+    {"name":"AUTH_RATE_LIMIT","namespace_id":"20261019","simple":{"limit":1000,"period":60}},
+    {"name":"AI_RATE_LIMIT","namespace_id":"20261020","simple":{"limit":5,"period":60}}
+  ]
+}

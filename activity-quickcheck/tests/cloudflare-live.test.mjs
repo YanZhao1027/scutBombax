@@ -67,6 +67,19 @@ function authFixture(iterations=100000){
   });
   return {env,req,user};
 }
+test('health exposes explicit isolated image-upload opt-in without disabling synthetic-only mode',async()=>{
+  const stage={...makeEnv(),ENABLE_LIVE:'true',SYNTHETIC_ONLY:'true'};
+  let res=await backend.fetch(new Request('https://activity-stage.10273055.xyz/api/health'),stage);
+  let data=await res.json();
+  assert.equal(data.ready,true);assert.equal(data.syntheticOnly,true);
+  assert.equal(data.allowTestImageUpload,false);
+  const isolated={...stage,ALLOW_TEST_IMAGE_UPLOAD:'true'};
+  res=await backend.fetch(new Request('https://activity-stage.10273055.xyz/api/health'),isolated);
+  data=await res.json();
+  assert.equal(data.ready,true);assert.equal(data.syntheticOnly,true);
+  assert.equal(data.allowTestImageUpload,true);
+});
+
 test('Synthetic 100k account successfully signs in and receives HttpOnly cookie',async()=>{
   const {env,req,user}=authFixture();
   const res=await backend.fetch(req,env);

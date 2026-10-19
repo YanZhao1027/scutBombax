@@ -73,21 +73,32 @@ function mutation(req,env){
 }
 async function readBounded(req,max){
   const declared=req.headers.get('Content-Length');
-  if(declared!==null)need(/^\d+$/.test(declared)&&Number(declared)<=max,413,'请求过大');
+  let expected=null;
+  if(declared!==null){
+    need(/^\d+$/.test(declared)&&Number(declared)<=max,413,'请求过大');
+    expected=Number(declared);
+  }
   if(!req.body)return new Uint8Array(0);
-  const reader=req.body.getReader(),chunks=[];let n=0;
+  const reader=req.body.getReader();
+  let result=expected===null?new Uint8Array(Math.min(max,65536)):new Uint8Array(expected);
+  let n=0;
   try{
     while(true){
       const {done,value}=await reader.read();
       if(done)break;
-      n+=value.byteLength;
-      if(n>max){await reader.cancel();err(413,'请求过大');}
-      chunks.push(value);
+      const next=n+value.byteLength;
+      if(next>max||(expected!==null&&next>expected)){
+        await reader.cancel();err(413,'请求过大或长度不匹配');
+      }
+      if(next>result.byteLength){
+        const capacity=Math.min(max,Math.max(next,Math.max(65536,result.byteLength*2)));
+        const grown=new Uint8Array(capacity);grown.set(result.subarray(0,n));result=grown;
+      }
+      result.set(value,n);n=next;
     }
   }finally{reader.releaseLock();}
-  const result=new Uint8Array(n);let at=0;
-  for(const chunk of chunks){result.set(chunk,at);at+=chunk.byteLength;}
-  return result;
+  if(expected!==null)need(n===expected,400,'请求长度与声明不符');
+  return n===result.byteLength?result:result.slice(0,n);
 }
 async function body(req,max=32768){
   const buf=await readBounded(req,max);
@@ -158,7 +169,7 @@ async function api(req,env,url){
   const db=env.DB,method=req.method,p=url.pathname;
   const syntheticOnly=env.SYNTHETIC_ONLY==='true';
   const ready=env.ENABLE_LIVE==='true'&&syntheticOnly;
-  if(method==='GET'&&p==='/api/health')return json({ok:true,product:'Activity QuickCheck Cloudflare',ready,syntheticOnly});
+  if(method==='GET'&&p==='/api/health')return json({ok:true,product:'Activity QuickCheck Cloudflare',ready,syntheticOnly,allowTestImageUpload:syntheticOnly&&env.ALLOW_TEST_IMAGE_UPLOAD==='true'});
   // Fail closed before any session/database lookup. This codebase has ONLY
   // self-declared, shared-password synthetic accounts: it is not a production identity provider.
   // ENABLE_LIVE is a staging traffic switch, NOT permission to process real student data.
@@ -373,6 +384,12 @@ async function api(req,env,url){
       return json({ok:true});
     }
     if(method==='POST'&&action==='upload'){
+      const uploadTiming=env.ALLOW_TEST_IMAGE_UPLOAD==='true'?{start:Date.now()}:null;
+      if(env.ALLOW_TEST_IMAGE_UPLOAD==='true'){
+        need(typeof env.UPLOAD_TEST_KEY==='string'&&env.UPLOAD_TEST_KEY.length>=32&&
+          req.headers.get('X-Bombax-Upload-Test-Key')===env.UPLOAD_TEST_KEY,
+          403,'缺少有效的隔离上传测试访问码');
+      }
       const r=await guestFor(db,req,eid);
       need(r,403,'本机没有此活动的有效报名凭证');need(epoch()<event.ends_at,409,'活动结束');
       need(r.state!=='rejected',409,'原报名已驳回；请重新填报，生成新二维码后重新提交材料');
@@ -380,18 +397,22 @@ async function api(req,env,url){
       need(!checkin||checkin.channel==='manual',409,'扫码已核销，不得补传材料');
       const files=await db.prepare('SELECT COUNT(*) AS total FROM activity_files WHERE registration_id=?').bind(r.id).first();
       need(files.total<3,409,'材料份数达到上限');
+      const beforeBody=uploadTiming?Date.now():0;
       const mime=req.headers.get('Content-Type');
       need(['image/png','image/jpeg'].includes(mime),415,'仅允许 PNG/JPEG');
       need(Number(req.headers.get('Content-Length'))<=MAX_IMAGE,413,'图片过大');
       const array=await readBounded(req,MAX_IMAGE);
       need(array.byteLength>=16&&array.byteLength<=MAX_IMAGE,413,'材料过大或无效');
       need(mime==='image/png'?pngValid(array):jpegValid(array),415,'图片格式和内容不匹配');
-      if(env.SYNTHETIC_ONLY==='true'){
+      if(env.SYNTHETIC_ONLY==='true'&&env.ALLOW_TEST_IMAGE_UPLOAD!=='true'){
         const digest=hex(new Uint8Array(await crypto.subtle.digest('SHA-256',array)));
         need(mime==='image/png'&&digest===env.SYNTHETIC_IMAGE_SHA256,403,'演练站只允许上传内置模拟截图；不得上传真实个人资料');
       }
+      const beforeR2=uploadTiming?Date.now():0;
       const id=uuid(),key='evidence/'+eid+'/'+r.id+'/'+id;
       await env.MATERIALS.put(key,array,{httpMetadata:{contentType:mime}});
+      const afterR2=uploadTiming?Date.now():0;
+      let afterD1=afterR2;
       try{
         await db.batch([
           db.prepare('INSERT INTO activity_files(id,registration_id,object_key,mime,length,added_at) VALUES (?,?,?,?,?,?)')
@@ -399,8 +420,13 @@ async function api(req,env,url){
           db.prepare("UPDATE activity_registrations SET state='pending',review_reason='',reviewed_by=NULL,reviewed_at=NULL,updated_at=? WHERE id=?").bind(epoch(),r.id),
           db.prepare('DELETE FROM activity_tickets WHERE registration_id=?').bind(r.id)
         ]);
+        if(uploadTiming)afterD1=Date.now();
       }catch(e){await env.MATERIALS.delete(key);throw e;}
-      return json({id,mime,bytes:array.byteLength},201);
+      const responseHeaders=uploadTiming?{'Server-Timing':
+        'preflight;dur='+(beforeBody-uploadTiming.start)+', body-and-validate;dur='+(beforeR2-beforeBody)+
+        ', r2-put;dur='+(afterR2-beforeR2)+', d1-commit;dur='+(afterD1-afterR2)+
+        ', worker-total;dur='+(afterD1-uploadTiming.start)}:{};
+      return json({id,mime,bytes:array.byteLength},201,responseHeaders);
     }
     if(method==='GET'&&action==='materials'){
       const rid=url.searchParams.get('registrationId');

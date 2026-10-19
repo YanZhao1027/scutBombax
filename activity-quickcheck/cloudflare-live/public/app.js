@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const app={me:null,events:[],active:null,poll:null,scanner:null,scannerOverlay:null,scannerVideo:null,scannerEpoch:0,scannerHistory:false,scannerFullscreenEntered:false,scannerPreviousFocus:null,scannerFeedback:null,reviewDispose:null,staffDispose:null,qr:null,syntheticOnly:false};
+const app={me:null,events:[],active:null,poll:null,scanner:null,scannerOverlay:null,scannerVideo:null,scannerEpoch:0,scannerHistory:false,scannerFullscreenEntered:false,scannerPreviousFocus:null,scannerFeedback:null,reviewDispose:null,staffDispose:null,qr:null,syntheticOnly:false,allowTestImageUpload:false};
 function el(tag,props={},...children){
   const n=document.createElement(tag);
   for(const [k,v] of Object.entries(props)){
@@ -62,7 +62,7 @@ async function request(path,{method='GET',data,raw,headers={}}={}){
   if(raw!==undefined)options.body=raw;
   // Lost connections must fail visibly rather than leave "initializing"
   // forever. Do NOT automatically retry mutations (join/approval/redeem).
-  options.signal=AbortSignal.timeout(method==='GET'?12000:25000);
+  options.signal=AbortSignal.timeout(method==='GET'?12000:path.endsWith('/upload')?60000:25000);
   let response;
   try{response=await fetch(path,options);}
   catch(error){
@@ -134,6 +134,7 @@ async function start(){
     restorePromise
   ]);
   app.syntheticOnly=Boolean(ready.syntheticOnly);
+  app.allowTestImageUpload=Boolean(ready.allowTestImageUpload);
   if(!ready.ready){
     notice('当前只开放虚构数据测试，真实报名暂未开通。','error');
     $('account').replaceChildren();
@@ -482,7 +483,9 @@ async function studentView(event,root){
       label('虚构测试姓名（以“测试”开头）',inp('displayName')),
       label('虚构测试学号（TEST- 开头）',inp('studentNumber')),
       label('补充说明（可选）',el('textarea',{name:'note',maxlength:'500'})),
-      el('label',{class:'check'},privacy,'我确认仅使用虚构测试资料，理解报名会保存自填信息和内置模拟截图，仅授权工作人员可查看；本测试站尚不支持真实报名或学校实名认证。')
+      el('label',{class:'check'},privacy,app.allowTestImageUpload
+        ?'我确认报名姓名和学号仅为虚构测试资料；如上传截图，我有权提交该图片，并理解图片会存入独立上传测试存储供性能测试，测试结束后清理。请勿上传他人的私密信息。'
+        :'我确认仅使用虚构测试资料，理解报名会保存自填信息和内置模拟截图，仅授权工作人员可查看；本测试站尚不支持真实报名或学校实名认证。')
     ],'免登录提交报名',async v=>{
       if(!privacy.checked)throw new Error('请先确认虚构数据演练说明');
       await request('/api/events/'+event.id+'/join',{method:'POST',data:{
@@ -551,27 +554,38 @@ async function studentView(event,root){
     text('已上传 '+f.mime+' · '+Math.ceil(f.length/1024)+' KB')));
   if(reg.state!=='rejected'&&(!attendance||attendance.channel==='manual')){
     box.append(el('h3',{text:'证明截图上传'}),
-      text(app.syntheticOnly?'只允许使用本站内置的虚构图片。Worker 会校验文件 SHA-256；真实图片会被拒绝。':'最多三张 PNG/JPEG。手机会先在本机以 JPEG 质量 75% 压缩，原图上限 12 MB，上传文件上限 3 MB。'));
-    if(app.syntheticOnly)box.append(el('img',{class:'qr',src:'/demo-proof.png',alt:'系统内置、标注 TEST ONLY 的虚构点赞截图'}));
-    box.append(button('真正上传内置模拟截图至私有 R2',async()=>{
+      text(app.syntheticOnly&&!app.allowTestImageUpload
+        ?'只允许使用本站内置的虚构图片。Worker 会校验文件 SHA-256；真实图片会被拒绝。'
+        :app.allowTestImageUpload
+          ?'独立上传性能测试环境：最多三张 PNG/JPEG。请只上传你有权提交的截图；图片会存入独立私有测试存储，并在本轮测试结束后清理。'
+          :'最多三张 PNG/JPEG。手机会先在本机以 JPEG 质量 75% 压缩，原图上限 12 MB，上传文件上限 3 MB。'));
+    if(app.syntheticOnly&&!app.allowTestImageUpload)box.append(el('img',{class:'qr',src:'/demo-proof.png',alt:'系统内置、标注 TEST ONLY 的虚构点赞截图'}));
+    if(app.syntheticOnly&&!app.allowTestImageUpload)box.append(button('真正上传内置模拟截图至私有 R2',async()=>{
       const source=await fetch('/demo-proof.png',{credentials:'same-origin'});
       if(!source.ok)throw new Error('无法获取内置测试图片');
       const blob=await source.blob();
       await request('/api/events/'+event.id+'/upload',{method:'POST',raw:blob,headers:{'Content-Type':'image/png'}});
       notice('图片已上传到私有 R2，等待审核员处理。','success');await studentViewReload(event);
     },'secondary'));
-    if(!app.syntheticOnly){
+    if(!app.syntheticOnly||app.allowTestImageUpload){
       const fileInput=el('input',{type:'file',accept:'image/png,image/jpeg'});
+      const testKeyInput=app.allowTestImageUpload
+        ?el('input',{type:'password',autocomplete:'off',placeholder:'本轮上传测试访问码','aria-label':'本轮上传测试访问码'})
+        :null;
+      if(testKeyInput)box.append(label('隔离测试访问码（仅当前页面内存使用）',testKeyInput));
       let uploading=false;
       const uploadButton=button('本机压缩并上传截图（JPEG 75%）',async()=>{
         if(uploading)return;
         const f=fileInput.files?.[0];if(!f)throw new Error('请选择截图');
+        if(testKeyInput&&!testKeyInput.value.trim())throw new Error('请输入隔离上传测试访问码');
         uploading=true;fileInput.disabled=true;uploadButton.disabled=true;
+        if(testKeyInput)testKeyInput.disabled=true;
         try{
           notice('正在手机本机压缩截图；原图不会先上传或发送给第三方。');
           const compressed=await compressEvidenceImage(f);
           await request('/api/events/'+event.id+'/upload',{
-            method:'POST',raw:compressed.blob,headers:{'Content-Type':'image/jpeg'}
+            method:'POST',raw:compressed.blob,headers:{'Content-Type':'image/jpeg',
+              ...(testKeyInput?{'X-Bombax-Upload-Test-Key':testKeyInput.value.trim()}:{})}
           });
           await studentViewReload(event);
           notice('截图已压缩为 JPEG（质量 75%）并提交：'+
@@ -579,6 +593,7 @@ async function studentView(event,root){
             Math.ceil(compressed.compressedBytes/1024)+' KB。','success');
         }finally{
           uploading=false;fileInput.disabled=false;uploadButton.disabled=false;
+          if(testKeyInput)testKeyInput.disabled=false;
         }
       });
       box.append(fileInput,uploadButton);
