@@ -18,7 +18,12 @@ const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;')
 const fmt=t=>new Date(t).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',
   year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 async function fresh(force=false){
-  if(!force&&Date.now()-cache.at<20_000&&cache.ready)return cache;
+  // Return cached public cards immediately; refresh in the background. Never
+  // make a LAN homepage wait for the WAN on every 20-second expiration.
+  if(!force&&cache.events.length){
+    if(Date.now()-cache.at>=20_000&&!loading)void fresh(true).catch(()=>{});
+    return cache;
+  }
   if(loading)return loading;
   loading=(async()=>{
     try{
@@ -106,7 +111,7 @@ const server=http.createServer(async(req,res)=>{
   }
   try{
     const state=await fresh();
-    send(res,200,page(state),'text/html; charset=utf-8',{
+    send(res,state.ready?200:503,page({events:state.events,offline:!state.ready}),'text/html; charset=utf-8',{
       'Content-Security-Policy':"default-src 'none'; img-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'"
     });
   }catch{
