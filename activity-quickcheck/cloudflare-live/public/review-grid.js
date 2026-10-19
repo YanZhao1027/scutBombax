@@ -9,7 +9,7 @@
     return n;
   };
   function createSelection(ids=[]){
-    const selected=new Set(),approved=new Set();
+    const selected=new Set(),decisions=new Map();
     let last=-1;
     const exists=new Set(ids);
     function choose(index,checked,shift=false){
@@ -19,28 +19,33 @@
       for(let i=begin;i<=end;i++){
         const id=ids[i];
         if(checked)selected.add(id);
-        else {selected.delete(id);approved.delete(id);}
+        else {selected.delete(id);decisions.delete(id);}
       }
       last=index;
     }
     function all(value){
-      selected.clear();if(!value)approved.clear();
+      selected.clear();if(!value)decisions.clear();
       else ids.forEach(id=>selected.add(id));
       last=-1;
     }
-    function setApproval(id,value){
+    function setDecision(id,value){
       if(!exists.has(id))return;
-      if(value){selected.add(id);approved.add(id);}
-      else approved.delete(id);
+      if(value==='approved'||value==='rejected'){
+        selected.add(id);decisions.set(id,value);
+      }else decisions.delete(id);
     }
+    function setApproval(id,checked){setDecision(id,checked?'approved':null);}
+    function setRejection(id,checked){setDecision(id,checked?'rejected':null);}
     return Object.freeze({
-      choose,all,setApproval,
+      choose,all,setApproval,setRejection,setDecision,
       get selected(){return new Set(selected);},
-      get approved(){return new Set(approved);},
+      get approved(){return new Set([...decisions].filter(([,v])=>v==='approved').map(([id])=>id));},
+      get rejected(){return new Set([...decisions].filter(([,v])=>v==='rejected').map(([id])=>id));},
+      get unassigned(){return [...selected].filter(id=>!decisions.has(id)).length;},
       get length(){return selected.size;},
       decisions(reasonFor){
-        return ids.filter(id=>selected.has(id)).map(id=>({
-          registrationId:id,state:approved.has(id)?'approved':'rejected',
+        return ids.filter(id=>selected.has(id)&&decisions.has(id)).map(id=>({
+          registrationId:id,state:decisions.get(id),
           reason:String(reasonFor(id)||'').slice(0,300)
         }));
       }
@@ -50,14 +55,14 @@
     const pending=rows.filter(r=>r.state==='pending');
     const selectable=pending.map(r=>r.id);
     const selection=createSelection(selectable);
-    const reasonInputs=new Map(),selectorInputs=new Map(),approvedInputs=new Map();
+    const reasonInputs=new Map(),selectorInputs=new Map(),approvedInputs=new Map(),rejectedInputs=new Map();
     const materialCache=new Map(),ordered=rows.filter(r=>r.material_count>0);
     let paneIndex=-1,imageIndex=0,closed=false;
     const shell=node('div','review-workspace');
     const sheet=node('section','review-sheet');
     const title=node('div','review-toolbar');
     title.append(node('h3','', '报名材料审核总表'),
-      node('p','muted','点击图片在右侧预览；Shift+点击可连续多选。先选中待处理行，再勾选「通过」；选中但未勾通过的行将驳回。'));
+      node('p','muted','点击图片在右侧预览；Shift+点击可连续多选。每条选中记录必须在「通过」或「驳回」两列明确勾选其一；两列互斥，未选择的报名绝不会被驳回。'));
     const toolbar=node('div','review-actions');
     const allBox=node('input');allBox.type='checkbox';allBox.setAttribute('aria-label','全选待审');
     const selectLabel=node('label','check');selectLabel.append(allBox,node('span','','全选待审'));
@@ -72,7 +77,7 @@
     const frame=node('div','review-scroll');
     const table=node('table','review-table');
     const head=node('thead');const headRow=node('tr');
-    for(const t of ['选中','序号','报名者（自填）','自填学号','审核状态','材料','到场','报名说明','通过 ✓','驳回原因'])headRow.append(node('th','',t));
+    for(const t of ['选中','序号','报名者（自填）','自填学号','审核状态','材料','到场','报名说明','通过 ✓','驳回 ✕','驳回意见'])headRow.append(node('th','',t));
     head.append(headRow);table.append(head);
     const body=node('tbody');table.append(body);frame.append(table);
     sheet.append(title,frame);
@@ -90,14 +95,15 @@
     pane.hidden=true;
     shell.append(sheet,pane);target.append(shell);
     function update(){
-      const ids=selection.selected,approved=selection.approved;
-      count.textContent='本次待处理 '+ids.size+'，通过 '+[...ids].filter(id=>approved.has(id)).length+
-        '，驳回 '+[...ids].filter(id=>!approved.has(id)).length;
+      const ids=selection.selected,approved=selection.approved,rejected=selection.rejected;
+      count.textContent='本次选中 '+ids.size+'，通过 '+approved.size+
+        '，驳回 '+rejected.size+'，未做决定 '+selection.unassigned;
       allBox.checked=ids.size===selectable.length&&ids.size>0;
       allBox.indeterminate=ids.size>0&&ids.size<selectable.length;
       for(const [id,input] of selectorInputs)input.checked=ids.has(id);
       for(const [id,input] of approvedInputs)input.checked=approved.has(id);
-      submit.disabled=!ids.size;
+      for(const [id,input] of rejectedInputs)input.checked=rejected.has(id);
+      submit.disabled=!ids.size||selection.unassigned>0;
       markGood.disabled=!ids.size;markBad.disabled=!ids.size;
     }
     pending.forEach((r,index)=>{selectorInputs.set(r.id,null);});
@@ -121,11 +127,17 @@
         const approval=node('input');approval.type='checkbox';approval.setAttribute('aria-label','通过第 '+(i+1)+' 行');
         approval.addEventListener('change',()=>{selection.setApproval(r.id,approval.checked);update();});
         approvedInputs.set(r.id,approval);cell(approval);
+        const rejection=node('input');rejection.type='checkbox';
+        rejection.setAttribute('aria-label','驳回第 '+(i+1)+' 行');
+        rejection.addEventListener('change',()=>{
+          selection.setRejection(r.id,rejection.checked);update();
+        });
+        rejectedInputs.set(r.id,rejection);cell(rejection);
         const reason=node('input');reason.type='text';reason.maxLength=300;
-        reason.placeholder='选中且不通过时填写';
+        reason.placeholder='驳回时说明原因，学生可据此重新报名';
         reason.setAttribute('aria-label','第 '+(i+1)+' 行驳回原因');
         reasonInputs.set(r.id,reason);cell(reason,'review-reason');
-      }else{cell('—');cell('—');}
+      }else{cell('—');cell('—');cell('—');}
       body.append(tr);
     }
     async function materials(row){
@@ -173,11 +185,17 @@
     };
     document.addEventListener('keydown',keys);
     allBox.addEventListener('change',()=>{selection.all(allBox.checked);update();});
-    markGood.addEventListener('click',()=>{for(const id of selection.selected)selection.setApproval(id,true);update();});
-    markBad.addEventListener('click',()=>{for(const id of selection.selected)selection.setApproval(id,false);update();});
+    markGood.addEventListener('click',()=>{for(const id of selection.selected)selection.setDecision(id,'approved');update();});
+    markBad.addEventListener('click',()=>{for(const id of selection.selected)selection.setDecision(id,'rejected');update();});
     submit.addEventListener('click',async()=>{
+      if(selection.unassigned){
+        notify('仍有 '+selection.unassigned+' 条已选报名没有勾选通过或驳回，请先明确决定。','error');
+        return;
+      }
       const decisions=selection.decisions(id=>reasonInputs.get(id)?.value);
       if(!decisions.length)return;
+      const emptyReason=decisions.find(x=>x.state==='rejected'&&!x.reason.trim());
+      if(emptyReason){notify('请先为每条驳回填写意见，方便学生重新填报。','error');return;}
       const approves=decisions.filter(x=>x.state==='approved').length;
       const rejects=decisions.length-approves;
       if(!window.confirm('确认提交 '+decisions.length+' 条审核结果？通过 '+approves+' 条，驳回 '+rejects+' 条。提交后将立即生效。'))return;

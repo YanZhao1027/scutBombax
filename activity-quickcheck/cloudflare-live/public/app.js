@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const app={me:null,events:[],active:null,poll:null,scanner:null,scannerOverlay:null,scannerVideo:null,scannerEpoch:0,scannerHistory:false,scannerFullscreenEntered:false,scannerPreviousFocus:null,scannerFeedback:null,reviewDispose:null,qr:null,syntheticOnly:false};
+const app={me:null,events:[],active:null,poll:null,scanner:null,scannerOverlay:null,scannerVideo:null,scannerEpoch:0,scannerHistory:false,scannerFullscreenEntered:false,scannerPreviousFocus:null,scannerFeedback:null,reviewDispose:null,staffDispose:null,qr:null,syntheticOnly:false};
 function el(tag,props={},...children){
   const n=document.createElement(tag);
   for(const [k,v] of Object.entries(props)){
@@ -60,7 +60,16 @@ async function request(path,{method='GET',data,raw,headers={}}={}){
   if(method!=='GET')options.headers['X-Bombax-Action']='1';
   if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data);}
   if(raw!==undefined)options.body=raw;
-  const response=await fetch(path,options);
+  // Lost connections must fail visibly rather than leave "initializing"
+  // forever. Do NOT automatically retry mutations (join/approval/redeem).
+  options.signal=AbortSignal.timeout(method==='GET'?12000:25000);
+  let response;
+  try{response=await fetch(path,options);}
+  catch(error){
+    throw new Error(error?.name==='TimeoutError'||error?.name==='AbortError'
+      ?'连接活动平台超时，请点击重试；无需重复报名。'
+      :'活动平台网络不可达，请检查网络后重试。');
+  }
   if(!response.ok){
     const info=await response.json().catch(()=>({error:'HTTP '+response.status}));
     throw new Error(info.error||'HTTP '+response.status);
@@ -77,47 +86,78 @@ function clean(){
   try{app.scanner?.stop();}catch{}app.scanner=null;
   app.scannerFeedback?.dispose();app.scannerFeedback=null;
   app.reviewDispose?.();app.reviewDispose=null;
+  app.staffDispose?.();app.staffDispose=null;
   if(app.qr){URL.revokeObjectURL(app.qr);app.qr=null;}
 }
-async function start(){
-  const ready=await request('/api/health');app.syntheticOnly=Boolean(ready.syntheticOnly);
-  if(!ready.ready){notice('生产 API 尚未开放。请使用公开演示站；不要填写真实学生资料。','error');$('account').replaceChildren();$('content').replaceChildren(
-    card('正在安全验收',text('此环境目前禁用真实报名、附件和 DeepSeek 处理。'),
-      el('a',{href:'https://activity-demo.10273055.xyz/',text:'打开无个人信息的交互演示'})));
-    return;
+let qrReaderLoading=null;
+async function loadQrReader(){
+  if(window.ZXingBrowser?.BrowserQRCodeReader)return;
+  if(!qrReaderLoading){
+    qrReaderLoading=new Promise((resolve,reject)=>{
+      const script=document.createElement('script');
+      script.src='/zxing.js';script.async=true;
+      script.onload=()=>window.ZXingBrowser?.BrowserQRCodeReader
+        ?resolve():reject(new Error('扫码组件未能正确初始化'));
+      script.onerror=()=>reject(new Error('二维码识别组件下载失败，请检查网络后重试'));
+      document.head.append(script);
+    }).catch(error=>{qrReaderLoading=null;throw error;});
   }
-  // The QR opens this page with a private fragment: browsers never send it
-  // in the HTTP request. Consume it immediately, then erase it from history.
-  let restoredEventId=null;
+  await qrReaderLoading;
+}
+async function start(){
+  // Display usable text before the first network request. From the campus
+  // network each individual HTTPS request may take around 700-1000ms; never
+  // serialize independent /health, /me and /events round trips.
+  $('content').replaceChildren(card('正在获取校园活动',
+    text('正在连接活动平台；网络不佳时可以稍后重试。')));
   const fragment=location.hash;
+  let restoredEventId=null,restorePromise=Promise.resolve(null);
   if(fragment.startsWith('#event=')){
-    // Native Android pass shelf restores the HttpOnly cookie without exposing the
-    // receipt to JS. Only the non-secret event UUID travels in this fragment.
     history.replaceState(history.state,'',location.pathname+location.search);
     const match=/^#event=([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.exec(fragment);
     if(match)restoredEventId=match[1];
-    else notice('本机票夹的活动编号无效','error');
+    else notice('本机票夹活动编号无效','error');
   }
   if(fragment.startsWith('#pass=')){
+    // Consume QR fragment synchronously, before a single network round trip.
     history.replaceState(history.state,'',location.pathname+location.search);
     const match=/^#pass=(bqx_[a-f0-9]{64})$/.exec(fragment);
-    if(match){
-      try {
-        const restored=await request('/api/pass/restore',{method:'POST',data:{token:match[1]}});
-        restoredEventId=restored.eventId;
-      }catch(error){
-        notice(error.message||'一码通无效，请联系活动主办方','error');
-      }
-    }else notice('这不是有效的花工木棉一码通二维码','error');
+    if(match)restorePromise=request('/api/pass/restore',{method:'POST',data:{token:match[1]}})
+      .catch(error=>{notice(error.message||'一码通无法恢复','error');return null;});
+    else notice('这不是有效的花工木棉一码通二维码','error');
   }
-  const me=await request('/api/me');app.me=me.user;
-  app.events=(await request('/api/events')).events;
+  const staffPage=page()==='admin'||page()==='adminlogin';
+  const [ready,me,events,restored]=await Promise.all([
+    request('/api/health'),
+    staffPage?request('/api/me'):Promise.resolve({user:null}),
+    request('/api/events'),
+    restorePromise
+  ]);
+  app.syntheticOnly=Boolean(ready.syntheticOnly);
+  if(!ready.ready){
+    notice('当前只开放虚构数据测试，真实报名暂未开通。','error');
+    $('account').replaceChildren();
+    $('content').replaceChildren(card('活动测试站尚未就绪',text('请稍后重试；请勿填写真实信息。')));
+    return;
+  }
+  if(restored?.eventId)restoredEventId=restored.eventId;
+  app.me=me.user;app.events=events.events||[];
   renderAccount();await home();
   if(restoredEventId){
     const event=app.events.find(x=>x.id===restoredEventId);
     if(event)await viewEvent(event);
-    else notice('本次活动不在当前可用列表中，请联系主办方','error');
-  }else if(!fragment)notice('活动速签已连接；学生无需登录，报名后请保存一码通二维码。');
+    else notice('活动不在目前清单中，请联系主办方','error');
+  }else if(!fragment)notice('活动列表已更新；学生无需登录。');
+}
+async function launchStart(){
+  try{await start();}
+  catch(error){
+    notice('加载活动失败：'+(error?.message||'网络连接异常'),'error');
+    const root=$('content');root.replaceChildren(card('活动加载未完成',
+      text('网络较慢或连接中断时可重试；不需要反复刷新整个页面。'),
+      button('重新获取活动列表',launchStart,'secondary'),
+      el('a',{href:'/my',text:'我的一码通 / 截图恢复'})));
+  }
 }
 function page(){
   const path=location.pathname.replace(/\/$/,'')||'/';
@@ -269,7 +309,7 @@ async function renderAdminHome(root){
 async function importPassImage(file){
   if(!file||!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>5*1024*1024)
     throw new Error('请选择 5 MB 以内的 PNG、JPEG 或 WebP 一码通截图');
-  if(!window.ZXingBrowser?.BrowserQRCodeReader)throw new Error('二维码识别组件暂不可用，请重新加载');
+  await loadQrReader();
   const blobUrl=URL.createObjectURL(file);
   let pass;
   try{
@@ -368,6 +408,12 @@ async function studentView(event,root){
   const box=card('我的报名与审核状态');
   root.append(box);
   if(!reg){
+    if(snapshot.receiptRevoked){
+      box.append(el('h3',{text:'原二维码已经作废'}),
+        text('这张二维码对应的报名已被驳回并重新提交。旧二维码不可用于查询或签到。请导入重新填报后保存的新二维码截图。'),
+        el('a',{href:'/my',text:'导入新的有效一码通截图'}));
+      return;
+    }
     const privacy=el('input',{type:'checkbox',name:'privacyAcknowledged',value:'yes'});
     const join=form([
       label('虚构测试姓名（以“测试”开头）',inp('displayName')),
@@ -386,6 +432,31 @@ async function studentView(event,root){
     box.append(text('无需登录。演练环境仅接受 TEST- 虚构学号及“测试”开头的姓名；同一设备报名后可再次打开本活动查看状态。'),join);
     return;
   }
+  if(reg.state==='rejected'&&!attendance){
+    const privacy=el('input',{type:'checkbox',name:'privacyAcknowledged',value:'yes'});
+    const rejoin=form([
+      label('重新填写虚构姓名（测试开头）',inp('displayName')),
+      label('重新填写虚构学号（TEST-开头）',inp('studentNumber')),
+      label('根据驳回意见补充新的报名说明',el('textarea',{name:'note',maxlength:'500'})),
+      el('label',{class:'check'},privacy,'我同意重新提交一个独立报名，旧一码通永久作废；旧截图不能再用于查询或核销。')
+    ],'重新填报，生成全新二维码并作废原码',async values=>{
+      if(!privacy.checked)throw new Error('请先确认原二维码将永久作废');
+      if(!window.confirm('确定重新填报？当前旧二维码将立即作废，旧截图失去效力，之后只能使用新二维码。'))return;
+      const outcome=await request('/api/events/'+event.id+'/reapply',{
+        method:'POST',data:{displayName:values.displayName,studentNumber:values.studentNumber,
+          note:values.note,privacyAcknowledged:true,aiConsent:false}
+      });
+      if(!outcome.oldReceiptRevoked||!outcome.newPassIssued)
+        throw new Error('服务器未确认旧码作废或新码签发，请联系工作人员');
+      await studentViewReload(event);
+      notice('重新填报成功：原二维码已作废！请立即截图保存全新的二维码，之前的截图全部失效。','success');
+    });
+    box.append(el('div',{class:'receipt-rejected-banner',role:'alert'},
+      el('h3',{text:'报名已驳回 · 旧二维码不可签到'}),
+      text('驳回意见：'+(reg.reviewReason||'请按主办方要求更正资料')),
+      text('选择重新填报后将生成完全不同的一码通。旧二维码将永久作废，旧材料不自动继承。'),
+      rejoin));
+  }
   const attendance=reg.attendance;
   box.append(el('div',{class:'row'},
     el('span',{class:'tag',text:reg.state==='approved'?'审核通过 · 可参加现场签到':reg.state==='pending'?'审核中 · 暂不可签到':'需补充材料 · 暂不可签到'}),
@@ -394,11 +465,13 @@ async function studentView(event,root){
   const passSvg=await passResponse.blob();
   if(app.qr)URL.revokeObjectURL(app.qr);
   app.qr=URL.createObjectURL(passSvg);
-  box.append(el('h3',{text:'我的一码通 · 报名时生成的固定二维码'}),
+  box.append(el('h3',{text:reg.state==='rejected'?'原一码通 · 驳回后仅可查看意见':'我的一码通 · 报名时生成的固定二维码'}),
     el('img',{class:'qr',src:app.qr,alt:'本次活动唯一的一码通凭证，可查询报名状态并由工作人员扫码核销'}),
     el('div',{class:'row'},
       el('a',{href:app.qr,download:'花工木棉-活动一码通.svg',text:'下载并保存一码通二维码'})),
-    text('整个活动都用这一个二维码：扫描可查询是否审核通过，审核通过后到场由授权工作人员核销；扫码签到后仍能查询状态。'),
+    text(reg.state==='rejected'
+      ?'该二维码对应已驳回的旧申请。只有重新填报并取得新二维码后，才能用新码再次参与审核；重新填报将立即作废旧码。'
+      :'整个活动同一份有效报名都用这一个二维码；扫码签到后仍能查询。'),
     text('二维码相当于私密通行凭证，请勿转发或展示给陌生人；工作人员核销时仍需当面核实身份。'),
     text(window.BombaxAppVault?.enabled
       ? '本机 App 已尝试用 Android Keystore 加密保管本场活动。请仍截图保存二维码，清除应用数据或卸载时本机保险箱会消失。'
@@ -408,7 +481,7 @@ async function studentView(event,root){
   const files=await request('/api/events/'+event.id+'/materials');
   for(const f of files.materials)box.append(el('div',{class:'item'},
     text('已上传 '+f.mime+' · '+Math.ceil(f.length/1024)+' KB')));
-  if(!attendance||attendance.channel==='manual'){
+  if(reg.state!=='rejected'&&(!attendance||attendance.channel==='manual')){
     box.append(el('h3',{text:'证明截图上传'}),
       text(app.syntheticOnly?'只允许使用本站内置的虚构图片。Worker 会校验文件 SHA-256；真实图片会被拒绝。':'最多三张 PNG/JPEG，每张不超过 3MB。'));
     if(app.syntheticOnly)box.append(el('img',{class:'qr',src:'/demo-proof.png',alt:'系统内置、标注 TEST ONLY 的虚构点赞截图'}));
@@ -441,7 +514,7 @@ async function studentView(event,root){
 async function studentViewReload(event){if(app.active===event.id){$('content').replaceChildren();await viewEvent(event);}}
 async function organizerView(event,root){
   const response=await request('/api/events/'+event.id+'/queue');
-  const duty=response.duty,queue=response.registrations;
+  const duty=response.duty,queue=response.registrations,duties=response.duties||[duty];
   const roles={owner:'负责人',reviewer:'后台材料审核',scanner:'快速扫码',manual:'人工确认到场'};
   const panel=card('工作岗位：'+(roles[duty]||duty),
     text(duty==='reviewer'?'批量材料审核由工作人员手动刷新，避免打勾过程中被覆盖。':'其他岗位可自动刷新；扫码摄像头不会被定时重绘。'));
@@ -478,24 +551,33 @@ async function organizerView(event,root){
         preview.src='/api/events/'+event.id+'/banner?v='+Date.now();
         notice('SVG 已经过服务器安全校验并替换活动横幅','success');
       })));
-    const assign=form([
-      label('已有主办方账号',inp('username')),
-      label('人员岗位',el('select',{name:'duty'},
-        el('option',{value:'reviewer',text:'后台审核'}),
-        el('option',{value:'scanner',text:'扫码员'}),
-        el('option',{value:'manual',text:'人工通道'})))
-    ],'授权岗位',async x=>{
-      await request('/api/events/'+event.id+'/staff',{method:'POST',data:x});
-      notice('已更新该工作人员岗位。','success');
+    const staffDetails=el('details',{},el('summary',{text:'工作人员岗位授权表 · 多岗位勾选及撤权'}));
+    const staffTarget=el('div',{});
+    staffDetails.append(staffTarget);
+    let staffLoaded=false;
+    staffDetails.addEventListener('toggle',()=>{
+      if(!staffDetails.open||staffLoaded)return;
+      staffLoaded=true;
+      if(!window.BombaxStaffRoles){
+        notice('工作人员岗位授权组件加载失败，请刷新管理后台','error');
+        return;
+      }
+      app.staffDispose=window.BombaxStaffRoles.mount({
+        root:staffTarget,eventId:event.id,request,notify:notice
+      });
     });
-    panel.append(el('details',{},el('summary',{text:'人员岗位授权'}),assign));
+    panel.append(staffDetails);
   }
   const mode=el('div',{class:'row'});
   if(duty==='owner'){
     for(const m of ['reviewer','scanner','manual'])mode.append(button(roles[m],()=>renderDuty(event,root,m,true),'secondary'));
     panel.append(mode);
+  }else if(duties.length>1){
+    for(const item of duties)mode.append(button(roles[item],()=>renderDuty(event,root,item,false),'secondary'));
+    panel.append(mode);
+    await renderDuty(event,root,duty,false);
   }else await renderDuty(event,root,duty,false);
-  if(['owner','reviewer'].includes(duty))panel.append(button('导出已审核且已到场 CSV',async()=>{
+  if(duty==='owner'||duties.includes('reviewer'))panel.append(button('导出已审核且已到场 CSV',async()=>{
     const response=await request('/api/events/'+event.id+'/export');
     const url=URL.createObjectURL(await response.blob()),anchor=el('a',{href:url,download:'花工木棉-活动申报名单.csv'});
     document.body.append(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);
@@ -504,7 +586,7 @@ async function organizerView(event,root){
     if(document.visibilityState!=='visible'||app.active!==event.id)return;
     const focused=document.activeElement;
     if(focused&&['INPUT','TEXTAREA'].includes(focused.tagName))return;
-    if(duty==='owner'||duty==='scanner'||duty==='reviewer')return;
+    if(duty==='owner'||duty==='scanner'||duty==='reviewer'||duties.length>1)return;
     // Never redraw the spreadsheet while staff are selecting approval rows.
     await safe(()=>renderDuty(event,root,duty,false));
   },5000);
@@ -519,7 +601,7 @@ async function renderDuty(event,root,duty,owner){
   app.reviewDispose?.();app.reviewDispose=null;
   const slot=card(duty==='reviewer'?'待审核队列':duty==='scanner'?'扫码通道':'人工认证窗口');
   slot.id='duty-body';root.append(slot);
-  const response=await request('/api/events/'+event.id+'/queue');
+  const response=await request('/api/events/'+event.id+'/queue?duty='+encodeURIComponent(duty));
   const all=response.registrations;
   if(duty==='reviewer'){
     slot.append(text('表格提供全选与 Shift 连续多选；勾「通过」后统一确认。图片会在右侧预览，支持前后顺序切换。'));
@@ -692,6 +774,8 @@ async function renderDuty(event,root,duty,owner){
       if(app.scannerOverlay!==overlay||app.scannerEpoch!==epoch)return;
       report('正在启动后置摄像头…');
       try{
+        await loadQrReader();
+        if(epoch!==app.scannerEpoch)return;
         const reader=new window.ZXingBrowser.BrowserQRCodeReader();
         const controls=await reader.decodeFromVideoDevice(undefined,video,code=>{
           if(code?.getText)void redeem(code.getText());
@@ -711,7 +795,7 @@ async function renderDuty(event,root,duty,owner){
       }
     }
     function openCamera(){
-      if(!window.ZXingBrowser||!window.BombaxScanner)
+      if(!window.BombaxScanner)
         throw new Error('扫码组件尚未加载。请刷新页面，或前往人工认证窗口。');
       if(!window.isSecureContext)
         throw new Error('摄像头必须通过有效 HTTPS 打开。纯 HTTP 校园网地址不可用。');
@@ -799,7 +883,7 @@ async function renderDuty(event,root,duty,owner){
         if(!file)return;
         if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024)
           throw new Error('只接受 2 MB 以内的 PNG/JPEG/WebP 二维码图片');
-        if(!window.ZXingBrowser)throw new Error('本地识码组件没有加载');
+        await loadQrReader();
         const blobUrl=URL.createObjectURL(file);
         try{
           const image=el('img',{src:blobUrl,alt:'待识别的测试二维码'});
@@ -865,6 +949,6 @@ document.addEventListener('fullscreenchange',()=>{
 // re-verify the stored receipt with the Stage backend before entering an event.
 window.addEventListener('hashchange',()=>{
   const fragment=location.hash;
-  if(fragment.startsWith('#event=')||fragment.startsWith('#pass='))void safe(start);
+  if(fragment.startsWith('#event=')||fragment.startsWith('#pass='))void launchStart();
 });
-safe(start);
+launchStart();

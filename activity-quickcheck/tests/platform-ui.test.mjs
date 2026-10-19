@@ -79,6 +79,10 @@ test('review sheet supports shift-range selection, all, approval ticks and only 
   f.choose(3,true,true);
   assert.deepEqual([...f.selected],['b','c','d']);
   f.setApproval('c',true);f.setApproval('d',true);
+  assert.equal(f.unassigned,1,'selecting a row alone must never mean reject');
+  assert.equal(f.decisions(()=>'').length,2);
+  f.setRejection('b',true);
+  assert.equal(f.unassigned,0,'reject is a separate explicit checkbox');
   assert.deepEqual(JSON.parse(JSON.stringify(f.decisions(id=>'reason '+id))),[
     {registrationId:'b',state:'rejected',reason:'reason b'},
     {registrationId:'c',state:'approved',reason:'reason c'},
@@ -91,6 +95,9 @@ test('review sheet supports shift-range selection, all, approval ticks and only 
   f.all(true);assert.equal(f.length,5);
   f.all(false);assert.equal(f.length,0);
   assert.deepEqual(JSON.parse(JSON.stringify(f.decisions(()=>''))),[]);
+  assert.match(review,/驳回 ✕/);
+  assert.match(review,/rejectedInputs/);
+  assert.match(review,/selection\.unassigned/);
   assert.match(review,/ArrowRight/);assert.match(review,/ArrowLeft/);
   assert.match(review,/className/);
   assert.match(review,/\/review-batch/);
@@ -106,4 +113,31 @@ test('Cloudflare clean staff and one-code routes reach ASSETS unchanged to avoid
     assert.equal(response.status,200);
     assert.equal(await response.text(),route,'must not internally request *.html (Cloudflare redirects to clean URL)');
   }
+});
+
+test('fast public bootstrap never waits for ZXing or staff authentication',()=>{
+  const home=load('index.html'),login=load('adminlogin.html');
+  assert.doesNotMatch(home,/<script[^>]+src="\/zxing\.js"/);
+  assert.doesNotMatch(login,/<script[^>]+src="\/zxing\.js"/);
+  assert.match(app,/async function loadQrReader\(\)/);
+  assert.match(app,/Promise\.all\(\[/);
+  assert.match(app,/staffPage\?request\('\/api\/me'\):Promise\.resolve\(\{user:null\}\)/);
+  assert.match(app,/AbortSignal\.timeout\(method==='GET'\?12000:25000\)/);
+  assert.match(app,/async function launchStart\(\)/);
+  assert.match(app,/receipt-rejected-banner/);
+  assert.match(app,/POST|method:'POST'/);
+  const roles=load('staff-roles.js');
+  assert.match(roles,/staff-roles/);
+  assert.match(roles,/input\.type='checkbox'/);
+  assert.match(roles,/window\.confirm/);
+  assert.doesNotMatch(roles,/innerHTML/);
+});
+test('campus read-only origin never accepts receipts or user data and binds loopback only',()=>{
+  const file=readFileSync(new URL('../campus-origin/server.mjs',import.meta.url),'utf8');
+  assert.match(file,/127\.0\.0\.1/);
+  assert.match(file,/if\(method!=='GET'&&method!=='HEAD'\)/);
+  assert.match(file,/__lan\/health/);
+  assert.match(file,/Cloudflare HTTPS|Cloudflare/);
+  assert.match(file,/activity-stage\.10273055\.xyz/);
+  assert.match(file,/old|cache/);
 });

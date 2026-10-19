@@ -13,7 +13,7 @@ const testPassword='OrganizerStageTestPassword12345!';
 function makeFixture(){
   const sqlite=new DatabaseSync(':memory:');
   sqlite.exec('PRAGMA foreign_keys=ON');
-  for(const file of ['0001_init.sql','0002_password_iterations.sql','0003_guest_access.sql','0004_join_window.sql']){
+  for(const file of ['0001_init.sql','0002_password_iterations.sql','0003_guest_access.sql','0004_join_window.sql','0005_reapply_permissions.sql']){
     sqlite.exec(readFileSync(new URL('../cloudflare-live/migrations/'+file,import.meta.url),'utf8'));
   }
   const db={
@@ -428,4 +428,103 @@ test('review sheet posts explicit mixed decisions with audit and permission chec
   assert.equal((await f.api(route+'/review-batch',{method:'POST',cookie:reviewer,
     data:{decisions:[{registrationId:registrations[2],state:'rejected'}]}})).status,200);
   assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS total FROM activity_audit WHERE action LIKE 'registration.review.%'").get().total,3);
+});
+
+test('rejected guest can reapply with a brand-new QR, while old bearer is irreversibly rejected',async t=>{
+  const f=makeFixture();t.after(()=>f.close());
+  const owner=await f.signIn('demo_owner');
+  const eid=await f.createEvent(owner,'测试驳回重新报名'),base='/api/events/'+eid;
+  const details={displayName:'测试第一次申请',studentNumber:'TEST-REISSUE-A',
+    privacyAcknowledged:true,aiConsent:false,note:'旧报名'};
+  const first=await f.api(base+'/join',{method:'POST',data:details});
+  assert.equal(first.status,201);const oldReg=(await first.json()).id;
+  const oldCookie=(first.headers.get('set-cookie')||'').split(';')[0],oldToken=oldCookie.split('=')[1];
+  assert.equal((await f.api(base+'/reapply',{method:'POST',cookie:oldCookie,data:details})).status,409);
+  const rejected=await f.api(base+'/review',{method:'POST',cookie:owner,
+    data:{registrationId:oldReg,state:'rejected',reason:'测试意见：截图不符合活动条件'}});
+  assert.equal(rejected.status,200);
+  const before=await(await f.api(base,{cookie:oldCookie})).json();
+  assert.equal(before.registration.state,'rejected');
+  assert.match(before.registration.reviewReason,/截图不符合/);
+  const oldSvg=await(await f.api(base+'/pass-qr',{method:'POST',cookie:oldCookie})).text();
+  assert.equal((await f.api(base+'/reapply',{method:'POST',cookie:oldCookie,
+    data:{...details,privacyAcknowledged:false}})).status,400);
+  const renewed=await f.api(base+'/reapply',{method:'POST',cookie:oldCookie,
+    data:{...details,displayName:'测试第二次申请',studentNumber:'TEST-REISSUE-B',note:'修改后的说明'}});
+  assert.equal(renewed.status,201,await renewed.clone().text());
+  const result=await renewed.clone().json();
+  assert.equal(result.oldReceiptRevoked,true);
+  assert.equal(result.newPassIssued,true);
+  assert.notEqual(result.id,oldReg);
+  const nextCookie=(renewed.headers.get('set-cookie')||'').split(';')[0],nextToken=nextCookie.split('=')[1];
+  assert.notEqual(oldToken,nextToken);
+  const newSvg=await(await f.api(base+'/pass-qr',{method:'POST',cookie:nextCookie})).text();
+  assert.notEqual(oldSvg,newSvg,'old and new rendered passes must be different');
+  const retired=await f.api('/api/pass/restore',{method:'POST',data:{token:oldToken}});
+  assert.equal(retired.status,410);assert.match((await retired.json()).error,/已作废/);
+  const oldPage=await(await f.api(base,{cookie:oldCookie})).json();
+  assert.equal(oldPage.registration,null);
+  assert.equal(oldPage.receiptRevoked,true);
+  assert.equal((await f.api(base+'/upload',{method:'POST',cookie:oldCookie,raw:png})).status,403);
+  assert.equal((await f.api(base+'/reapply',{method:'POST',cookie:oldCookie,data:details})).status,403);
+  const restored=await f.api('/api/pass/restore',{method:'POST',data:{token:nextToken}});
+  assert.equal(restored.status,200);
+  assert.equal((await f.api(base+'/materials',{cookie:nextCookie})).status,200);
+  assert.equal((await(await f.api(base+'/materials',{cookie:nextCookie})).json()).materials.length,0,
+    'reapplication must never silently inherit rejected evidence');
+  assert.equal((await f.api(base+'/upload',{method:'POST',cookie:nextCookie,raw:png})).status,201);
+  assert.equal((await f.api(base+'/review',{method:'POST',cookie:owner,
+    data:{registrationId:result.id,state:'approved',reason:'测试第二份证明通过'}})).status,200);
+  assert.equal((await f.api(base+'/redeem',{method:'POST',cookie:owner,data:{token:oldToken}})).status,409);
+  assert.equal((await f.api(base+'/redeem',{method:'POST',cookie:owner,data:{token:nextToken}})).status,200);
+  const origin=f.sqlite.prepare("SELECT state,review_reason FROM activity_registrations WHERE id=?").get(oldReg);
+  assert.equal(origin.state,'rejected');
+  assert.match(origin.review_reason,/截图不符合/);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM activity_revoked_receipts WHERE old_registration_id=?').get(oldReg).n,1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM activity_audit WHERE action='registration.reapplied'").get().n,1);
+});
+
+test('owner assigns several staff duties per account, can revoke independently, and audits changes',async t=>{
+  const f=makeFixture();t.after(()=>f.close());
+  const owner=await f.signIn('demo_owner'),reviewer=await f.signIn('demo_reviewer');
+  const eid=await f.createEvent(owner,'测试多岗位授权');
+  const base='/api/events/'+eid,users=(await(await f.api(base+'/staff-roles',{cookie:owner})).json()).accounts;
+  const target=users.find(x=>x.username==='demo_reviewer');
+  const organizer=users.find(x=>x.username==='demo_owner');
+  assert.ok(target&&organizer.owner);
+  assert.equal((await f.api(base+'/staff-roles',{cookie:reviewer})).status,403);
+  assert.equal((await f.api(base+'/staff-roles',{method:'POST',cookie:owner,
+    data:{assignments:[{userId:organizer.id,duties:[]}]}})).status,403);
+  const roles=[
+    {userId:target.id,duties:['reviewer','scanner']},
+    {userId:users.find(x=>x.username==='demo_scanner').id,duties:['manual']}
+  ];
+  assert.equal((await f.api(base+'/staff-roles',{method:'POST',cookie:owner,
+    data:{assignments:roles}})).status,200);
+  const current=(await(await f.api(base+'/staff-roles',{cookie:owner})).json()).accounts
+    .find(x=>x.id===target.id);
+  assert.deepEqual(current.duties.sort(),['reviewer','scanner']);
+  const visible=await f.api('/api/admin/events',{cookie:reviewer});
+  assert.equal(visible.status,200);
+  assert.equal((await visible.json()).events.filter(e=>e.id===eid).length,1,'multi-role accounts must not duplicate events');
+  const queue=await f.api(base+'/queue?duty=reviewer',{cookie:reviewer});
+  assert.equal(queue.status,200);assert.equal((await queue.json()).duty,'reviewer');
+  assert.equal((await f.api(base+'/queue?duty=scanner',{cookie:reviewer})).status,200);
+  assert.equal((await f.api(base+'/queue?duty=manual',{cookie:reviewer})).status,403);
+  assert.equal((await f.api(base+'/staff-roles',{method:'POST',cookie:reviewer,
+    data:{assignments:[{userId:target.id,duties:[]}]}})).status,403);
+  assert.equal((await f.api(base+'/staff-roles',{method:'POST',cookie:owner,
+    data:{assignments:[{userId:target.id,duties:['scanner']}]}})).status,200);
+  assert.equal((await f.api(base+'/queue?duty=reviewer',{cookie:reviewer})).status,403,
+    'revoked reviewer permission must not remain effective via legacy table');
+  assert.equal((await f.api(base+'/queue?duty=scanner',{cookie:reviewer})).status,200);
+  assert.equal((await f.api(base+'/staff-roles',{method:'POST',cookie:owner,
+    data:{assignments:[{userId:target.id,duties:[]}]}})).status,200);
+  assert.equal((await f.api(base+'/queue',{cookie:reviewer})).status,403);
+  const audit=f.sqlite.prepare("SELECT COUNT(*) n FROM activity_audit WHERE action='staff.roles.updated'").get();
+  assert.equal(audit.n,4,'one audit record for each staff account changed');
+  assert.equal((await f.api(base+'/staff',{method:'POST',cookie:owner,
+    data:{username:'demo_reviewer',duty:'reviewer'}})).status,200,
+    'legacy role assignment remains compatible and auditable');
+  assert.equal((await f.api(base+'/queue?duty=reviewer',{cookie:reviewer})).status,200);
 });
