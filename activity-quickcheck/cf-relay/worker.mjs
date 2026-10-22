@@ -32,7 +32,13 @@ export default {
     if(!hostnames.has(requested.hostname)||requested.protocol!=='https:')return error(421,'Unknown public host');
     if(requested.pathname==='/__route/decision')return localMode();
     if(!['GET','HEAD','POST','PATCH','DELETE','OPTIONS'].includes(request.method))return error(405,'Method not supported');
-    if(!env.RELAY_SECRET||env.RELAY_SECRET.length<48)return error(503,'Origin route is not configured');
+    // In production, use Cloudflare's native internal service binding so the
+    // verified core Worker keeps the relay secret; no secret is copied here.
+    if(env.CORE_RELAY){
+      try{return await env.CORE_RELAY.fetch(request);}
+      catch{return unavailable(requested.pathname);}
+    }
+    if(!env.RELAY_SECRET||env.RELAY_SECRET.length<48)return unavailable(requested.pathname);
     const target=new URL(requested.pathname+requested.search,ubuntu);
     const headers=new Headers(request.headers);
     headers.delete('X-Bombax-Relay-Auth');
