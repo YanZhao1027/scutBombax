@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Bombax campus static heartbeat every 20 seconds
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=20s
+AccuracySec=5s
+Unit=bombax-campus-heartbeat.service
+
+[Install]
+WantedBy=timers.target

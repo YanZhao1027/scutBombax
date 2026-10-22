@@ -1,0 +1,38 @@
+/* Spreadsheet-like reviewer queue with sticky readable columns and proof drawer. */
+.review-help{font-size:13px;color:#6c8299;margin:7px 0 14px}
+.review-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:14px;background:#f1f7ff;border:1px solid #e0edfa;border-radius:13px;margin:0 0 15px}
+.review-counter{margin-right:auto;font-size:13px;white-space:nowrap}
+.review-toolbar button{font-size:12px;padding:8px 12px;min-height:35px}
+.review-workspace{display:grid;grid-template-columns:minmax(0,1fr) minmax(270px,34%);align-items:start;gap:15px;min-width:0}
+.review-sheet-scroll{overflow:auto;max-height:72vh;border:1px solid #dbe7f3;border-radius:12px;background:#fff;min-width:0}
+.review-sheet{width:100%;border-collapse:separate;border-spacing:0;min-width:860px;font-size:12px;text-align:left}
+.review-sheet th{position:sticky;top:0;background:#eaf3ff;color:#245176;padding:11px 10px;border-bottom:1px solid #cbdeef;white-space:nowrap;z-index:2}
+.review-sheet td{padding:9px 10px;border-bottom:1px solid #edf2f7;vertical-align:middle}
+.review-sheet tbody tr:nth-child(even){background:#f9fcff}
+.review-sheet tbody tr[data-selected=true]{background:#e7f4ff}
+.review-sheet tbody tr[data-decision=approved]{box-shadow:inset 3px 0 0 #34a56e}
+.review-sheet tbody tr[data-decision=rejected]{box-shadow:inset 3px 0 0 #df875f}
+.review-sheet tbody tr[data-failed=true]{background:#ffece6}
+.review-sheet td input[type=checkbox]{margin:0;width:19px;height:19px;accent-color:#2778e9}
+.review-sheet .review-person{font-weight:800;color:#294763;white-space:nowrap}
+.review-sheet .review-student-id{white-space:nowrap;font-family:ui-monospace,Consolas,monospace;color:#4c6682}
+.review-sheet .review-date{white-space:nowrap;color:#708aa1}
+.review-pending{white-space:nowrap;color:#a86f27}
+.review-row-index{font-weight:800;color:#6c85a1}
+.review-sheet button.review-photo-btn{border:0;background:#e5f2ff;color:#1767ad;white-space:nowrap;padding:7px 10px;min-height:32px;font-size:12px}
+.review-sheet button.review-reject{background:#ffede8;color:#ae4e35;padding:7px 11px;min-height:32px;font-size:12px}
+.review-empty{color:#99a7b7;font-size:12px;white-space:nowrap}
+.review-sheet .review-note{min-width:140px;max-width:220px;width:100%;font-size:12px;min-height:32px;padding:6px!important}
+.review-preview{position:sticky;top:8px;padding:14px;background:#fff;border:1px solid #d5e3f0;border-radius:14px;box-shadow:0 15px 33px #164b7c15;min-height:230px;max-height:78vh;overflow:auto;z-index:10}
+.review-preview[hidden]{display:none}
+.review-preview-header{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:12px}
+.review-preview-header strong{line-height:1.5;font-size:13px}
+.review-preview-close{border:0;background:#e8f1fb;color:#2d5b82;font-size:22px;padding:4px 10px;min-height:29px}
+.review-proof{display:block;width:100%;max-height:57vh;object-fit:contain;background:#f4f7fa;border-radius:9px}
+.review-preview-status{font-size:13px;color:#6b8298;min-height:25px}
+.review-preview-toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:12px}
+.review-preview-toolbar button{font-size:12px;padding:7px;min-height:34px;white-space:nowrap}
+.review-preview-page{font-size:12px;color:#627d99;white-space:nowrap}
+#duty-body{max-width:100%;min-width:0}
+.admin-shell{max-width:1600px}
+@media(max-width:1020px){.review-workspace{grid-template-columns:minmax(0,1fr)}.review-preview{position:fixed;inset:10% 4% 8%;max-height:none;box-shadow:0 0 0 100vmax #061f3b80;overflow:auto}.review-proof{max-height:53vh}}

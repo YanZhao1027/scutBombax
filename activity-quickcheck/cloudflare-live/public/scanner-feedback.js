@@ -23,27 +23,59 @@
         return false;
       }
     }
-    function ringOnce(){
+    // Original 8-bit (square-wave) cues: no copyrighted audio assets,
+    // network requests or third-party players. Avoid deep bass because small
+    // phone speakers barely reproduce it. Peaks are below digital clipping.
+    const chipSounds=Object.freeze({
+      success:Object.freeze({
+        peak:0.28,
+        notes:Object.freeze([[0,880,0.13],[0.15,1320,0.19]]) // one rising chime
+      }),
+      failure:Object.freeze({
+        peak:0.36,
+        notes:Object.freeze([[0,698,0.21],[0.235,523,0.23]]) // two descending buzzes
+      })
+    });
+    function playChipSound(kind){
       if(!soundEnabled||!audio||audio.state!=='running')return false;
+      const cue=chipSounds[kind];
+      if(!cue)return false;
       try{
-        // A single short, low-volume bell. No prerecorded file/network access.
-        const tone=audio.createOscillator(),gain=audio.createGain();
-        const at=audio.currentTime;
-        tone.type='sine';
-        tone.frequency.setValueAtTime(880,at);
-        tone.frequency.exponentialRampToValueAtTime(1100,at+0.16);
-        gain.gain.setValueAtTime(0.0001,at);
-        gain.gain.exponentialRampToValueAtTime(0.075,at+0.014);
-        gain.gain.exponentialRampToValueAtTime(0.0001,at+0.26);
-        tone.connect(gain);gain.connect(audio.destination);
-        tone.onended=()=>{try{tone.disconnect();gain.disconnect();}catch{}};
-        tone.start(at);tone.stop(at+0.27);
+        const at=audio.currentTime+0.006;
+        for(const [offset,frequency,duration] of cue.notes){
+          const tone=audio.createOscillator(),gain=audio.createGain();
+          const start=at+offset;
+          tone.type='square'; // distinct, audible 8-bit timbre
+          tone.frequency.setValueAtTime(frequency,start);
+          // Fast but smooth attack/release prevents sharp clipping clicks.
+          gain.gain.setValueAtTime(0.0001,start);
+          gain.gain.exponentialRampToValueAtTime(cue.peak,start+0.012);
+          gain.gain.setValueAtTime(cue.peak,start+duration-0.036);
+          gain.gain.exponentialRampToValueAtTime(0.0001,start+duration);
+          tone.connect(gain);gain.connect(audio.destination);
+          tone.onended=()=>{try{tone.disconnect();gain.disconnect();}catch{}};
+          tone.start(start);tone.stop(start+duration+0.003);
+        }
         return true;
       }catch{
-        // A browser/system audio failure never changes the server's check-in.
+        // Audio output failure must never alter the server's check-in result.
         soundEnabled=false;
         return false;
       }
+    }
+    function ringOnce(){return playChipSound('success');}
+    function errorTone(){return playChipSound('failure');}
+    function rejected({audible=true}={}){
+      // Never increments the successful count, even for a duplicated QR.
+      return Object.freeze({count,played:audible?errorTone():false});
+    }
+    function preview(kind,{audible=true}={}){
+      // Explicit staff-only preview. No check-in API, no successful count,
+      // no lastAccepted state, and no QR data.
+      const played=audible
+        ?kind==='success'?ringOnce():kind==='failure'?errorTone():false
+        :false;
+      return Object.freeze({count,played});
     }
     function confirmed({audible=true}={}){
       // Caller MUST invoke only once after a successful response from /redeem.
@@ -62,7 +94,7 @@
       }
     }
     return Object.freeze({
-      confirmed,setSound,dispose,
+      confirmed,rejected,preview,setSound,dispose,
       get count(){return count;},
       get soundEnabled(){return soundEnabled;}
     });

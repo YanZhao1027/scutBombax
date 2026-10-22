@@ -1,8 +1,16 @@
 import QRCode from 'qrcode';
+import {sanitizeBannerSvg,MAX_BANNER_BYTES,isPreset} from './safe-svg.mjs';
+import {campusHeartbeat,maybeCampusAsset} from './campus-router.mjs';
 // Cloudflare Workers + D1 + R2 backend for Activity QuickCheck.
 // NOT deployed by the public showcase. ENABLE_LIVE must be enabled only after review.
 const te=new TextEncoder();
 const SESSION_MS=12*3600_000, MAX_IMAGE=3*1024*1024;
+const bannerHead={
+  'Content-Type':'image/svg+xml; charset=utf-8',
+  'Content-Security-Policy':"sandbox; default-src 'none'; script-src 'none'; style-src 'none'; img-src 'none'",
+  'Cross-Origin-Resource-Policy':'same-origin','X-Content-Type-Options':'nosniff',
+  'Referrer-Policy':'no-referrer','Cache-Control':'public, max-age=120'
+};
 // A single registration pass stays unchanged through check-in and post-event status lookup.
 // The +30 day window is only a synthetic-stage policy, not an approved real-data retention rule.
 const GUEST_AFTER_EVENT_MS=30*86400_000;
@@ -203,7 +211,9 @@ async function api(req,env,url){
     return json({ok:true},200,{'Set-Cookie':'bqx_live=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0'});
   }
   if(method==='GET'&&p==='/api/events'){
-    const rows=await db.prepare('SELECT id,title,guidelines,lat,lon,radius_m,starts_at,ends_at,require_photo FROM activity_events ORDER BY starts_at DESC LIMIT 100').all();
+    // Registration window is distinct from event attendance time.
+    // The older synthetic fixtures used event creation as registration start.
+    const rows=await db.prepare('SELECT id,title,guidelines,created_at,lat,lon,radius_m,starts_at,ends_at,require_photo,registration_opens_at,registration_closes_at,banner_template,CASE WHEN banner_key IS NOT NULL THEN 1 ELSE 0 END AS has_custom_banner FROM activity_events ORDER BY starts_at DESC LIMIT 100').all();
     return json({events:rows.results});
   }
   if(method==='POST'&&p==='/api/events'){
@@ -215,10 +225,25 @@ async function api(req,env,url){
     need(ends>starts,400,'活动结束时间必须晚于开始时间');
     need(ends-starts<=7*86400000,400,'活动时间跨度不能超过 7 天');
     need(ends>epoch(),400,'活动结束时间已过去；请设置为将来的时间，并检查设备时钟及所在时区');
+    const opened=x.registrationOpensAt??epoch(),closed=x.registrationClosesAt??ends;
+    need(Number.isFinite(opened)&&Number.isFinite(closed)&&opened<=closed&&closed<=ends,400,'报名开始和截止时间必须有效，且不晚于活动结束');
+    need(closed>epoch(),400,'报名截止时间必须晚于现在');
+    need(opened<=ends&&opened>=epoch()-30*86400_000,400,'报名开始时间不合理');
+    const preset=x.bannerTemplate??'music';
+    need(isPreset(preset),400,'请选择平台提供的活动插画');
     const id=uuid();
-    await db.prepare('INSERT INTO activity_events(id,owner_id,title,guidelines,lat,lon,radius_m,starts_at,ends_at,require_photo,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-      .bind(id,user.id,str(x.title,100),String(x.guidelines||'').slice(0,1000),lat,lon,radius,starts,ends,x.requirePhoto===false?0:1,epoch()).run();
+    await db.prepare('INSERT INTO activity_events(id,owner_id,title,guidelines,lat,lon,radius_m,starts_at,ends_at,require_photo,created_at,registration_opens_at,registration_closes_at,banner_template) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(id,user.id,str(x.title,100),String(x.guidelines||'').slice(0,1000),lat,lon,radius,starts,ends,x.requirePhoto===false?0:1,epoch(),opened,closed,preset).run();
     return json({id},201);
+  }
+  const banner=p.match(/^\/api\/events\/([a-f0-9-]{36})\/banner\.svg$/);
+  if(method==='GET'&&banner){
+    const ev=await db.prepare('SELECT banner_key FROM activity_events WHERE id=?').bind(banner[1]).first();
+    need(ev,404,'活动不存在');
+    need(ev.banner_key,404,'活动使用平台默认插画');
+    const illustration=await env.MATERIALS.get(ev.banner_key);
+    need(illustration,404,'活动插画未找到');
+    return new Response(illustration.body,{headers:bannerHead});
   }
   const m=p.match(/^\/api\/events\/([a-f0-9-]{36})(?:\/([\w-]+))?$/);
   if(m){
@@ -232,7 +257,10 @@ async function api(req,env,url){
         aiConsent:Boolean(reg.ai_consent),attendance}:null});
     }
     if(method==='POST'&&action==='join'){
-      need(epoch()<=event.ends_at,409,'报名结束');
+      const opens=event.registration_opens_at??event.created_at;
+      const closes=event.registration_closes_at??event.ends_at;
+      need(epoch()>=opens,409,'报名尚未开始');
+      need(epoch()<=closes,409,'报名已经截止');
       need(!(await guestFor(db,req,eid)),409,'你已经报名，请返回当前报名页面');
       const x=await body(req),name=str(x.displayName,40),studentNumber=str(x.studentNumber,32);
       need(x.privacyAcknowledged===true,400,'须明确确认虚构资料演练说明');
@@ -317,6 +345,23 @@ async function api(req,env,url){
     if(method==='POST'&&action==='ticket'){
       err(410,'无需现场生成新码；请使用报名时保存的一码通二维码');
     }
+    if(method==='POST'&&action==='banner'){
+      await access(db,user,eid,['owner']);
+      need((req.headers.get('Content-Type')||'').split(';')[0].trim()==='image/svg+xml',415,'仅接受 SVG 活动插画');
+      const raw=await readBounded(req,MAX_BANNER_BYTES);
+      need(raw.byteLength>100&&raw.byteLength<MAX_BANNER_BYTES,413,'活动插画必须小于 100 KB');
+      let source;
+      try{source=new TextDecoder('utf-8',{fatal:true}).decode(raw);}catch{err(400,'SVG 不是 UTF-8 编码');}
+      let cleaned;
+      try{cleaned=sanitizeBannerSvg(source);}catch(e){err(422,e.message||'SVG 未通过安全校验');}
+      const digest=await sha(cleaned),key='banners/'+eid+'/'+digest+'.svg';
+      await env.MATERIALS.put(key,utf8(cleaned),{httpMetadata:{contentType:'image/svg+xml'}});
+      try{
+        await db.prepare("UPDATE activity_events SET banner_key=?,banner_template='custom' WHERE id=?").bind(key,eid).run();
+        await audit(db,eid,user.id,'event.banner.uploaded',eid);
+      }catch(e){await env.MATERIALS.delete(key);throw e;}
+      return json({ok:true,bytes:utf8(cleaned).byteLength},201);
+    }
     if(method==='POST'&&action==='staff'){
       await access(db,user,eid,['owner']);
       const x=await body(req),duty=x.duty;
@@ -334,6 +379,52 @@ async function api(req,env,url){
         if(a.duty==='manual')return {id:r.id,displayName:r.display_name,studentNumber:r.student_number,attendedAt:r.attended_at,state:r.state};
         return r;
       })});
+    }
+    if(method==='POST'&&action==='review-batch'){
+      // Partial result semantics are explicit: each row gets its own result.
+      // Optimistic timestamps avoid overwriting other reviewers' decisions.
+      await access(db,user,eid,['owner','reviewer']);
+      const payload=await body(req,65536),decisions=payload.decisions;
+      need(Array.isArray(decisions)&&decisions.length>=1&&decisions.length<=60,400,'一次只能提交 1–60 条审核');
+      const seen=new Set();
+      const accepted=[];
+      for(const raw of decisions){
+        need(raw&&typeof raw==='object'&&!Array.isArray(raw),400,'审核记录格式无效');
+        const registrationId=str(raw.registrationId,40),state=raw.state;
+        need(/^[a-f0-9-]{36}$/.test(registrationId),400,'报名编号无效');
+        need(!seen.has(registrationId),400,'同一报名不能在一批中重复出现');
+        seen.add(registrationId);
+        need(['approved','rejected'].includes(state),400,'审核结果必须为通过或驳回');
+        need(Number.isSafeInteger(raw.updatedAt)&&raw.updatedAt>0,400,'需要该报名最新审核版本');
+        need(typeof raw.reason==='string'&&raw.reason.length<=300,400,'审核原因过长');
+        accepted.push({registrationId,state,updatedAt:raw.updatedAt,reason:raw.reason.trim()});
+      }
+      const results=[];
+      for(const item of accepted){
+        try{
+          const r=await db.prepare('SELECT id,state,updated_at FROM activity_registrations WHERE id=? AND event_id=?')
+            .bind(item.registrationId,eid).first();
+          need(r&&r.state==='pending',409,'该报名已处理或不属于本场活动');
+          need(r.updated_at===item.updatedAt,409,'材料或审核状态已被其他工作人员更新，请刷新后重审');
+          const t=await db.prepare('SELECT channel FROM activity_attendance WHERE registration_id=?').bind(r.id).first();
+          need(t?.channel!=='scan',409,'该报名已经扫码核销，不得重新审核');
+          if(item.state==='approved'&&event.require_photo){
+            const photos=await db.prepare('SELECT COUNT(*) AS total FROM activity_files WHERE registration_id=?').bind(r.id).first();
+            need(photos?.total>0,409,'没有材料，不能勾选通过');
+          }
+          // Each successful update is guarded by its original version. A row
+          // that races another reviewer is reported as failed, not a success.
+          const now=Math.max(epoch(),r.updated_at+1);
+          const changed=await db.prepare("UPDATE activity_registrations SET state=?,review_reason=?,reviewed_by=?,reviewed_at=?,updated_at=? WHERE id=? AND event_id=? AND state='pending' AND updated_at=?")
+            .bind(item.state,item.reason,user.id,now,now,r.id,eid,item.updatedAt).run();
+          need(changed.meta?.changes===1,409,'该报名刚被更新，请刷新队列');
+          await audit(db,eid,user.id,'registration.review.'+item.state,r.id);
+          results.push({registrationId:item.registrationId,ok:true,state:item.state});
+        }catch(e){
+          results.push({registrationId:item.registrationId,ok:false,error:e.status?e.message:'审核处理异常，请人工核查该条记录'});
+        }
+      }
+      return json({results,accepted:results.filter(x=>x.ok).length,failed:results.filter(x=>!x.ok).length});
     }
     if(method==='POST'&&action==='review'){
       await access(db,user,eid,['owner','reviewer']);
@@ -427,13 +518,24 @@ export default {
   async fetch(req,env){
     try{
       const url=new URL(req.url);
+      if(url.pathname==='/__campus/heartbeat'){
+        return await campusHeartbeat(req,env); // disabled until production routing opt-in
+      }
+      if(req.method==='GET'&&['/admin','/adminlogin'].includes(url.pathname)){
+        return Response.redirect(url.origin+url.pathname+'/',302);
+      }
       if(url.pathname.startsWith('/api/')){
         const resp=await api(req,env,url);
         resp.headers.set('Referrer-Policy','no-referrer');
         resp.headers.set('X-Content-Type-Options','nosniff');
         return resp;
       }
-      // Assets are deployed separately from the data API. No dynamic HTML interpolation.
+      // The campus only serves vetted static assets on this SAME origin.
+      // All account/cookie/pass/evidence APIs stay at Cloudflare D1/R2.
+      try{
+        const campus=await maybeCampusAsset(req,env,url);
+        if(campus)return campus;
+      }catch{/* Fail closed to Cloudflare static assets when router is unavailable. */}
       return env.ASSETS.fetch(req);
     }catch(e){
       const message=e.status?e.message:e.message?.includes('UNIQUE constraint')?'记录已经存在':'请求失败';

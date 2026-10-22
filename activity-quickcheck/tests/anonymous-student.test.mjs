@@ -13,7 +13,7 @@ const testPassword='OrganizerStageTestPassword12345!';
 function makeFixture(){
   const sqlite=new DatabaseSync(':memory:');
   sqlite.exec('PRAGMA foreign_keys=ON');
-  for(const file of ['0001_init.sql','0002_password_iterations.sql','0003_guest_access.sql']){
+  for(const file of ['0001_init.sql','0002_password_iterations.sql','0003_guest_access.sql','0004_event_branding.sql']){
     sqlite.exec(readFileSync(new URL('../cloudflare-live/migrations/'+file,import.meta.url),'utf8'));
   }
   const db={
@@ -22,7 +22,7 @@ function makeFixture(){
       let params=[];
       return {
         bind(...items){params=items;return this;},
-        async run(){return st.run(...params);},
+        async run(){const out=st.run(...params);return {...out,meta:{changes:out.changes}};},
         async first(){return st.get(...params)||null;},
         async all(){return {results:st.all(...params)};}
       };
@@ -59,12 +59,12 @@ function makeFixture(){
     );
   }
   addAccount('demo_owner');addAccount('demo_reviewer');addAccount('demo_scanner');addAccount('demo_legacy_student','student');
-  async function api(path,{method='GET',data,raw,cookie='',originHeader=true,limit=true}={}){
+  async function api(path,{method='GET',data,raw,cookie='',originHeader=true,limit=true,contentType}={}){
     const headers={'CF-Connecting-IP':'127.0.0.1'};
     if(cookie)headers.Cookie=cookie;
     if(method!=='GET'&&originHeader){headers.Origin=origin;headers['X-Bombax-Action']='1';}
     if(data!==undefined)headers['Content-Type']='application/json';
-    if(raw!==undefined)headers['Content-Type']='image/png';
+    if(raw!==undefined)headers['Content-Type']=contentType||'image/png';
     const request=new Request(origin+path,{method,headers,body:data===undefined?raw:JSON.stringify(data)});
     return backend.fetch(request,limit?env:{...env,AUTH_RATE_LIMIT:undefined});
   }
@@ -295,4 +295,121 @@ test('one-code remains unchanged through manual arrival, late evidence and appro
   const restore=await f.api('/api/pass/restore',{method:'POST',data:{token:pass}});
   assert.equal(restore.status,200);
   assert.equal((await restore.json()).eventId,eid);
+});
+
+test('bulk reviewer saves each selected row with optimistic version checks and reports partial failures',async t=>{
+  const f=makeFixture();t.after(()=>f.close());
+  const owner=await f.signIn('demo_owner');
+  const event=await f.createEvent(owner,'测试音乐会批量材料审核');
+  const reviewer=await f.signIn('demo_reviewer');
+  await f.api('/api/events/'+event+'/staff',{method:'POST',cookie:owner,
+    data:{username:'demo_reviewer',duty:'reviewer'}});
+  const receipts=[];
+  for(const [index,name] of ['甲','乙','丙'].entries()){
+    const join=await f.api('/api/events/'+event+'/join',{method:'POST',data:{
+      displayName:'测试'+name,studentNumber:'TEST-BULK-'+index,privacyAcknowledged:true,aiConsent:false
+    }});
+    assert.equal(join.status,201);
+    const registrationId=(await join.json()).id;
+    const cookie=join.headers.get('set-cookie').split(';')[0];
+    receipts.push({registrationId,cookie});
+    if(index<2)assert.equal((await f.api('/api/events/'+event+'/upload',{method:'POST',raw:png,cookie})).status,201);
+  }
+  const q=await f.api('/api/events/'+event+'/queue',{cookie:reviewer});
+  assert.equal(q.status,200);
+  const rows=(await q.json()).registrations;
+  assert.equal(rows.length,3);
+  const byId=new Map(rows.map(x=>[x.id,x]));
+  const decisions=[
+    {registrationId:receipts[0].registrationId,state:'approved',reason:'虚构截图符合要求',
+      updatedAt:byId.get(receipts[0].registrationId).updated_at},
+    {registrationId:receipts[1].registrationId,state:'rejected',reason:'仍须补充说明',
+      updatedAt:byId.get(receipts[1].registrationId).updated_at},
+    {registrationId:receipts[2].registrationId,state:'approved',reason:'',
+      updatedAt:byId.get(receipts[2].registrationId).updated_at}
+  ];
+  assert.equal((await f.api('/api/events/'+event+'/review-batch',{method:'POST',data:{decisions}})).status,403,
+    'anonymous reviewer has no permission');
+  const updated=await f.api('/api/events/'+event+'/review-batch',{
+    method:'POST',data:{decisions},cookie:reviewer
+  });
+  assert.equal(updated.status,200,await updated.clone().text());
+  const report=await updated.json();
+  assert.equal(report.accepted,2);
+  assert.equal(report.failed,1);
+  assert.equal(report.results[2].ok,false,'cannot approve without required evidence');
+  assert.equal(f.sqlite.prepare('SELECT state FROM activity_registrations WHERE id=?').get(receipts[0].registrationId).state,'approved');
+  assert.equal(f.sqlite.prepare('SELECT state FROM activity_registrations WHERE id=?').get(receipts[1].registrationId).state,'rejected');
+  assert.equal(f.sqlite.prepare('SELECT state FROM activity_registrations WHERE id=?').get(receipts[2].registrationId).state,'pending');
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) total FROM activity_audit WHERE action LIKE ?').get('registration.review.%').total,2);
+  assert.equal((await f.api('/api/events/'+event+'/review-batch',{method:'POST',data:{decisions:[decisions[0],decisions[0]]},cookie:reviewer})).status,400);
+  const old=await f.api('/api/events/'+event+'/review-batch',{method:'POST',cookie:reviewer,
+    data:{decisions:[{...decisions[0],state:'rejected'}]}});
+  assert.equal((await old.json()).results[0].ok,false,'previously approved row cannot be silently overwritten');
+  const cross=await f.createEvent(owner,'另一场批量审核');
+  const other=await f.api('/api/events/'+cross+'/review-batch',{method:'POST',cookie:owner,
+    data:{decisions:[decisions[2]]}});
+  assert.equal((await other.json()).accepted,0,'cross-event review must fail');
+});
+
+test('custom SVG requires organizer and 21:9 illustration-only content below 100 KB',async t=>{
+  const f=makeFixture();t.after(()=>f.close());
+  const owner=await f.signIn('demo_owner');
+  const event=await f.createEvent(owner,'测试社团文化节');
+  const route='/api/events/'+event+'/banner';
+  const original='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2100 900">'+
+    '<rect width="2100" height="900" fill="#123456"/>'+
+    '<circle cx="1500" cy="450" r="230" fill="#fedcba"/></svg>';
+  assert.equal((await f.api(route,{method:'POST',raw:Buffer.from(original),contentType:'image/svg+xml'})).status,403);
+  const uploaded=await f.api(route,{method:'POST',cookie:owner,
+    raw:Buffer.from(original),contentType:'image/svg+xml'});
+  assert.equal(uploaded.status,201,await uploaded.clone().text());
+  const all=await(await f.api('/api/events')).json();
+  assert.equal(all.events.find(x=>x.id===event).has_custom_banner,1);
+  const image=await f.api('/api/events/'+event+'/banner.svg');
+  assert.equal(image.status,200);
+  assert.match(image.headers.get('Content-Security-Policy'),/script-src 'none'/);
+  const code=await image.text();
+  assert.match(code,/width="2100" height="900"/);
+  assert.match(code,/<circle/);
+  assert.doesNotMatch(code,/javascript:|onload|script/i);
+  for(const payload of [
+    original.replace('<circle','<script>alert(1)</script><circle'),
+    original.replace('fill="#123456"','onload="alert(1)" fill="#123456"'),
+    original.replace('2100 900','1024 1024'),
+    original.replace('<rect','<foreignObject></foreignObject><rect')
+  ]){
+    const response=await f.api(route,{method:'POST',cookie:owner,
+      raw:Buffer.from(payload),contentType:'image/svg+xml'});
+    assert.equal(response.status,422,'malicious or non-wide custom SVG rejected');
+  }
+  assert.equal((await f.api(route,{method:'POST',cookie:owner,
+    raw:Buffer.alloc(100_000,65),contentType:'image/svg+xml'})).status,413);
+  assert.equal((await f.api('/api/events/'+event+'/join',{method:'POST',data:{
+    displayName:'测试文化节报名',studentNumber:'TEST-CULT-1',privacyAcknowledged:true,aiConsent:false
+  }})).status,201,'banner upload never blocks student registration');
+});
+
+test('creating events exposes a separate enrollment date range',async t=>{
+  const f=makeFixture();t.after(()=>f.close());
+  const owner=await f.signIn('demo_owner');
+  const first=now()+1000*60;
+  const res=await f.api('/api/events',{method:'POST',cookie:owner,data:{
+    title:'测试科创展',guidelines:'完成预报名资料',
+    latitude:23.1,longitude:113.3,radiusM:150,
+    startsAt:first+3600_000,endsAt:first+7200_000,
+    registrationOpensAt:first,registrationClosesAt:first+1200_000,
+    bannerTemplate:'science'
+  }});
+  assert.equal(res.status,201,await res.clone().text());
+  const eventId=(await res.json()).id;
+  const registered=await f.api('/api/events/'+eventId+'/join',{method:'POST',data:{
+    displayName:'测试早报名',studentNumber:'TEST-EARLY-1',privacyAcknowledged:true,aiConsent:false
+  }});
+  assert.equal(registered.status,409);
+  assert.match((await registered.json()).error,/尚未开始/);
+  const publicInfo=(await(await f.api('/api/events')).json()).events.find(x=>x.id===eventId);
+  assert.equal(publicInfo.banner_template,'science');
+  assert.equal(publicInfo.registration_opens_at,first);
+  assert.equal(publicInfo.registration_closes_at,first+1200_000);
 });

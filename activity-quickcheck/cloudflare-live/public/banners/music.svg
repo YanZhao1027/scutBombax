@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2100" height="900" viewBox="0 0 2100 900">
+ <defs>
+ <linearGradient id="bg" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#24216c"/><stop offset="64%" stop-color="#5f58e9"/><stop offset="100%" stop-color="#a392ff"/></linearGradient>
+ <radialGradient id="shine"><stop offset="0%" stop-color="#ffffff" stop-opacity=".33"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+ </defs>
+ <rect width="2100" height="900" fill="url(#bg)"/>
+ <ellipse cx="1620" cy="310" rx="920" ry="760" fill="url(#shine)"/>
+ <path d="M0 725 Q400 570 870 690 T2100 625 V900 H0Z" fill="#24216c" opacity=".17"/>
+ <path d="M0 810 Q630 690 1190 765 T2100 730 V900 H0Z" fill="#ffffff" opacity=".10"/>
+ <circle cx="390" cy="120" r="245" fill="#f7c35a" opacity=".15"/><circle cx="1020" cy="670" r="285" fill="#ffffff" opacity=".065"/>
+ <g stroke="#ffffff" stroke-width="9" opacity=".35" fill="none" stroke-linecap="round">
+ <path d="M96 180 Q375 85 625 188"/><path d="M90 285 Q345 205 650 301"/>
+ </g>
+ <g fill="#ffffff" opacity=".27">
+ <circle cx="775" cy="175" r="17"/><circle cx="920" cy="410" r="12"/><circle cx="1110" cy="130" r="13"/><circle cx="1180" cy="560" r="17"/>
+ </g>
+ <g transform="translate(1370 115)">
+  <ellipse cx="290" cy="570" rx="550" ry="130" fill="#120f60" opacity=".28"/>
+  <path d="M60 510 Q290 440 520 510 L600 790 H-20Z" fill="#3e327e"/>
+  <rect x="146" y="135" width="350" height="450" rx="125" fill="#f8d7c5"/>
+  <rect x="176" y="153" width="288" height="275" rx="110" fill="#282475"/>
+  <rect x="217" y="220" width="205" height="180" rx="68" fill="#c4b9ff"/>
+  <path d="M270 394 V555 Q322 606 374 555 V393" fill="none" stroke="#f8d7c5" stroke-width="36" stroke-linecap="round"/>
+  <rect x="307" y="577" width="35" height="95" rx="17" fill="#f8d7c5"/>
+  <rect x="220" y="654" width="209" height="28" rx="14" fill="#f8d7c5"/>
+  <path d="M-30 175 L100 80 L140 360Z" fill="#ffe9ac" opacity=".7"/>
+  <path d="M590 30 L720 120 L530 360Z" fill="#fff0d2" opacity=".72"/>
+  <g fill="#ffcf68">
+   <circle cx="93" cy="170" r="22"/><circle cx="587" cy="205" r="24"/>
+   <path d="M4 324 V213 L60 194 V293 Q46 276 24 283 Q-13 292 4 324Z"/>
+   <path d="M537 106 V-6 L586 -22 V65 Q569 48 548 58 Q514 67 537 106Z"/>
+  </g>
+ </g>
+ </svg>

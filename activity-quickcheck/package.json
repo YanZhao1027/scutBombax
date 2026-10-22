@@ -13,7 +13,8 @@
     "bootstrap": "node --disable-warning=ExperimentalWarning scripts/bootstrap.mjs"
   },
   "dependencies": {
+    "@zxing/browser": "^0.2.1",
     "qrcode": "^1.5.4",
-    "@zxing/browser": "^0.2.1"
+    "saxes": "^6.0.0"
   }
 }

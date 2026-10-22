@@ -79,6 +79,6 @@ test('Full-viewport camera UI supports continuous scanning, closure, Android Bac
 test('One-code synthetic Stage organizer form avoids collecting real GPS coordinates',()=>{
   assert.match(app,/app\.syntheticOnly\?trialCoordinates:useGps/);
   assert.match(app,/一键填入虚构测试坐标/);
-  assert.match(app,/换手机可直接扫码恢复/);
+  assert.match(app,/我的活动 \/ 从截图找回一码通/);
   assert.doesNotMatch(app,/手机需在此区域才能领取签到码/);
 });

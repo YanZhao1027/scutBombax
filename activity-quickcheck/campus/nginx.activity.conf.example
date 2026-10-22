@@ -1,0 +1,21 @@
+# Example Nginx STATIC-ONLY listener behind cloudflared.
+# Replace <RELEASE_SHA> with exactly the SHA configured at CF edge.
+# Do not expose this port on the public Internet.
+server {
+    listen 127.0.0.1:8080;
+    server_name localhost;
+    root /srv/bombax-activity/public;
+    index index.html;
+    charset utf-8;
+    add_header X-Bombax-Static-Release "<RELEASE_SHA>" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Cache-Control "no-store" always;
+    location = /health-static { default_type text/plain; return 200 "ready"; }
+    location ^~ /api/ { return 404; } # API only at Cloudflare, NEVER local
+    location ^~ /__campus/ { return 404; }
+    location / {
+        limit_except GET HEAD { deny all; }
+        try_files $uri $uri/ /index.html;
+    }
+}

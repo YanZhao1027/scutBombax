@@ -1,5 +1,10 @@
 'use strict';
 const $=id=>document.getElementById(id);
+const MODE=document.body.dataset.page||'student';
+const PRESETS=Object.freeze([
+  ['music','音乐演出'],['volunteer','志愿公益'],['sports','体育运动'],
+  ['science','科技创新'],['festival','文化社团']
+]);
 const app={me:null,events:[],active:null,poll:null,scanner:null,scannerOverlay:null,scannerVideo:null,scannerEpoch:0,scannerHistory:false,scannerFullscreenEntered:false,scannerPreviousFocus:null,scannerFeedback:null,qr:null,syntheticOnly:false};
 function el(tag,props={},...children){
   const n=document.createElement(tag);
@@ -53,7 +58,10 @@ function validateEventInputs(x){
   if(ends<=Date.now())throw new Error('结束时间已经过去，请设置为未来时间（请核对手机日期和时区）');
   return {radius,starts,ends};
 }
-function notice(s,type=''){const n=$('notice');n.className='notice '+type;n.textContent=s;}
+function notice(s,type=''){
+  const n=$('notice');n.className='notice '+type;n.textContent=s;
+  n.hidden=MODE==='student'&&!type&&s.startsWith('活动速签已连接');
+}
 async function safe(fn){try{await fn();}catch(e){notice(e.message||'请求失败','error');}}
 async function request(path,{method='GET',data,raw,headers={}}={}){
   const options={method,credentials:'same-origin',headers:{...headers}};
@@ -85,10 +93,35 @@ async function start(){
       el('a',{href:'https://activity-demo.10273055.xyz/',text:'打开无个人信息的交互演示'})));
     return;
   }
+  if(MODE==='adminlogin'){
+    const me=await request('/api/me');
+    if(me.user?.role==='organizer'){location.replace('/admin/');return;}
+    $('account').replaceChildren();
+    renderAdminLogin();
+    notice('工作人员登录区 · 请使用主办方授权的岗位账号');
+    return;
+  }
+  if(MODE==='admin'){
+    const me=await request('/api/me');
+    if(me.user?.role!=='organizer'){location.replace('/adminlogin/');return;}
+    app.me=me.user;
+    app.events=(await request('/api/events')).events;
+    renderAccount();home();
+    notice('管理后台已连接 · 仅对授权工作人员开放');
+    return;
+  }
   // The QR opens this page with a private fragment: browsers never send it
   // in the HTTP request. Consume it immediately, then erase it from history.
   let restoredEventId=null;
   const fragment=location.hash;
+  if(fragment.startsWith('#event=')){
+    // Native Android pass shelf restores the HttpOnly cookie without exposing the
+    // receipt to JS. Only the non-secret event UUID travels in this fragment.
+    history.replaceState(history.state,'',location.pathname+location.search);
+    const match=/^#event=([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.exec(fragment);
+    if(match)restoredEventId=match[1];
+    else notice('本机票夹的活动编号无效','error');
+  }
   if(fragment.startsWith('#pass=')){
     history.replaceState(history.state,'',location.pathname+location.search);
     const match=/^#pass=(bqx_[a-f0-9]{64})$/.exec(fragment);
@@ -101,6 +134,8 @@ async function start(){
       }
     }else notice('这不是有效的花工木棉一码通二维码','error');
   }
+  // The public landing page never shows staff login forms, even when
+  // an existing organizer HttpOnly session happens to be present.
   const me=await request('/api/me');app.me=me.user;
   app.events=(await request('/api/events')).events;
   renderAccount();home();
@@ -112,29 +147,64 @@ async function start(){
 }
 function renderAccount(){
   const root=$('account');root.replaceChildren();
-  if(app.me?.role==='organizer'){
-    root.append(card('工作人员已登录',el('div',{class:'row between'},el('div',{},
-      el('strong',{text:app.me.displayName}),text('主办方或被授权岗位，负责创建、审核和核销活动')),
-      button('退出工作人员账号',async()=>{
-        await request('/api/logout',{method:'POST'});clean();app.me=null;renderAccount();home();
-      },'secondary'))));
-    return;
-  }
-  const signIn=form([
-    label('主办方 / 工作人员用户名',inp('username')),
-    label('工作人员密码',inp('password','password'))
-  ],'工作人员登录',async x=>{
-    await request('/api/login',{method:'POST',data:x});await start();
+  if(MODE!=='admin'||app.me?.role!=='organizer')return;
+  root.append(el('div',{class:'admin-session'},
+    el('strong',{text:'已登录：'+app.me.displayName}),
+    button('退出管理后台',async()=>{
+      await request('/api/logout',{method:'POST'});clean();
+      location.assign('/adminlogin/');
+    },'secondary')));
+}
+function renderAdminLogin(){
+  const target=$('content');target.replaceChildren();
+  const username=inp('username'),password=inp('password','password');
+  const login=form([
+    label('授权工作人员用户名',username),
+    label('工作人员密码',password)
+  ],'安全登录管理后台',async x=>{
+    await request('/api/login',{method:'POST',data:x});
+    location.replace('/admin/');
   });
-  root.append(card('学生免登录',
-    text('学生直接选择活动报名、上传材料及查看审核状态，无须注册账号或输入密码。'),
-    text('学生报名后请保存一码通二维码；换手机可直接扫码恢复自己的报名与审核状态。二维码与本浏览器数据都丢失时，不能仅凭学号找回，需主办方现场核实。'),
-    el('details',{},el('summary',{text:'主办方 / 审核员 / 扫码员登录'}),signIn)));
+  target.append(el('section',{class:'admin-login-panel'},
+    el('div',{class:'admin-login-icon',text:'✿'}),
+    el('h1',{text:'主办方后台登录'}),
+    text('仅活动负责人、材料审核员、现场扫码员和人工确认岗位使用。学生无需登录。'),
+    login,el('a',{href:'/',text:'← 返回公开活动首页'})));
+}
+function bannerUrl(event){
+  if(event.has_custom_banner)return '/api/events/'+encodeURIComponent(event.id)+'/banner.svg';
+  const chosen=PRESETS.some(x=>x[0]===event.banner_template)?event.banner_template:'music';
+  return '/banners/'+chosen+'.svg';
+}
+function enrollmentDates(event){
+  return {open:event.registration_opens_at??event.created_at??event.starts_at,
+    close:event.registration_closes_at??event.ends_at};
+}
+function enrollmentLabel(event){
+  const t=Date.now(),{open,close}=enrollmentDates(event);
+  return t<open?'即将开放报名':t>close?'报名已截止':'正在报名';
+}
+function drawEventCard(event){
+  const {open,close}=enrollmentDates(event);
+  const info=el('div',{class:'activity-info'},
+    el('div',{class:'activity-meta'},el('span',{class:'activity-pill',text:enrollmentLabel(event)}),
+      el('span',{class:'activity-type',text:'无需账号 · 一码通'})),
+    el('h3',{text:event.title}),
+    el('div',{class:'activity-detail-label',text:'报名时间'}),
+    text(stamp(open)+' — '+stamp(close),'activity-date'),
+    el('div',{class:'activity-detail-label',text:'活动时间'}),
+    text(stamp(event.starts_at)+' — '+stamp(event.ends_at),'activity-date'),
+    el('div',{class:'activity-detail-label',text:'活动要求'}),
+    text(event.guidelines||'请以主办方发布的活动说明为准','activity-requirements'),
+    button('查看活动 / 免登录报名',()=>viewEvent(event),'activity-open'));
+  return el('article',{class:'activity-card'},
+    el('img',{class:'activity-banner',src:bannerUrl(event),alt:event.title+'主题卡通横幅',loading:'lazy',decoding:'async'}),
+    info);
 }
 function home(){
   clean();app.active=null;
   const root=$('content');root.replaceChildren();
-  if(app.me?.role==='organizer'){
+  if(MODE==='admin'&&app.me?.role==='organizer'){
     const create=form([
       label('活动标题',inp('title')),
       label('审核要求（例如集赞数量）',el('textarea',{name:'guidelines',maxlength:'1000'})),
@@ -142,13 +212,30 @@ function home(){
       label('WGS84 经度',el('input',{name:'longitude',type:'number',step:'any',required:'required'})),
       label('定位半径（米，50–1000）',el('input',{name:'radiusM',type:'number',min:50,max:1000,step:1,value:150,required:'required'})),
       label('开始时间（按设备本地时间）',el('input',{name:'startsAt',type:'datetime-local',value:localInputTime(Date.now()-5*60000),required:'required'})),
-      label('结束时间（按设备本地时间）',el('input',{name:'endsAt',type:'datetime-local',value:localInputTime(Date.now()+90*60000),required:'required'}))
+      label('结束时间（按设备本地时间）',el('input',{name:'endsAt',type:'datetime-local',value:localInputTime(Date.now()+90*60000),required:'required'})),
+      label('报名开放时间',el('input',{name:'registrationOpensAt',type:'datetime-local',value:localInputTime(Date.now()-5*60000),required:'required'})),
+      label('报名截止时间',el('input',{name:'registrationClosesAt',type:'datetime-local',value:localInputTime(Date.now()+85*60000),required:'required'})),
+      label('活动卡通横幅（内置 21:9 SVG）',el('select',{name:'bannerTemplate'},
+        ...PRESETS.map(([id,name])=>el('option',{value:id,text:name})))),
+      label('可选：替换为主办方的 21:9 SVG（严格小于 100 KB）',
+        el('input',{name:'bannerSvg',type:'file',accept:'.svg,image/svg+xml'}))
     ],'创建活动',async x=>{
       const valid=validateEventInputs(x);
-      await request('/api/events',{method:'POST',data:{
+      const registrationOpensAt=new Date(x.registrationOpensAt).getTime();
+      const registrationClosesAt=new Date(x.registrationClosesAt).getTime();
+      if(!Number.isFinite(registrationOpensAt)||!Number.isFinite(registrationClosesAt)||
+        registrationOpensAt>registrationClosesAt||registrationClosesAt>valid.ends)
+        throw new Error('报名开始须早于报名截止，报名截止不能晚于活动结束');
+      const created=await request('/api/events',{method:'POST',data:{
         title:x.title,guidelines:x.guidelines,latitude:Number(x.latitude),longitude:Number(x.longitude),
-        radiusM:valid.radius,startsAt:valid.starts,endsAt:valid.ends,requirePhoto:true
+        radiusM:valid.radius,startsAt:valid.starts,endsAt:valid.ends,requirePhoto:true,
+        registrationOpensAt,registrationClosesAt,bannerTemplate:x.bannerTemplate
       }});
+      const art=x.bannerSvg;
+      if(art instanceof File&&art.size>0){
+        try{await uploadEventBanner(created.id,art);}
+        catch(e){notice('活动已创建，但插画上传失败：'+e.message,'error');await start();return;}
+      }
       notice('活动创建成功','success');await start();
     });
     const useGps=button('用当前 GPS 作为活动地点',async()=>{
@@ -167,6 +254,8 @@ function home(){
     const fillTrialTime=button('一键设置：开始前 5 分钟，结束后 90 分钟',async()=>{
       create.elements.namedItem('startsAt').value=localInputTime(Date.now()-5*60000);
       create.elements.namedItem('endsAt').value=localInputTime(Date.now()+90*60000);
+      create.elements.namedItem('registrationOpensAt').value=localInputTime(Date.now()-5*60000);
+      create.elements.namedItem('registrationClosesAt').value=localInputTime(Date.now()+85*60000);
       create.elements.namedItem('radiusM').value='150';
       notice('已填入合法的演练时间和 150 米半径（以本设备时间为准）。','success');
     },'secondary');
@@ -179,32 +268,148 @@ function home(){
         text('当前设备时区：'+(Intl.DateTimeFormat().resolvedOptions().timeZone||'本地')+'。时间已预填，可直接创建 90 分钟模拟活动。'),
         create)));
   }
-  const list=card('活动列表');
-  if(!app.events.length)list.append(text('暂时还没有活动。'));
-  for(const event of app.events){
-    const item=el('div',{class:'item'},el('h3',{text:event.title}),text(event.guidelines||'按主办方要求提交材料'),
-      text(stamp(event.starts_at)+' 至 '+stamp(event.ends_at)),
-      button(app.me?.role==='organizer'?'进入工作人员后台':'免登录报名 / 签到',
-        ()=>viewEvent(event),app.me?'':'secondary'));
-    list.append(item);
+  if(MODE==='admin'){
+    const selector=el('select',{'aria-label':'选择要管理的活动'},
+      el('option',{value:'',text:'选择需要审核或现场处理的活动'}),
+      ...app.events.map(e=>el('option',{value:e.id,text:e.title+' · '+stamp(e.starts_at)})));
+    root.prepend(el('section',{class:'admin-workspace'},
+      el('div',{class:'admin-workspace-header'},
+        el('h2',{text:'管理工作台'}),text('选择活动后进入审核、扫码和人员授权；这里不展示学生首页活动卡片。')),
+      el('div',{class:'row'},selector,
+        button('进入该活动管理',async()=>{
+          const event=app.events.find(e=>e.id===selector.value);
+          if(!event)throw new Error('请先选择一个活动');
+          await viewEvent(event);
+        }))));
+    return;
   }
-  root.append(list);
+  const board=el('section',{class:'activity-board'},
+    el('div',{class:'activity-heading'},
+      el('h2',{text:'当前运营活动'}),
+      el('span',{class:'activity-heading-sub',text:'浏览活动 · 查看要求 · 免登录报名'})));
+  const grid=el('div',{class:'activity-grid'});
+  const ordered=[...app.events].sort((a,b)=>{
+    const aOpen=enrollmentDates(a).close>=Date.now()?0:1;
+    const bOpen=enrollmentDates(b).close>=Date.now()?0:1;
+    return aOpen-bOpen || a.starts_at-b.starts_at;
+  });
+  for(const e of ordered)grid.append(drawEventCard(e));
+  if(!ordered.length)grid.append(text('活动筹备中，稍后回来查看。'));
+  board.append(grid);root.append(board);
+  void renderStudentPassDesk(root);
+}
+async function importPassImage(file){
+  if(!file||!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>5*1024*1024)
+    throw new Error('请选择 5 MB 以内的 PNG、JPEG 或 WebP 一码通截图');
+  if(!window.ZXingBrowser?.BrowserQRCodeReader)throw new Error('二维码识别组件暂不可用，请重新加载');
+  const blobUrl=URL.createObjectURL(file);
+  let pass;
+  try{
+    const img=el('img',{src:blobUrl,alt:'本地导入的一码通截图'});
+    await img.decode();
+    const result=await new window.ZXingBrowser.BrowserQRCodeReader().decodeFromImageElement(img);
+    pass=window.BombaxScanner?.normalizeToken(result.getText());
+  }catch{
+    throw new Error('截图未识别出花工木棉一码通，请使用原始清晰截图');
+  }finally{URL.revokeObjectURL(blobUrl);}
+  if(!pass)throw new Error('二维码不是本站的一码通，请勿导入校园认证码或支付码');
+  // The screenshot never leaves the device; ONLY the bearer pass is sent via
+  // HTTPS POST for mandatory validity verification. No URL query token.
+  const restored=await request('/api/pass/restore',{method:'POST',data:{token:pass}});
+  const verified=await request('/api/events/'+restored.eventId);
+  if(!verified.registration)throw new Error('服务器未确认该截图的报名权限');
+  const event=app.events.find(x=>x.id===restored.eventId);
+  if(!event)throw new Error('凭证有效，但活动尚未出现在当前活动列表，请联系主办方');
+  await viewEvent(event);
+  notice('服务端查验通过，已恢复这场活动。花工木棉 App 也会加密保存本机票夹；请继续保留原截图。','success');
+}
+async function renderStudentPassDesk(root){
+  const native=window.BombaxAppVault;
+  const box=card(native?.enabled?'本机活动票夹 · 无账号':'一码通找回 · 无账号',
+    text('活动报名不用登录。每次报名都只有一个固定二维码，可随时查询、补交材料或在现场签到。'),
+    text('请务必另外截图保存一码通！在手机设置中清除 App 应用数据（包括本机活动记录和缓存）、卸载、换手机，或丢失原浏览器 Cookie，都可能失去本机凭证。恢复时必须联网由服务器查验；仅保存本机数据不是独立备份。'),
+    text('一码通等同于私密报名凭证，截图持有人也可查看报名，请勿公开转发。'));
+  const picker=el('input',{type:'file',accept:'image/png,image/jpeg,image/webp'});
+  picker.setAttribute('aria-label','从照片导入旧的一码通截图');
+  box.append(label('从照片恢复旧的一码通（仅本机识图，服务器查验有效性）',picker),
+    button('导入截图并向服务器查证',()=>safe(async()=>{
+      const file=picker.files?.[0];if(!file)throw new Error('请先选择保存的一码通截图');
+      await importPassImage(file);picker.value='';
+    }),'secondary'));
+  if(native?.enabled){
+    const lines=el('div',{},text('正在读取本机加密票夹…'));
+    box.append(el('h3',{text:'本机已经参与的活动'}),lines,
+      text('这里只在本机加密保存活动、上次查验状态和二维码凭证，不会建立花工木棉用户账号。离线记录仅供参考，以联网时服务器查验为准。'));
+    native.call('list').then(rows=>{
+      if(!box.isConnected)return;
+      lines.replaceChildren();
+      if(!rows?.length){lines.append(text('本机尚未保存活动，报名或导入截图后会自动保管。'));return;}
+      for(const row of rows){
+        const status=row.attended?'上次同步：已签到':row.state==='approved'?'上次同步：审核通过':row.state==='pending'?'上次同步：审核中':'上次同步：需补材料 / 被驳回';
+        lines.append(el('div',{class:'item'},el('strong',{text:row.title||'活动'}),
+          text(status),el('div',{class:'row'},
+            button('联网验证并打开',()=>safe(async()=>{
+              await native.call('restore',{eventId:row.eventId});
+              const event=app.events.find(x=>x.id===row.eventId);
+              if(!event)throw new Error('活动暂未列出，无法联网查询；票夹未删除');
+              const proof=await request('/api/events/'+row.eventId);
+              if(!proof.registration)throw new Error('服务端尚未认可本机凭证，请导入原截图');
+              await viewEvent(event);
+              notice('服务端已确认一码通有效，当前报名状态已刷新','success');
+            }),'secondary'),
+            button('从本机移除此活动',()=>safe(async()=>{
+              if(!window.confirm('只删除本机加密副本。截图和服务器报名不会自动注销；确认删除？'))return;
+              await native.call('forget',{eventId:row.eventId});
+              await renderStudentPassDesk(root);
+              box.remove();
+            }),'secondary'))));
+      }
+    }).catch(()=>{
+      if(box.isConnected)lines.replaceChildren(text('本机票夹暂不可用。仍可截图保存，或导入既有二维码。'));
+    });
+  }else box.append(text('网页版无需安装 App；单独保存截图即可，换设备可以在此导入并查证。'));
+  root.append(el('details',{class:'pass-desk'},
+    el('summary',{text:'我的活动 / 从截图找回一码通'}),box));
+}
+async function uploadEventBanner(eventId,file){
+  if(!(file instanceof File)||file.type!=='image/svg+xml')
+    throw new Error('只能上传 image/svg+xml 格式的 SVG 文件');
+  if(file.size<=100||file.size>=100_000)throw new Error('SVG 插画必须严格小于 100 KB');
+  await request('/api/events/'+eventId+'/banner',{
+    method:'POST',raw:file,headers:{'Content-Type':'image/svg+xml'}});
 }
 async function viewEvent(event){
   clean();app.active=event.id;
   const root=$('content');root.replaceChildren();
-  const head=card(event.title,button('← 返回活动列表',home,'secondary'),
-    text('活动期间新报名与新上传材料仍可由后台实时审核；最终名单必须同时满足材料通过与到场。'));
+  const head=card(event.title,button(MODE==='admin'?'← 返回管理台':'← 返回活动',home,'secondary'),
+    text(MODE==='admin'?'这里可管理审核、授权岗位和现场核销；一切实际结果以服务端记录为准。':
+      '查看报名、补充材料以及固定一码通；请为二维码单独截图备份。'));
   root.append(head);
-  if(app.me?.role==='organizer')await organizerView(event,root);
+  if(MODE==='admin'&&app.me?.role==='organizer')await organizerView(event,root);
   else await studentView(event,root);
 }
 async function studentView(event,root){
   const snapshot=await request('/api/events/'+event.id);
   const reg=snapshot.registration;
+  if(reg && window.BombaxAppVault?.enabled){
+    try{
+      await window.BombaxAppVault.call('save',{
+        eventId:event.id,title:event.title,state:reg.state,
+        attended:!!reg.attendance,expiresAt:event.ends_at+30*86400_000
+      });
+    }catch{
+      notice('本机加密保存暂未完成，请立即截图保存一码通，以免换机无法恢复。','error');
+    }
+  }
   const box=card('我的报名与审核状态');
   root.append(box);
   if(!reg){
+    const dates=enrollmentDates(event),now=Date.now();
+    if(now<dates.open||now>dates.close){
+      box.append(text('当前不在报名开放时间：'+stamp(dates.open)+' 至 '+stamp(dates.close)+
+        '。如已报名，请通过一码通截图恢复后查询审核状态。'));
+      return;
+    }
     const privacy=el('input',{type:'checkbox',name:'privacyAcknowledged',value:'yes'});
     const join=form([
       label('虚构测试姓名（以“测试”开头）',inp('displayName')),
@@ -236,7 +441,10 @@ async function studentView(event,root){
     el('div',{class:'row'},
       el('a',{href:app.qr,download:'花工木棉-活动一码通.svg',text:'下载并保存一码通二维码'})),
     text('整个活动都用这一个二维码：扫描可查询是否审核通过，审核通过后到场由授权工作人员核销；扫码签到后仍能查询状态。'),
-    text('二维码相当于私密通行凭证，请勿转发或展示给陌生人；工作人员核销时仍需当面核实身份。'));
+    text('二维码相当于私密通行凭证，请勿转发或展示给陌生人；工作人员核销时仍需当面核实身份。'),
+    text(window.BombaxAppVault?.enabled
+      ? '本机 App 已尝试用 Android Keystore 加密保管本场活动。请仍截图保存二维码，清除应用数据或卸载时本机保险箱会消失。'
+      : '网页版请另外截图保存一码通。换设备后选择“从照片恢复旧的一码通截图”即可向服务器验证。'));
   if(reg.reviewReason)box.append(text('审核意见：'+reg.reviewReason));
   if(attendance&&reg.state!=='approved')box.append(text('人工通道已记录到场，仍需补齐证明材料并获得审核通过。'));
   const files=await request('/api/events/'+event.id+'/materials');
@@ -278,7 +486,7 @@ async function organizerView(event,root){
   const duty=response.duty,queue=response.registrations;
   const roles={owner:'负责人',reviewer:'后台材料审核',scanner:'快速扫码',manual:'人工确认到场'};
   const panel=card('工作岗位：'+(roles[duty]||duty),
-    text('最新状态每 5 秒刷新；如需填写审核意见，页面不会在输入期间自动重绘。'));
+    text('扫码、审核和授权均由独立岗位控制；表格勾选之后必须人工确认才提交。'));
   root.append(panel);
   const totals=el('div',{class:'row'},
     el('span',{class:'tag',text:'报名 '+queue.length}),
@@ -286,6 +494,18 @@ async function organizerView(event,root){
     el('span',{class:'tag green',text:'已到场 '+queue.filter(x=>x.attended_at||x.attendedAt).length}));
   panel.append(totals);
   if(duty==='owner'){
+    const cover=el('input',{type:'file',accept:'.svg,image/svg+xml'});
+    panel.append(el('details',{class:'banner-manage'},
+      el('summary',{text:'更换活动 21:9 SVG 卡通横幅'}),text('上传者必须是活动负责人。素材只支持安全 SVG 绘图，严格小于 100 KB。'),
+      el('img',{class:'banner-preview',src:bannerUrl(event),alt:'当前活动横幅'}),
+      label('选择新的插画文件',cover),
+      button('上传并替换活动横幅',async()=>{
+        const asset=cover.files?.[0];
+        if(!asset)throw new Error('请选择 SVG 图片');
+        await uploadEventBanner(event.id,asset);
+        notice('横幅已替换；请重新打开活动查看新插画。','success');
+        await start();
+      })));
     const assign=form([
       label('已有主办方账号',inp('username')),
       label('人员岗位',el('select',{name:'duty'},
@@ -312,7 +532,8 @@ async function organizerView(event,root){
     if(document.visibilityState!=='visible'||app.active!==event.id)return;
     const focused=document.activeElement;
     if(focused&&['INPUT','TEXTAREA'].includes(focused.tagName))return;
-    if(duty==='owner'||duty==='scanner')return; // Keep the camera stream mounted during scanning.
+    if(duty==='owner'||duty==='scanner'||duty==='reviewer')return;
+    // Review spreadsheet must never auto-refresh away staged checkbox decisions.
     await safe(()=>renderDuty(event,root,duty,false));
   },5000);
 }
@@ -328,36 +549,11 @@ async function renderDuty(event,root,duty,owner){
   const response=await request('/api/events/'+event.id+'/queue');
   const all=response.registrations;
   if(duty==='reviewer'){
-    const pending=all.filter(x=>x.state==='pending');
-    slot.append(text('优先审核已经人工到场、后补截图的学生；AI 仅显示建议，不代替审核。'));
-    for(const r of pending){
-      const item=el('div',{class:'item'},el('h3',{text:r.display_name+'（自填学号：'+r.student_number+'）'}),
-        el('span',{class:'tag',text:r.channel==='manual'?'人工已到场，待补审':'新提交待审'}),
-        text('材料 '+r.material_count+' 张'));
-      const photos=el('div');
-      item.append(button('加载审核截图',async()=>{
-        const m=await request('/api/events/'+event.id+'/materials?registrationId='+encodeURIComponent(r.id));
-        photos.replaceChildren(...m.materials.map(f=>el('div',{},el('img',{class:'qr',src:'/api/materials/'+f.id,alt:'审核证明截图'}))));
-      },'secondary'),photos);
-      const advice=el('div');
-      if(!app.syntheticOnly)item.append(button('DeepSeek V4.1 辅助初审（须获学生同意）',async()=>{
-        const x=await request('/api/events/'+event.id+'/ai-review',{method:'POST',data:{registrationId:r.id}});
-        advice.replaceChildren(text('AI 建议：'+x.advice.assessment+' · 可见点赞：'+(x.advice.visibleLikeCount??'不确定')),
-          text('可见依据：'+x.advice.visibleEvidence),text('疑点：'+x.advice.concerns.join('；')),
-          text('AI 不能验证截图真实性，必须人工确认。'));
-      },'secondary'),advice);
-      else item.append(text('虚构资料演练站禁用第三方 AI；请由审核员人工审核。'));
-      const note=el('input',{placeholder:'审核说明/要求补充',maxlength:'300'});
-      item.append(note,el('div',{class:'row'},
-        button('人工审核通过',()=>review('approved')),
-        button('驳回 / 补充材料',()=>review('rejected'),'danger')));
-      async function review(state){
-        await request('/api/events/'+event.id+'/review',{method:'POST',data:{registrationId:r.id,state,reason:note.value}});
-        notice('审核结果已记录。','success');await renderDuty(event,root,duty,owner);
-      }
-      slot.append(item);
-    }
-    if(!pending.length)slot.append(text('当前没有待审核的新材料。'));
+    if(!window.BombaxReviewGrid?.render)throw new Error('批量审核表格未加载，请刷新后台');
+    await window.BombaxReviewGrid.render({
+      slot,rows:all,event,api:request,notify:notice,
+      reload:()=>renderDuty(event,root,duty,owner)
+    });
   }else if(duty==='manual'){
     slot.append(text('只在当面核对身份后操作。人工到场不等于集赞材料通过。'));
     const search=el('input',{placeholder:'搜索姓名或自填学号'}),list=el('div');
@@ -437,23 +633,23 @@ async function renderDuty(event,root,duty,owner){
     }
     function syncSoundControls(){
       for(const item of soundControls){
-        item.textContent=feedback.soundEnabled?'🔔 成功铃声：开':'🔕 成功铃声：关';
+        item.textContent=feedback.soundEnabled?'🔔 成功/错误提示音：开':'🔕 成功/错误提示音：关';
         item.setAttribute('aria-checked',String(feedback.soundEnabled));
-        item.setAttribute('aria-label',feedback.soundEnabled?'关闭成功核销提示音':'开启成功核销提示音');
+        item.setAttribute('aria-label',feedback.soundEnabled?'关闭成功与失败提示音':'开启成功与失败提示音');
       }
     }
     function soundSwitch(css='secondary'){
       const control=el('button',{
         type:'button',class:css,role:'switch','aria-checked':'false',
-        'aria-label':'开启成功核销提示音'
-      },'🔕 成功铃声：关');
+        'aria-label':'开启成功与失败提示音'
+      },'🔕 成功/错误提示音：关');
       control.addEventListener('click',()=>safe(async()=>{
         const requested=!feedback.soundEnabled;
         const active=await feedback.setSound(requested);
         syncSoundControls();
         report(requested&&!active
           ? '浏览器无法开启提示音，请检查系统音量或改用文字计数'
-          : active?'提示音已开启：每次成功核销响一声':'提示音已关闭：仅显示成功编号',
+          : active?'8-bit 提示音已开启：成功响亮上行音、失败两段下降警示音':'提示音已关闭：仅显示成功编号',
           requested&&!active?'error':'normal');
       }));
       // Keep both the panel and fullscreen switches synchronized, including
@@ -476,6 +672,7 @@ async function renderDuty(event,root,duty,owner){
         if(lastAttempt!==checkin||Date.now()-lastAttemptAt>2000){
           report('不是花工木棉签到码；请勿扫描学校支付或认证二维码。','error');
           markFailed();
+          feedback.rejected({audible:!document.hidden});
         }
         lastAttempt=checkin;lastAttemptAt=Date.now();
         return;
@@ -510,6 +707,7 @@ async function renderDuty(event,root,duty,owner){
         },2100);
       }catch(e){
         markFailed();
+        feedback.rejected({audible:!document.hidden});
         report('核销失败：'+e.message+'（成功计数未增加）','error');
         try{navigator.vibrate?.([75,55,75]);}catch{}
       }finally{
@@ -568,7 +766,7 @@ async function renderDuty(event,root,duty,owner){
         marker(true),hud,
         el('div',{class:'scanner-fullscreen-controls'},
           soundSwitch('scanner-fullscreen-sound'),retry),
-        el('p',{text:'每次成功编号加一、铃声至多响一次；失败或重复不加。继续扫描下一位的一码通。'}));
+        el('p',{text:'每次成功编号加一、播放一次 8-bit 上行提示音；失败或重复不加，播放两段更响亮的 8-bit 下降警示音（须先开启音效）。继续扫描下一位的一码通。'}));
       const overlay=el('div',{class:'bombax-scanner-fullscreen',role:'dialog','aria-modal':'true',
         'aria-label':'全屏二维码签到扫码','tabindex':'-1'},
         video,el('div',{class:'scanner-fullscreen-shade','aria-hidden':'true'}),
@@ -597,10 +795,28 @@ async function renderDuty(event,root,duty,owner){
       }
       void startCamera(video,overlay,epoch);
     }
+    function previewSound(kind){
+      // Staff must opt in first; sample tones never call the server or alter
+      // the success counter, even during active camera scanning.
+      if(!feedback.soundEnabled){
+        report('请先手动开启提示音，再试听。试听不核销、不计数。','error');
+        return;
+      }
+      const sample=feedback.preview(kind,{audible:!document.hidden});
+      report(sample.played
+        ?kind==='success'?'已试听成功 8-bit 上行音：未核销，成功编号不变':'已试听失败 8-bit 下降警示音：未核销，成功编号不变'
+        :'此设备暂无法播放提示音。请检查系统媒体音量或浏览器声音权限。',
+        sample.played?'normal':'error');
+    }
     slot.append(el('div',{class:'row scanner-action-row'},
         button('开启全屏摄像头扫码',openCamera),soundSwitch()),
+      el('details',{class:'sound-preview'},
+        el('summary',{text:'现场试听提示音（不核销、不计数）'}),
+        el('div',{class:'row'},
+          button('试听成功铃声',()=>previewSound('success'),'secondary'),
+          button('试听失败提示音',()=>previewSound('failure'),'secondary'))),
       marker(),status,
-      text('成功核销会显示新的 #001、#002… 编号；失败或重复不会加一。铃声默认关闭，开启后每次核销成功只响一声。扫码时先核对本人身份。'));
+      text('成功核销会显示新的 #001、#002… 编号；失败或重复不会加一。音效默认关闭，开启后成功播放一次清晰的 8-bit 上行短音，失败播放两段更响亮的 8-bit 下降警示音。扫码时先核对本人身份。'));
     if(app.syntheticOnly){
       const picker=el('input',{type:'file',accept:'image/png,image/jpeg,image/webp',class:'hidden',
         'aria-label':'只在虚构数据演练站选择二维码图片'});
@@ -669,5 +885,12 @@ window.addEventListener('popstate',()=>{
 document.addEventListener('fullscreenchange',()=>{
   if(app.scannerOverlay&&app.scannerFullscreenEntered&&
       document.fullscreenElement!==app.scannerOverlay)cleanScanner();
+});
+// Native shelf can change only the URL fragment within the already-loaded WebView.
+// A same-document navigation does not rerun DOMContentLoaded, so explicitly
+// re-verify the stored receipt with the Stage backend before entering an event.
+window.addEventListener('hashchange',()=>{
+  const fragment=location.hash;
+  if(fragment.startsWith('#event=')||fragment.startsWith('#pass='))void safe(start);
 });
 safe(start);

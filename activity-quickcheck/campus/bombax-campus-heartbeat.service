@@ -1,0 +1,17 @@
+[Unit]
+Description=Bombax activity Ubuntu static server health heartbeat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=bombax-static
+Group=bombax-static
+EnvironmentFile=/etc/bombax/activity-campus.env
+ExecStart=/usr/local/sbin/bombax-campus-heartbeat.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/bombax/activity-campus.env
+StandardOutput=journal
