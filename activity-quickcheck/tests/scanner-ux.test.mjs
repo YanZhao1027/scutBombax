@@ -1,0 +1,94 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+
+const base=new URL('../cloudflare-live/public/',import.meta.url);
+const code=fs.readFileSync(new URL('scan-utils.js',base),'utf8');
+const html=fs.readFileSync(new URL('index.html',base),'utf8');
+const app=fs.readFileSync(new URL('app.js',base),'utf8');
+function loadScanner(secure=true){
+  const window={isSecureContext:secure};
+  vm.runInNewContext(code,{window});
+  return window.BombaxScanner;
+}
+test('Only 256-bit activity tokens are accepted, never official payment/authentication QR payloads',()=>{
+  const scan=loadScanner();
+  assert.equal(scan.validToken('bqx_'+('a0'.repeat(32))),true);
+  assert.equal(scan.validToken('  bqx_'+('ab'.repeat(32))+'  '),true);
+  for(const bad of [
+    null,'',42,'bqx_00000','bqx_'+('f'.repeat(63)),
+    'bqx_'+('f'.repeat(65)),'bqx_'+('G'.repeat(64)),
+    'https://ecardwxnew.scut.edu.cn/',
+    'https://activity-stage.10273055.xyz/?token=bqx_'+('f'.repeat(64)),
+    'wxp://anything','student-id:000001','BEGIN:VCARD',
+    '0'.repeat(64)
+  ])assert.equal(scan.validToken(bad),false,String(bad));
+});
+test('User-friendly camera errors distinguish browser denial, no hardware and busy hardware',()=>{
+  const scan=loadScanner();
+  assert.match(scan.scannerProblem({name:'NotAllowedError'}),/相机|权限/);
+  assert.match(scan.scannerProblem({name:'PermissionDeniedError'}),/相机|权限/);
+  assert.match(scan.scannerProblem({name:'SecurityError'}),/相机|权限/);
+  assert.match(scan.scannerProblem({name:'NotFoundError'}),/没有找到|设备/);
+  assert.match(scan.scannerProblem({name:'NotReadableError'}),/占用/);
+  assert.match(scan.scannerProblem({name:'AbortError'}),/中断/);
+  assert.match(loadScanner(false).scannerProblem({name:'TypeError'}),/HTTPS/);
+});
+test('Scanner is only loaded from same-origin assets and trial file import only appears in synthetic mode',()=>{
+  assert.match(html,/<script defer src="\/scan-utils\.js"><\/script>/);
+  assert.match(html,/<link rel="stylesheet" href="\/scanner\.css">/);
+  assert.match(app,/if\(app\.syntheticOnly\)\{\s*const picker/);
+  assert.match(app,/await image\.decode\(\)/);
+  assert.match(app,/decodeFromImageElement\(image\)/);
+  assert.match(app,/URL\.revokeObjectURL\(blobUrl\)/);
+  assert.match(app,/validToken\(checkin\)/);
+  assert.match(app,/if\(document\.hidden\)cleanScanner\(\)/);
+  assert.doesNotMatch(app,/console\.(log|debug|info)\(.*(?:token|result)/);
+});
+
+test('Full-viewport camera UI supports continuous scanning, closure, Android Back and camera cleanup',()=>{
+  const css=fs.readFileSync(new URL('scanner.css',base),'utf8');
+  assert.match(app,/class:'bombax-scanner-fullscreen'/);
+  assert.match(app,/role:'dialog','aria-modal':'true'/);
+  assert.match(app,/requestFullscreen\(\{navigationUI:'hide'\}\)/);
+  assert.match(app,/scannerFullscreenEntered/);
+  assert.match(app,/epoch=\+\+app\.scannerEpoch;\s*void startCamera\(video,overlay,epoch\)/);
+  assert.match(app,/let epoch=\+\+app\.scannerEpoch/);
+  assert.match(app,/history\.pushState\(\{__bombaxScanner:true\}/);
+  assert.match(app,/window\.addEventListener\('popstate'/);
+  assert.match(app,/document\.addEventListener\('fullscreenchange'/);
+  assert.match(app,/if\(document\.hidden\)cleanScanner\(\)/);
+  assert.match(app,/getTracks\?\.\(\)\.forEach\(track=>track\.stop\(\)\)/);
+  assert.match(app,/lastAccepted=checkin/);
+  assert.match(app,/核销成功 · 请下一位/);
+  assert.match(app,/✕ 退出扫码/);
+  assert.match(css,/position:\s*fixed;/);
+  assert.match(css,/100dvh/);
+  assert.match(css,/env\(safe-area-inset-bottom\)/);
+  assert.match(css,/object-fit:\s*cover;/);
+  assert.match(css,/prefers-reduced-motion:\s*reduce/);
+});
+
+test('Ordinary scanner/reviewer/manual UI hides student identity; exceptional lookup is an explicit audited action',()=>{
+  assert.doesNotMatch(app,/搜索姓名或自填学号/);
+  assert.doesNotMatch(app,/r\.display_name\+'（自填学号：'/);
+  assert.match(app,/匿名报名 · /);
+  assert.match(app,/人工核验编号：/);
+  assert.match(app,/assist-lookup/);
+  assert.match(app,/studentPresent:true/);
+  assert.match(app,/reasonCode:reason\.value/);
+  assert.match(app,/reasonNote:explanation\.value\.trim\(\)/);
+  assert.match(app,/if\(!confirmed\.checked\)/);
+  assert.match(app,/identityChecked:true/);
+  assert.match(app,/data-manual-disclosure/);
+  assert.match(app,/data-sensitive-lookup/);
+  assert.match(app,/expireTimer=setTimeout/);
+  assert.match(app,/visibleUntil=Date\.now\(\)\+60_000/);
+  assert.match(app,/document\.addEventListener\('visibilitychange',onHide\)/);
+  assert.match(app,/app\.manualCleanup\?\.\(\)/);
+  assert.match(app,/身份资料已自动隐藏/);
+  assert.match(app,/data:\{registrationId:r\.id,reason:explanation\.value\.trim\(\),identityChecked:true\}/);
+  assert.match(app,/到场登记完成/);
+  assert.match(app,/if\(duty==='owner'\)panel\.append\(button\('导出已审核且已到场 CSV/);
+});

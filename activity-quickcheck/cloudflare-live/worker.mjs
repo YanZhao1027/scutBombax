@@ -3,10 +3,34 @@ import QRCode from 'qrcode';
 // NOT deployed by the public showcase. ENABLE_LIVE must be enabled only after review.
 const te=new TextEncoder();
 const SESSION_MS=12*3600_000, TICKET_MS=45_000, MAX_IMAGE=3*1024*1024;
+const QR_LOOKUP_GRACE_MS=48*3600_000;
+const MANUAL_REASONS=new Set(['unreadable_qr','expired_qr','camera_failure','network_issue','other']);
 const uuid=()=>crypto.randomUUID(), epoch=()=>Date.now();
 const bytes=n=>crypto.getRandomValues(new Uint8Array(n));
 const hex=a=>Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');
 const utf8=s=>te.encode(s);
+// No names, student numbers or registration IDs appear in these random hints.
+// A 12-character Crockford Base32 reference is for finding a record, not proof
+// of student identity or permission to redeem anything.
+const REF_ALPHABET='0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+function newRecoveryCode(){
+  const raw=Array.from(bytes(12),b=>REF_ALPHABET[b&31]).join('');
+  return 'BM-'+raw.slice(0,4)+'-'+raw.slice(4,8)+'-'+raw.slice(8,12);
+}
+function canonicalRecoveryCode(raw){
+  if(typeof raw!=='string'||raw.length>32)return null;
+  const value=raw.trim().toUpperCase().replace(/[\s-]/g,'').replace(/O/g,'0').replace(/[IL]/g,'1');
+  if(!/^BM[0-9A-HJKMNP-TV-Z]{12}$/.test(value))return null;
+  return 'BM-'+value.slice(2,6)+'-'+value.slice(6,10)+'-'+value.slice(10);
+}
+async function ensureRecoveryCode(db,registration){
+  if(registration.recovery_code)return registration.recovery_code;
+  await db.prepare('UPDATE activity_registrations SET recovery_code=? WHERE id=? AND recovery_code IS NULL')
+    .bind(newRecoveryCode(),registration.id).run();
+  const row=await db.prepare('SELECT recovery_code FROM activity_registrations WHERE id=?')
+    .bind(registration.id).first();
+  return row.recovery_code;
+}
 const err=(status,message)=>{throw Object.assign(new Error(message),{status});};
 const need=(v,status,message)=>{if(!v)err(status,message);};
 const str=(v,max=200)=>{need(typeof v==='string'&&v.trim().length>0&&v.length<=max,400,'字段无效');return v.trim();};
@@ -203,14 +227,15 @@ async function api(req,env,url){
     if(method==='GET'&&action===''){
       const reg=user?.role==='student'?await regFor(db,eid,user.id):null;
       const attendance=reg?await db.prepare('SELECT attended_at,channel FROM activity_attendance WHERE registration_id=?').bind(reg.id).first():null;
+      const recoveryCode=reg?await ensureRecoveryCode(db,reg):null;
       return json({event,registration:reg?{id:reg.id,state:reg.state,reviewReason:reg.review_reason,
-        aiConsent:Boolean(reg.ai_consent),attendance}:null});
+        aiConsent:Boolean(reg.ai_consent),attendance,recoveryCode}:null});
     }
     if(method==='POST'&&action==='join'){
       need(user?.role==='student',403,'只有学生可报名');need(epoch()<=event.ends_at,409,'报名结束');
       const x=await body(req),id=uuid(),t=epoch();
-      await db.prepare('INSERT INTO activity_registrations(id,event_id,user_id,note,created_at,updated_at,ai_consent) VALUES (?,?,?,?,?,?,?)')
-        .bind(id,eid,user.id,String(x.note||'').slice(0,500),t,t,x.aiConsent===true?1:0).run();
+      await db.prepare('INSERT INTO activity_registrations(id,event_id,user_id,note,created_at,updated_at,ai_consent,recovery_code) VALUES (?,?,?,?,?,?,?,?)')
+        .bind(id,eid,user.id,String(x.note||'').slice(0,500),t,t,x.aiConsent===true?1:0,newRecoveryCode()).run();
       return json({id,state:'pending'},201);
     }
     if(method==='POST'&&action==='consent'){
@@ -271,10 +296,18 @@ async function api(req,env,url){
       need(!attendance,409,'已经到场');
       need(epoch()>=event.starts_at&&epoch()<=event.ends_at,409,'尚未到签到时间');
       geo(event,await body(req));
-      const token='bqx_'+hex(bytes(32));
-      await db.prepare('INSERT INTO activity_tickets(registration_id,digest,expires_at) VALUES (?,?,?) ON CONFLICT(registration_id) DO UPDATE SET digest=excluded.digest,expires_at=excluded.expires_at')
-        .bind(r.id,await sha(token),epoch()+TICKET_MS).run();
-      return json({token,expiresAt:epoch()+TICKET_MS});
+      const token='bqx_'+hex(bytes(32)),digest=await sha(token),issued=epoch(),expiresAt=issued+TICKET_MS;
+      // Keep only a digest trail for an exceptional, audited lookup after
+      // expiration, QR rotation or consumption; it never authorizes sign-in.
+      await db.batch([
+        db.prepare('INSERT INTO activity_tickets(registration_id,digest,expires_at) VALUES (?,?,?) ON CONFLICT(registration_id) DO UPDATE SET digest=excluded.digest,expires_at=excluded.expires_at')
+          .bind(r.id,digest,expiresAt),
+        db.prepare('INSERT INTO activity_ticket_history(digest,registration_id,event_id,issued_at,expires_at) VALUES (?,?,?,?,?)')
+          .bind(digest,r.id,eid,issued,expiresAt)
+      ]);
+      await db.prepare('DELETE FROM activity_ticket_history WHERE expires_at<?')
+        .bind(issued-QR_LOOKUP_GRACE_MS).run();
+      return json({token,expiresAt});
     }
     if(method==='POST'&&action==='staff'){
       await access(db,user,eid,['owner']);
@@ -287,12 +320,59 @@ async function api(req,env,url){
     }
     if(method==='GET'&&action==='queue'){
       const a=await access(db,user,eid);
-      const rows=await db.prepare("SELECT r.id,r.state,r.review_reason,r.updated_at,r.note,u.display_name,u.student_number,t.channel,t.attended_at,(SELECT COUNT(*) FROM activity_files f WHERE f.registration_id=r.id) material_count FROM activity_registrations r JOIN activity_users u ON u.id=r.user_id LEFT JOIN activity_attendance t ON t.registration_id=r.id WHERE r.event_id=? ORDER BY CASE WHEN r.state='pending' AND t.channel='manual' THEN 0 WHEN r.state='pending' THEN 1 ELSE 2 END,r.updated_at DESC LIMIT 500").bind(eid).all();
-      return json({duty:a.duty,registrations:rows.results.map(r=>{
-        if(a.duty==='scanner')return {id:r.id,state:r.state,attendedAt:r.attended_at};
-        if(a.duty==='manual')return {id:r.id,displayName:r.display_name,studentNumber:r.student_number,attendedAt:r.attended_at,state:r.state};
-        return r;
-      })});
+      if(a.duty==='scanner'||a.duty==='manual'){
+        // Normal scanner and manual-lane overview has NO identity join, no
+        // student IDs, no registration IDs and no global person-search list.
+        const rows=await db.prepare("SELECT r.state,t.attended_at FROM activity_registrations r LEFT JOIN activity_attendance t ON t.registration_id=r.id WHERE r.event_id=? LIMIT 500").bind(eid).all();
+        return json({duty:a.duty,registrations:rows.results.map(r=>({state:r.state,attendedAt:r.attended_at}))});
+      }
+      // Even reviewers/owners use anonymous review IDs in the ordinary queue.
+      // Identity is disclosed only through audited exception lookup or export.
+      const rows=await db.prepare("SELECT r.id,r.state,r.review_reason,r.updated_at,t.channel,t.attended_at,(SELECT COUNT(*) FROM activity_files f WHERE f.registration_id=r.id) material_count FROM activity_registrations r LEFT JOIN activity_attendance t ON t.registration_id=r.id WHERE r.event_id=? ORDER BY CASE WHEN r.state='pending' AND t.channel='manual' THEN 0 WHEN r.state='pending' THEN 1 ELSE 2 END,r.updated_at DESC LIMIT 500").bind(eid).all();
+      return json({duty:a.duty,registrations:rows.results});
+    }
+    if(method==='POST'&&action==='assist-lookup'){
+      // "Break glass" is allowed only for the event owner/manual window.
+      // Scanners and reviewers cannot learn names through this endpoint.
+      await access(db,user,eid,['owner','manual']);
+      const limiter=env.ASSIST_RATE_LIMIT||env.AUTH_RATE_LIMIT;
+      need(limiter?.limit,503,'异常身份查询限流未配置');
+      const limit=await limiter.limit({key:'assist:'+user.id+':'+eid});
+      need(limit.success,429,'人工查询过于频繁，请联系活动负责人');
+      const x=await body(req),reference=str(x.reference,90);
+      const reason=str(x.reasonCode,32),note=str(x.reasonNote,250);
+      need(MANUAL_REASONS.has(reason),400,'请选择具体异常原因');
+      need(note.length>=8,400,'请填写至少 8 字的异常说明');
+      need(x.studentPresent===true,403,'必须由学生在现场主动请求协助');
+      const code=canonicalRecoveryCode(reference);
+      const kind=code?'recovery':/^bqx_[a-f0-9]{64}$/.test(reference)?'qr':null;
+      need(kind,400,'请输入完整的人工核验编号或花工木棉签到码');
+      let target=null;
+      if(kind==='recovery'){
+        target=await db.prepare("SELECT r.id,r.state,u.display_name,u.student_number,t.channel,t.attended_at FROM activity_registrations r JOIN activity_users u ON u.id=r.user_id LEFT JOIN activity_attendance t ON t.registration_id=r.id WHERE r.event_id=? AND r.recovery_code=?")
+          .bind(eid,code).first();
+      }else{
+        const digest=await sha(reference);
+        // Expired or consumed QR digests are searchable for up to 48h, but
+        // are NEVER accepted as a replacement for actual redemption.
+        target=await db.prepare("SELECT r.id,r.state,u.display_name,u.student_number,t.channel,t.attended_at FROM activity_ticket_history h JOIN activity_registrations r ON r.id=h.registration_id JOIN activity_users u ON u.id=r.user_id LEFT JOIN activity_attendance t ON t.registration_id=r.id WHERE h.event_id=? AND h.digest=? AND h.expires_at>=?")
+          .bind(eid,digest,epoch()-QR_LOOKUP_GRACE_MS).first();
+        if(!target){
+          // Pre-migration active QR codes have not entered the digest trail yet.
+          target=await db.prepare("SELECT r.id,r.state,u.display_name,u.student_number,t.channel,t.attended_at FROM activity_tickets h JOIN activity_registrations r ON r.id=h.registration_id JOIN activity_users u ON u.id=r.user_id LEFT JOIN activity_attendance t ON t.registration_id=r.id WHERE r.event_id=? AND h.digest=? AND h.expires_at>=?")
+            .bind(eid,digest,epoch()-QR_LOOKUP_GRACE_MS).first();
+        }
+      }
+      // Log matched and unmatched lookups, without logging any QR payload,
+      // recovery code, name or student number.
+      await db.prepare('INSERT INTO activity_exception_lookup(id,event_id,actor_id,registration_id,kind,reason_code,reason_note,matched,occurred_at) VALUES (?,?,?,?,?,?,?,?,?)')
+        .bind(uuid(),eid,user.id,target?.id||null,kind,reason,note,target?1:0,epoch()).run();
+      need(target,404,'未找到本活动的对应记录；请联系活动负责人，不要重复尝试猜测编号');
+      return json({matched:true,registration:{
+        id:target.id,displayName:target.display_name,studentNumber:target.student_number,
+        state:target.state,attendance:target.attended_at?{channel:target.channel,at:target.attended_at}:null,
+        identityStatus:'self_declared'
+      }});
     }
     if(method==='POST'&&action==='review'){
       await access(db,user,eid,['owner','reviewer']);
@@ -328,10 +408,15 @@ async function api(req,env,url){
       return json({ok:true});
     }
     if(method==='POST'&&action==='manual-checkin'){
-      await access(db,user,eid,['owner','manual']);
+      const staff=await access(db,user,eid,['owner','manual']);
       need(epoch()>=event.starts_at&&epoch()<=event.ends_at,409,'不在活动时间');
       const x=await body(req),rid=str(x.registrationId,40),reason=str(x.reason,250);
       need(x.identityChecked===true,400,'需要当面核对身份后才能登记');
+      if(staff.duty==='manual'){
+        const recent=await db.prepare('SELECT 1 AS allowed FROM activity_exception_lookup WHERE event_id=? AND actor_id=? AND registration_id=? AND matched=1 AND occurred_at>? ORDER BY occurred_at DESC LIMIT 1')
+          .bind(eid,user.id,rid,epoch()-10*60_000).first();
+        need(recent,403,'请先按学生主动提供的线索完成带原因的异常查询');
+      }
       const r=await db.prepare('SELECT id,state FROM activity_registrations WHERE id=? AND event_id=?').bind(rid,eid).first();
       need(r,404,'报名不存在');
       await db.prepare("INSERT INTO activity_attendance(registration_id,event_id,staff_id,channel,reason,attended_at) VALUES (?,?,?,'manual',?,?)")
@@ -341,7 +426,10 @@ async function api(req,env,url){
       return json({ok:true,reviewPending:r.state!=='approved'});
     }
     if(method==='GET'&&action==='export'){
-      await access(db,user,eid,['owner','reviewer']);
+      await access(db,user,eid,['owner']);
+      // Official-submission candidate exports necessarily contain identity:
+      // reserve them for the event owner and audit the disclosure.
+      await audit(db,eid,user.id,'attendance.export',null);
       const rows=await db.prepare("SELECT u.display_name,u.student_number,r.reviewed_at,t.channel,t.attended_at,t.reason FROM activity_registrations r JOIN activity_users u ON u.id=r.user_id JOIN activity_attendance t ON t.registration_id=r.id WHERE r.event_id=? AND r.state='approved' ORDER BY t.attended_at").bind(eid).all();
       return new Response(csv([['姓名','学号','审核通过时间','到场方式','签到时间','人工原因'],...rows.results.map(r=>
         [r.display_name,r.student_number,new Date(r.reviewed_at).toISOString(),r.channel,new Date(r.attended_at).toISOString(),r.reason||''])]),
@@ -398,5 +486,12 @@ export default {
       const message=e.status?e.message:e.message?.includes('UNIQUE constraint')?'记录已经存在':'请求失败';
       return json({error:message},e.status|| (e.message?.includes('UNIQUE constraint')?409:500));
     }
+  },
+  // Requires an explicitly configured Wrangler cron trigger. Lookups already
+  // enforce the 48h limit even if the scheduled job has not yet been enabled.
+  async scheduled(_controller,env){
+    if(env.ENABLE_LIVE!=='true'||!env.DB)return;
+    await env.DB.prepare('DELETE FROM activity_ticket_history WHERE expires_at<?')
+      .bind(epoch()-QR_LOOKUP_GRACE_MS).run();
   }
 };

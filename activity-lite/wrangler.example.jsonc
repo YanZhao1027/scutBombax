@@ -1,0 +1,38 @@
+{
+  // Standalone Lite staging Worker; never point to the older activity D1/R2.
+  // After inspection, copy to wrangler.jsonc and provision NEW isolated resources.
+  "name": "bombax-activity-lite-stage",
+  "main": "./worker.mjs",
+  "compatibility_date": "2026-10-14",
+  "vars": {
+    "PUBLIC_ORIGIN": "https://REPLACE_WITH_LITE_STAGE_HOST",
+    "LITE_ENABLED": "false",
+    "SYNTHETIC_ONLY": "true"
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "REPLACE_WITH_NEW_LITE_D1",
+    "database_id": "REPLACE_WITH_LITE_D1_ID"
+  }],
+  "r2_buckets": [{
+    "binding": "MATERIALS",
+    "bucket_name": "REPLACE_WITH_PRIVATE_LITE_R2"
+  }],
+  "ratelimits": [
+    {
+      "name": "APPLY_RATE_LIMIT",
+      "namespace_id": "REPLACE_WITH_UNIQUE_APPLY_NAMESPACE",
+      "simple": {"limit": 6, "period": 60}
+    },
+    {
+      "name": "STAFF_LOGIN_LIMIT",
+      "namespace_id": "REPLACE_WITH_UNIQUE_STAFF_LOGIN_NAMESPACE",
+      "simple": {"limit": 6, "period": 60}
+    }
+  ]
+}

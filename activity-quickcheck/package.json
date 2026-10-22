@@ -10,7 +10,8 @@
     "start": "node --disable-warning=ExperimentalWarning server.mjs",
     "dev": "node --disable-warning=ExperimentalWarning --watch server.mjs",
     "test": "node --disable-warning=ExperimentalWarning --test tests/*.test.mjs",
-    "bootstrap": "node --disable-warning=ExperimentalWarning scripts/bootstrap.mjs"
+    "bootstrap": "node --disable-warning=ExperimentalWarning scripts/bootstrap.mjs",
+    "qa:phone": "node --disable-warning=ExperimentalWarning scripts/phone-qa-server.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

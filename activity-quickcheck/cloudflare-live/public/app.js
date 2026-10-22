@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const app={me:null,events:[],active:null,poll:null,scanner:null,qr:null,syntheticOnly:false};
+const app={me:null,events:[],active:null,poll:null,scanner:null,scannerOverlay:null,scannerVideo:null,scannerEpoch:0,scannerHistory:false,scannerFullscreenEntered:false,scannerPreviousFocus:null,qr:null,manualCleanup:null,syntheticOnly:false};
 function el(tag,props={},...children){
   const n=document.createElement(tag);
   for(const [k,v] of Object.entries(props)){
@@ -73,6 +73,7 @@ function form(fields,submit,fn){
   return f;
 }
 function clean(){
+  app.manualCleanup?.();app.manualCleanup=null;
   if(app.poll){clearInterval(app.poll);app.poll=null;}
   try{app.scanner?.stop();}catch{}app.scanner=null;
   if(app.qr){URL.revokeObjectURL(app.qr);app.qr=null;}
@@ -196,6 +197,9 @@ async function studentView(event,root){
     box.append(join);return;
   }
   const attendance=reg.attendance;
+    box.append(el('div',{class:'item student-recovery'},
+      el('strong',{text:'人工核验编号：'+(reg.recoveryCode||'待刷新')}),
+      text('仅在扫码失败时向授权人工窗口出示。本编号不能代替身份核验，也不能直接签到。')));
   box.append(el('div',{class:'row'},
     el('span',{class:'tag',text:reg.state==='approved'?'材料通过':reg.state==='pending'?'待审核':'待补充材料'}),
     el('span',{class:'tag '+(attendance?'green':''),text:attendance?'已到场（'+(attendance.channel==='manual'?'人工通道':'扫码')+'）':'尚未到场'})));
@@ -241,7 +245,9 @@ async function studentView(event,root){
         if(app.qr)URL.revokeObjectURL(app.qr);
         app.qr=URL.createObjectURL(svg);
         qrArea.replaceChildren(el('img',{class:'qr',src:app.qr,alt:'本次活动临时签到二维码'}),
-          text('请在 '+stamp(ticket.expiresAt)+' 前出示给工作人员；用过即失效。'));
+          text('请在 '+stamp(ticket.expiresAt)+' 前出示给工作人员；用过即失效。'),
+          el('div',{class:'item'},el('strong',{text:'二维码异常备用编号：'+(reg.recoveryCode||'待刷新')}),
+            text('此编号不包含姓名学号，只有授权人工窗口可以按原因调取报名信息。')));
         notice('定位符合要求，请出示二维码。','success');
       }),qrArea);
   }
@@ -278,7 +284,7 @@ async function organizerView(event,root){
     for(const m of ['reviewer','scanner','manual'])mode.append(button(roles[m],()=>renderDuty(event,root,m,true),'secondary'));
     panel.append(mode);
   }else await renderDuty(event,root,duty,false);
-  if(['owner','reviewer'].includes(duty))panel.append(button('导出已审核且已到场 CSV',async()=>{
+  if(duty==='owner')panel.append(button('导出已审核且已到场 CSV（仅负责人）',async()=>{
     const response=await request('/api/events/'+event.id+'/export');
     const url=URL.createObjectURL(await response.blob()),anchor=el('a',{href:url,download:'花工木棉-活动申报名单.csv'});
     document.body.append(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);
@@ -287,12 +293,13 @@ async function organizerView(event,root){
     if(document.visibilityState!=='visible'||app.active!==event.id)return;
     const focused=document.activeElement;
     if(focused&&['INPUT','TEXTAREA'].includes(focused.tagName))return;
-    if(duty==='owner'||duty==='scanner')return; // Keep the camera stream mounted during scanning.
+    if(['owner','scanner','manual'].includes(duty))return; // Never redraw an ongoing manual exception or camera stream.
     await safe(()=>renderDuty(event,root,duty,false));
   },5000);
 }
 async function renderDuty(event,root,duty,owner){
-  const old=$('duty-body');if(old)old.remove();
+  app.manualCleanup?.();app.manualCleanup=null;
+  const old=$('duty-body');if(old?.dataset.duty==='scanner')cleanScanner();if(old)old.remove();
   const slot=card(duty==='reviewer'?'待审核队列':duty==='scanner'?'扫码通道':'人工认证窗口');
   slot.id='duty-body';root.append(slot);
   const response=await request('/api/events/'+event.id+'/queue');
@@ -301,7 +308,7 @@ async function renderDuty(event,root,duty,owner){
     const pending=all.filter(x=>x.state==='pending');
     slot.append(text('优先审核已经人工到场、后补截图的学生；AI 仅显示建议，不代替审核。'));
     for(const r of pending){
-      const item=el('div',{class:'item'},el('h3',{text:r.display_name+'（自填学号：'+r.student_number+'）'}),
+      const item=el('div',{class:'item'},el('h3',{text:'匿名报名 · '+r.id.slice(0,8).toUpperCase()}),
         el('span',{class:'tag',text:r.channel==='manual'?'人工已到场，待补审':'新提交待审'}),
         text('材料 '+r.material_count+' 张'));
       const photos=el('div');
@@ -328,47 +335,325 @@ async function renderDuty(event,root,duty,owner){
     }
     if(!pending.length)slot.append(text('当前没有待审核的新材料。'));
   }else if(duty==='manual'){
-    slot.append(text('只在当面核对身份后操作。人工到场不等于集赞材料通过。'));
-    const search=el('input',{placeholder:'搜索姓名或自填学号'}),list=el('div');
-    slot.append(search,list);
-    function draw(){
-      list.replaceChildren();
-      for(const r of all.filter(r=>!(r.attended_at||r.attendedAt))
-        .filter(r=>String(r.displayName||r.display_name).includes(search.value)||String(r.studentNumber||r.student_number).includes(search.value)).slice(0,30)){
-        const rid=r.id,who=r.displayName||r.display_name,id=r.studentNumber||r.student_number;
-        const reason=el('input',{placeholder:'现场兜底原因（必填）',maxlength:'250'}),checked=el('input',{type:'checkbox'});
-        list.append(el('div',{class:'item'},el('strong',{text:who+' · '+id}),
-          reason,el('label',{class:'check'},checked,'已经在现场当面核对该学生身份'),
-          button('记录到场',async()=>{
-            if(!checked.checked||!reason.value.trim())throw new Error('必须先确认身份并填写原因');
-            await request('/api/events/'+event.id+'/manual-checkin',{method:'POST',
-              data:{registrationId:rid,reason:reason.value.trim(),identityChecked:true}});
-            notice('已记录到场，材料审核仍独立进行。','success');await renderDuty(event,root,duty,owner);
-          })));
+    slot.classList.add('manual-lane');
+    const intro=el('div',{class:'manual-intro'},
+      el('strong',{text:'特殊情况 · 人工核验'}),
+      el('p',{text:'日常匿名签到。只有学生本人在场并主动求助，才允许按单条二维码或备用编号调取身份。所有查询均会留下审计记录。'}));
+    const progress=el('div',{class:'manual-steps','aria-label':'人工核验操作步骤'},
+      el('span',{class:'manual-step current',text:'① 查找线索'}),
+      el('span',{class:'manual-step',text:'② 当面核对'}),
+      el('span',{class:'manual-step',text:'③ 记录到场'}));
+    const reference=el('input',{type:'text',maxlength:90,autocomplete:'off',
+      autocorrect:'off',autocapitalize:'off',spellcheck:'false',
+      placeholder:'BM-XXXX-XXXX-XXXX',
+      'aria-label':'学生主动出示的备用编号或二维码原始码值'});
+    const reason=el('select',{'aria-label':'人工核验原因'},
+      el('option',{value:'',text:'请选择实际异常原因'}),
+      el('option',{value:'unreadable_qr',text:'二维码模糊 / 无法识别'}),
+      el('option',{value:'expired_qr',text:'二维码已过期或已使用'}),
+      el('option',{value:'camera_failure',text:'摄像头故障 / 权限异常'}),
+      el('option',{value:'network_issue',text:'现场网络异常'}),
+      el('option',{value:'other',text:'其他特殊情况'}));
+    const explanation=el('textarea',{maxlength:250,rows:'3',
+      placeholder:'例：二维码多次扫描不成功，学生本人已到场并请求人工协助'});
+    const studentPresent=el('input',{type:'checkbox'});
+    const details=el('div',{'data-manual-disclosure':'','aria-live':'polite'});
+    let expireTimer=null,inFlight=false,sequence=0,visibleUntil=0;
+    function resetSteps(){
+      progress.querySelectorAll('.manual-step').forEach((node,i)=>{
+        node.className='manual-step'+(i===0?' current':'');
+      });
+    }
+    function clearDisclosure(showMessage=false){
+      if(expireTimer!==null){clearTimeout(expireTimer);expireTimer=null;}
+      visibleUntil=0;
+      details.replaceChildren();
+      if(showMessage)details.append(el('p',{class:'manual-result-status',
+        text:'身份资料已自动隐藏。再次处理前，请重新确认学生在场并发起审计查询。'}));
+      resetSteps();
+    }
+    const onHide=()=>{if(document.hidden)clearDisclosure(true);};
+    document.addEventListener('visibilitychange',onHide);
+    app.manualCleanup=()=>{
+      sequence++;
+      clearDisclosure(false);
+      document.removeEventListener('visibilitychange',onHide);
+    };
+    const query=button('查询一条异常报名记录',async()=>{
+      if(inFlight)return;
+      const run=++sequence;
+      clearDisclosure(false);
+      if(!studentPresent.checked)throw new Error('请先确认学生本人在现场主动请求协助');
+      if(!reason.value)throw new Error('请选择本次异常原因');
+      if(explanation.value.trim().length<8)throw new Error('请填写至少 8 字的现场问题说明');
+      if(!reference.value.trim())throw new Error('请填写学生出示的备用编号或二维码');
+      inFlight=true;query.disabled=true;query.textContent='安全查询中…';
+      try{
+        const lookup=await request('/api/events/'+event.id+'/assist-lookup',{method:'POST',
+          data:{reference:reference.value.trim(),reasonCode:reason.value,
+            reasonNote:explanation.value.trim(),studentPresent:true}});
+        if(run!==sequence||!slot.isConnected||document.hidden)return;
+        reference.value=''; // Never leave the complete QR bearer token in a field.
+        const r=lookup.registration;
+        visibleUntil=Date.now()+60_000;
+        const identity=el('dl',{class:'manual-identity'},
+          el('div',{},el('dt',{text:'本人自填姓名'}),el('dd',{text:r.displayName})),
+          el('div',{},el('dt',{text:'本人自填学号'}),el('dd',{text:r.studentNumber})),
+          el('div',{},el('dt',{text:'材料状态'}),el('dd',{text:r.state==='approved'?'审核通过':r.state==='pending'?'待审核':'待补充材料'})),
+          el('div',{},el('dt',{text:'到场情况'}),el('dd',{text:r.attendance?'已经到场，不得重复登记':'尚无到场记录'})));
+        const privateCard=el('section',{class:'manual-private','data-sensitive-lookup':'','aria-label':'本次异常核对信息'},
+          el('div',{class:'manual-disclosure',text:'限本次面对面核对使用 · 60 秒后自动隐藏 · 自填学号并非学校实名认证'}),
+          el('h3',{text:'核对学生提供的独立身份证明'}),identity);
+        const actions=el('div',{class:'manual-actions'});
+        const dismiss=button('隐藏身份资料',()=>{sequence++;clearDisclosure(true);},'secondary');
+        actions.append(dismiss);
+        if(!r.attendance){
+          const confirmed=el('input',{type:'checkbox'});
+          privateCard.append(el('label',{class:'manual-checkbox'},confirmed,
+            '已当面核对学生提供的独立身份证明；本编号本身不是身份凭据'));
+          const record=button('确认登记人工到场',async()=>{
+            if(inFlight||run!==sequence||Date.now()>=visibleUntil)
+              throw new Error('本次核验已过期，请重新查询');
+            if(!confirmed.checked)throw new Error('必须实际完成面对面身份核对');
+            inFlight=true;record.disabled=true;record.textContent='正在登记…';
+            try{
+              await request('/api/events/'+event.id+'/manual-checkin',{method:'POST',
+                data:{registrationId:r.id,reason:explanation.value.trim(),identityChecked:true}});
+              if(run!==sequence)return;
+              sequence++;clearDisclosure(false);
+              reference.value='';reason.value='';explanation.value='';studentPresent.checked=false;
+              details.append(el('div',{class:'manual-complete',role:'status'},
+                el('strong',{text:'✓ 到场登记完成'}),
+                el('p',{text:'本次身份资料已清除。材料审核仍独立进行，可继续协助下一位学生。'})));
+              notice('人工到场记录已保存，学生身份已从页面隐藏。','success');
+            }finally{
+              inFlight=false;record.disabled=false;record.textContent='确认登记人工到场';
+            }
+          });
+          actions.prepend(record);
+        }else{
+          privateCard.append(el('p',{class:'manual-result-status',
+            text:'该学生已有到场记录，不能再次核销。请核对记录并告知学生。'}));
+        }
+        privateCard.append(actions);
+        details.replaceChildren(privateCard);
+        progress.querySelectorAll('.manual-step').forEach((node,i)=>{
+          node.className='manual-step'+(i===1?' current':i===0?' done':'');
+        });
+        expireTimer=setTimeout(()=>{sequence++;clearDisclosure(true);},60_000);
+        privateCard.scrollIntoView({behavior:'smooth',block:'nearest'});
+      }finally{
+        inFlight=false;query.disabled=false;query.textContent='查询一条异常报名记录';
+      }
+    },'manual-action');
+    slot.append(intro,progress,el('div',{class:'manual-panel'},
+      label('学生出示的线索',reference),
+      el('p',{class:'manual-field-hint',
+        text:'支持 BM-XXXX-XXXX-XXXX，也可粘贴已解出的完整 bqx_ 动态二维码。不能按姓名批量搜索。'}),
+      label('失败原因',reason),
+      label('现场处理说明',explanation),
+      el('label',{class:'manual-checkbox'},studentPresent,
+        '确认学生本人在场，且主动请求人工协助'),
+      query,el('p',{class:'manual-privacy-note',
+        text:'读取个人信息前由服务器验证岗位并记审计；未完成独立身份核验时，禁止直接登记。'})),
+      details);
+    // Go straight to the active station on a phone; account/header cards stay above.
+    requestAnimationFrame(()=>{if(slot.isConnected)slot.scrollIntoView({behavior:'smooth',block:'start'});});
+  }else if(duty==='scanner'){
+    slot.dataset.duty='scanner';
+    slot.append(text('扫码员不接触姓名和学号；仅识别花工木棉签到二维码。无法核销时请学生出示备用编号，前往独立的授权人工窗口。学校校园认证码和支付码无效。'));
+    const status=el('div',{class:'status',role:'status','aria-live':'polite',text:'摄像头尚未开启。'});
+    const token=el('input',{type:'text',placeholder:'备用：粘贴完整 bqx_ 签到码',maxlength:68,
+      autocomplete:'off',autocapitalize:'off',spellcheck:'false','aria-label':'完整花工木棉签到码'});
+    let scanning=false,lastAccepted='',lastAttempt='',lastAttemptAt=0;
+    function report(message,kind='normal'){
+      status.textContent=message;
+      status.className='status '+(kind==='ok'?'scan-good':kind==='error'?'scan-error':'');
+      const overlay=app.scannerOverlay;
+      if(overlay){
+        const hud=overlay.querySelector('[data-scanner-result]');
+        if(hud){
+          hud.textContent=message;
+          hud.dataset.kind=kind;
+        }
       }
     }
-    search.addEventListener('input',draw);draw();
-  }else if(duty==='scanner'){
-    slot.append(text('仅扫描花工木棉活动二维码，不扫描学校支付或校园认证码。'));
-    const video=el('video',{autoplay:'autoplay',playsinline:'playsinline',muted:'muted'}),status=el('div',{class:'status',text:'等待扫码…'});
-    const token=el('input',{placeholder:'摄像头不可用时手工输入完整签到码'});
-    let scanning=false;
     async function redeem(value){
-      if(scanning)return;scanning=true;
-      try{await request('/api/events/'+event.id+'/redeem',{method:'POST',data:{token:value}});
-        status.textContent='✓ 核销成功，请下一位';token.value='';
-      }catch(e){status.textContent='核销失败：'+e.message;}
-      finally{setTimeout(()=>{scanning=false;},500);}
+      const checkin=String(value||'').trim();
+      if(scanning||checkin===lastAccepted)return;
+      if(!window.BombaxScanner?.validToken(checkin)){
+        if(lastAttempt!==checkin||Date.now()-lastAttemptAt>2000)
+          report('不是花工木棉签到码；请勿扫描学校支付或认证二维码。','error');
+        lastAttempt=checkin;lastAttemptAt=Date.now();
+        return;
+      }
+      // A continuously visible already-redeemed/expired QR must not cause
+      // repeated requests against the high-throughput onsite check-in API.
+      if(checkin===lastAttempt&&Date.now()-lastAttemptAt<3000)return;
+      lastAttempt=checkin;lastAttemptAt=Date.now();
+      scanning=true;
+      try{
+        await request('/api/events/'+event.id+'/redeem',{method:'POST',data:{token:checkin}});
+        lastAccepted=checkin;
+        report('✓ 核销成功 · 请下一位','ok');
+        token.value='';
+        try{navigator.vibrate?.(75);}catch{}
+      }catch(e){
+        report('核销失败：'+e.message+'。请让学生去人工窗口出示备用编号。','error');
+        try{navigator.vibrate?.([75,55,75]);}catch{}
+      }finally{
+        setTimeout(()=>{scanning=false;},650);
+      }
     }
-    slot.append(el('div',{class:'row'},
-      button('开启摄像头',async()=>{
-        if(!window.ZXingBrowser)throw new Error('扫码模块尚未打包：请改用人工通道');
-        cleanScanner();
+    async function startCamera(video,overlay,epoch){
+      if(app.scannerOverlay!==overlay||app.scannerEpoch!==epoch)return;
+      report('正在启动后置摄像头…');
+      try{
         const reader=new window.ZXingBrowser.BrowserQRCodeReader();
-        app.scanner=await reader.decodeFromVideoDevice(undefined,video,code=>{if(code?.getText)safe(()=>redeem(code.getText()));});
-      }),button('停止',cleanScanner,'secondary')),video,status,
-      el('div',{class:'row'},token,button('手工核销',()=>redeem(token.value))));
+        const controls=await reader.decodeFromVideoDevice(undefined,video,code=>{
+          if(code?.getText)void redeem(code.getText());
+        });
+        if(app.scannerOverlay!==overlay||app.scannerEpoch!==epoch){
+          controls.stop();
+          try{video.srcObject?.getTracks?.().forEach(track=>track.stop());}catch{}
+          video.srcObject=null;
+          return;
+        }
+        app.scanner=controls;
+        report('摄像头已就绪 · 将二维码对准中央取景框');
+      }catch(error){
+        if(app.scannerOverlay===overlay&&app.scannerEpoch===epoch){
+          report(window.BombaxScanner.scannerProblem(error),'error');
+        }
+      }
+    }
+    function openCamera(){
+      if(!window.ZXingBrowser||!window.BombaxScanner)
+        throw new Error('扫码组件尚未加载。请刷新页面，或前往人工认证窗口。');
+      if(!window.isSecureContext)
+        throw new Error('摄像头必须通过有效 HTTPS 打开。纯 HTTP 校园网地址不可用。');
+      cleanScanner();
+      const video=el('video',{autoplay:'autoplay',playsinline:'playsinline',muted:'muted',
+        'aria-label':'实时二维码摄像头画面'});
+      const close=button('✕ 退出扫码',()=>cleanScanner(),'scanner-fullscreen-close');
+      close.setAttribute('aria-label','退出全屏扫码，关闭摄像头');
+      const hdr=el('div',{class:'scanner-fullscreen-header'},
+        el('div',{class:'scanner-fullscreen-brand'},
+          el('strong',{text:'花工木棉 · 全屏扫码'}),
+          el('span',{text:'仅限本场活动二维码'})),close);
+      const target=el('div',{class:'scanner-target','aria-hidden':'true'},
+        el('div',{class:'scanner-target-line'}));
+      const hud=el('div',{class:'scanner-fullscreen-result','data-scanner-result':'',role:'status',
+        'aria-live':'polite',text:'正在申请相机权限…'});
+      const retry=button('重新开启摄像头',()=>{
+        if(app.scannerOverlay!==overlay)return;
+        try{app.scanner?.stop();}catch{}
+        app.scanner=null;
+        try{video.srcObject?.getTracks?.().forEach(track=>track.stop());}catch{}
+        video.srcObject=null;
+        // Invalidate an earlier pending camera startup before retrying.
+        epoch=++app.scannerEpoch;
+        void startCamera(video,overlay,epoch);
+      },'scanner-fullscreen-retry');
+      const bottom=el('div',{class:'scanner-fullscreen-footer'},hud,
+        el('p',{text:'扫描成功后无需退出；继续对准下一位同学的动态二维码。'}),retry);
+      const overlay=el('div',{class:'bombax-scanner-fullscreen',role:'dialog','aria-modal':'true',
+        'aria-label':'全屏二维码签到扫码','tabindex':'-1'},
+        video,el('div',{class:'scanner-fullscreen-shade','aria-hidden':'true'}),
+        hdr,el('div',{class:'scanner-target-wrap'},target),bottom);
+      // Full-viewport fixed UI works on browsers without Fullscreen API.
+      // When allowed, requestFullscreen hides browser chrome as well.
+      document.body.append(overlay);
+      document.body.classList.add('scanner-modal-open');
+      app.scannerOverlay=overlay;
+      app.scannerVideo=video;
+      let epoch=++app.scannerEpoch;
+      app.scannerPreviousFocus=document.activeElement;
+      app.scannerFullscreenEntered=false;
+      if(!history.state?.__bombaxScanner){
+        try{history.pushState({__bombaxScanner:true},'',location.href);app.scannerHistory=true;}
+        catch{app.scannerHistory=false;}
+      }
+      overlay.focus();
+      if(typeof overlay.requestFullscreen==='function'){
+        try{
+          Promise.resolve(overlay.requestFullscreen({navigationUI:'hide'})).then(()=>{
+            if(app.scannerOverlay===overlay&&document.fullscreenElement===overlay)
+              app.scannerFullscreenEntered=true;
+          }).catch(()=>{/* fixed-position fallback remains usable */});
+        }catch{/* fixed-position fallback remains usable */}
+      }
+      void startCamera(video,overlay,epoch);
+    }
+    slot.append(button('开启全屏摄像头扫码',openCamera),
+      status,text('摄像头将进入全屏扫码取景界面。底部显示扫码结果；顶部退出。没有相机权限时请改走人工认证通道。'));
+    if(app.syntheticOnly){
+      const picker=el('input',{type:'file',accept:'image/png,image/jpeg,image/webp',class:'hidden',
+        'aria-label':'只在虚构数据演练站选择二维码图片'});
+      picker.addEventListener('change',()=>safe(async()=>{
+        const file=picker.files?.[0];picker.value='';
+        if(!file)return;
+        if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024)
+          throw new Error('只接受 2 MB 以内的 PNG/JPEG/WebP 二维码图片');
+        if(!window.ZXingBrowser)throw new Error('本地识码组件没有加载');
+        const blobUrl=URL.createObjectURL(file);
+        try{
+          const image=el('img',{src:blobUrl,alt:'待识别的测试二维码'});
+          await image.decode();
+          const result=await new window.ZXingBrowser.BrowserQRCodeReader().decodeFromImageElement(image);
+          if(!result?.getText)throw new Error('图片未识别出二维码');
+          await redeem(result.getText());
+        }catch(error){
+          if(!String(error.message||'').includes('核销失败'))
+            report('图片识码失败：请确认它是清晰的花工木棉测试二维码，且未过期。','error');
+        }finally{URL.revokeObjectURL(blobUrl);}
+      }));
+      slot.append(el('div',{class:'scanner-demo-panel'},
+        text('仅虚构数据演练：选择二维码截图进行本机解码，不上传图片；真实活动不开放图片代扫。'),
+        button('从图片识别测试二维码',()=>picker.click(),'secondary'),picker));
+    }
+    slot.append(el('div',{class:'scanner-fallback'},token,
+      button('备用：核销已读取的完整签到码',()=>redeem(token.value),'secondary')));
   }
 }
-function cleanScanner(){try{app.scanner?.stop();}catch{}app.scanner=null;}
+function cleanScanner(){
+  ++app.scannerEpoch;
+  try{app.scanner?.stop();}catch{}
+  app.scanner=null;
+  const video=app.scannerVideo;
+  try{video?.srcObject?.getTracks?.().forEach(track=>track.stop());}catch{}
+  if(video){try{video.pause();}catch{}video.srcObject=null;}
+  app.scannerVideo=null;
+  const overlay=app.scannerOverlay;
+  app.scannerOverlay=null;
+  app.scannerFullscreenEntered=false;
+  if(overlay){
+    if(document.fullscreenElement===overlay){
+      try{Promise.resolve(document.exitFullscreen()).catch(()=>{});}catch{}
+    }
+    overlay.remove();
+    document.body.classList.remove('scanner-modal-open');
+    if(app.scannerPreviousFocus?.isConnected){
+      try{app.scannerPreviousFocus.focus({preventScroll:true});}catch{}
+    }
+    app.scannerPreviousFocus=null;
+  }
+  if(app.scannerHistory){
+    app.scannerHistory=false;
+    if(history.state?.__bombaxScanner){
+      try{history.back();}catch{}
+    }
+  }
+}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)cleanScanner();});
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&app.scannerOverlay){event.preventDefault();cleanScanner();}
+});
+window.addEventListener('popstate',()=>{
+  if(app.scannerOverlay){app.scannerHistory=false;cleanScanner();}
+});
+document.addEventListener('fullscreenchange',()=>{
+  if(app.scannerOverlay&&app.scannerFullscreenEntered&&
+      document.fullscreenElement!==app.scannerOverlay)cleanScanner();
+});
 safe(start);
