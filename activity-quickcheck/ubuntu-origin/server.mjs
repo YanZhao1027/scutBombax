@@ -17,6 +17,7 @@ const publicDir=path.join(root,'cloudflare-live/public');
 const migrationsDir=path.join(root,'cloudflare-live/migrations');
 const DEFAULT_PUBLIC='https://activity.10273055.xyz';
 const LAN_PUBLIC='https://activity-lan.10273055.xyz:8443';
+const CANONICAL_PASS_ORIGIN='https://activity.10273055.xyz';
 const FUNNEL_HOST='zyubuntu-ms-7e51.tailedfb32.ts.net';
 const types={
   '.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8',
@@ -43,7 +44,11 @@ async function staticAssets(req){
   try{data=await fs.readFile(file);}
   catch(e){if(e.code==='ENOENT'||e.code==='EISDIR')return new Response('Not found',{status:404});throw e;}
   const ext=path.extname(file).toLowerCase();
-  return new Response(req.method==='HEAD'?null:new Uint8Array(data),{
+  const lan=new URL(req.url).hostname==='activity-lan.10273055.xyz';
+  const outgoing=lan&&file===path.join(publicDir,'index.html')
+    ?Buffer.from(data.toString('utf8').replace('</head>',
+      '<script defer src="/lan-watchdog.js"></script></head>')):data;
+  return new Response(req.method==='HEAD'?null:new Uint8Array(outgoing),{
     status:200,headers:{'Content-Type':types[ext]||'application/octet-stream',
       'Cache-Control':ext==='.html'?'no-store':'public, max-age=300',
       ...securityHeaders}
@@ -78,6 +83,37 @@ export function createOrigin({dataDir=process.env.BOMBAX_ACTIVITY_DATA||path.joi
       }
       const publicOrigin=requestOrigin(host);
       if(!publicOrigin){res.writeHead(421,securityHeaders);res.end('Unknown host');return;}
+      const localHealth=new URL(req.url,'http://local').pathname==='/__lan/health';
+      if(localHealth){
+        if(host!=='activity-lan.10273055.xyz:8443'){
+          res.writeHead(404,{...securityHeaders,'Cache-Control':'no-store'});res.end();return;
+        }
+        const origin=req.headers.origin||'';
+        const cors=origin==='https://activity.10273055.xyz'?
+          {'Access-Control-Allow-Origin':origin,
+           'Access-Control-Allow-Private-Network':'true',
+           'Vary':'Origin'}:{'Vary':'Origin'};
+        if(req.method==='OPTIONS'){
+          if(!cors['Access-Control-Allow-Origin']){
+            res.writeHead(403,{...securityHeaders,'Cache-Control':'no-store'});res.end();return;
+          }
+          res.writeHead(204,{...securityHeaders,...cors,
+            'Access-Control-Allow-Methods':'GET, OPTIONS',
+            'Access-Control-Allow-Headers':'Content-Type',
+            'Access-Control-Max-Age':'600','Cache-Control':'no-store'});
+          res.end();return;
+        }
+        if(req.method!=='GET'&&req.method!=='HEAD'){
+          res.writeHead(405,{...securityHeaders,'Cache-Control':'no-store'});res.end();return;
+        }
+        let healthy=false;
+        try{healthy=bindings.DB.inspect('SELECT 1 AS alive')[0]?.alive===1;}catch{}
+        const response=JSON.stringify({service:'bombax-campus-lan',healthy,
+          kind:'synthetic-ubuntu-authoritative',origin:'local-sqlite'});
+        res.writeHead(healthy?200:503,{...securityHeaders,...cors,
+          'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});
+        res.end(req.method==='HEAD'?'':response);return;
+      }
       if((Number(req.headers['content-length'])||0)>4*1024*1024){
         res.writeHead(413,securityHeaders);res.end();return;
       }
@@ -98,7 +134,7 @@ export function createOrigin({dataDir=process.env.BOMBAX_ACTIVITY_DATA||path.joi
         method:req.method,headers,
         ...(req.method!=='GET'&&req.method!=='HEAD'?{body:req,duplex:'half'}:{})
       });
-      const resp=await worker.fetch(webReq,{...bindings,PUBLIC_ORIGIN:publicOrigin});
+      const resp=await worker.fetch(webReq,{...bindings,PUBLIC_ORIGIN:publicOrigin,PUBLIC_PASS_ORIGIN:CANONICAL_PASS_ORIGIN});
       res.statusCode=resp.status;
       for(const [key,value] of resp.headers.entries()){
         if(['content-length','transfer-encoding','connection'].includes(key))continue;

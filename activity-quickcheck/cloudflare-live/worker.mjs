@@ -447,7 +447,10 @@ async function api(req,env,url){
       const token=guestCookie(req,eid);
       // The fragment is NOT sent to the HTTP server on page navigation.
       // It is immediately consumed by same-origin app.js and removed from history.
-      const passUrl=env.PUBLIC_ORIGIN+'/#pass='+token;
+      // QR passes remain universally usable after the student leaves campus:
+      // the pass fragment always points to the public Cloudflare same-origin
+      // entry, which reaches the SAME authoritative Ubuntu database.
+      const passUrl=(env.PUBLIC_PASS_ORIGIN||env.PUBLIC_ORIGIN)+'/#pass='+token;
       const svg=await QRCode.toString(passUrl,{type:'svg',width:340,margin:3,errorCorrectionLevel:'M'});
       return new Response(svg,{headers:{'Content-Type':'image/svg+xml; charset=utf-8',
         'Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; sandbox",

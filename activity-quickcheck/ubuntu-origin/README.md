@@ -19,3 +19,9 @@ This is an isolated development deployment; **NO real student data**.
   are handled by the existing Worker with a single SQLite writer.
 - Offsite backups must include consistent SQLite snapshots and material files.
 - Real student usage requires verified authentication and a separate review.
+
+### Campus direct routing
+
+See SMART_ROUTE.md for the three campus IP allowlists, the independently
+trusted :8443 HTTPS gateway, browser probe, certificate renewal and emergency
+disable. campus-nginx.conf is versioned; the live config is outside Git.

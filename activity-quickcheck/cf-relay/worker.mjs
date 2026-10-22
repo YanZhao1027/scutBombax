@@ -8,7 +8,12 @@ const hostnames=new Set([
   'activity-relay-test.10273055.xyz',
   'bombax-activity-relay-test.ryowenth.workers.dev'
 ]);
-const localMode=()=>new Response(JSON.stringify({mode:'cloud',reason:'lan-not-configured'}),{
+const LAN_ORIGIN='https://activity-lan.10273055.xyz:8443/';
+const localMode=(env,requested)=>new Response(JSON.stringify(
+  env.CAMPUS_ROUTE_ENABLED==='true'&&requested.hostname==='activity.10273055.xyz'
+    ?{mode:'probe',lanOrigin:LAN_ORIGIN,timeoutMs:1300}
+    :{mode:'cloud',reason:'lan-not-configured'}
+),{
   headers:{'Content-Type':'application/json','Cache-Control':'no-store'}
 });
 function unavailable(pathname){
@@ -30,7 +35,7 @@ export default {
   async fetch(request,env){
     const requested=new URL(request.url);
     if(!hostnames.has(requested.hostname)||requested.protocol!=='https:')return error(421,'Unknown public host');
-    if(requested.pathname==='/__route/decision')return localMode();
+    if(requested.pathname==='/__route/decision')return localMode(env,requested);
     if(!['GET','HEAD','POST','PATCH','DELETE','OPTIONS'].includes(request.method))return error(405,'Method not supported');
     // In production, use Cloudflare's native internal service binding so the
     // verified core Worker keeps the relay secret; no secret is copied here.
