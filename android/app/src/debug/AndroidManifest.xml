@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools">
+  <!-- DEBUG APK ONLY: ADB can launch the isolated QR verification Activity.
+       Release keeps the original non-exported Activity and strict network policy. -->
+  <application android:networkSecurityConfig="@xml/bombax_qa_network_security">
+    <activity android:name="cn.scut.bombax.activity.ActivityPortalActivity"
+              android:exported="true"
+              tools:replace="android:exported" />
+  </application>
+</manifest>

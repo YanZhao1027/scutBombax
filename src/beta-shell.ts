@@ -73,11 +73,11 @@ export function mountBetaShell(): void {
     try {
       await openActivityPortal(which);
       status.textContent = which === 'stage'
-        ? '已打开独立活动测试工作台。返回花工木棉即可继续查询水电。'
+        ? '已打开独立 HTTPS 活动工作台。点击左上角返回花工木棉。'
         : '已打开只使用虚构数据的演示页面。';
       status.dataset.tone = 'ok';
     } catch {
-      status.textContent = '打开失败。请确认手机已安装支持 HTTPS 的浏览器并保持网络畅通。';
+      status.textContent = '打开失败。请确认网络畅通，或重新安装最新版 Beta 后重试。';
       status.dataset.tone = 'error';
     } finally {
       buttons.forEach((button) => button.removeAttribute('disabled'));
