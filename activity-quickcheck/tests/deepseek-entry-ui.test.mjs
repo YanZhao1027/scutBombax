@@ -33,7 +33,7 @@ function fixture(rows,{aiAvailable=true}={}){
     apiCalls.push({path,options});
     if(path.includes('/materials?'))return {materials:[{id:'ea4c5cfa-18e8-41e8-aaf0-0812a5f49099'}]};
     if(path.endsWith('/ai-review'))return {advice:{visibleLikeCount:38,minimumLikes:28,
-      thresholdMet:true,visibleEvidence:'图像中可见赞数 38',concerns:['截图真实性未验证']}};
+      thresholdMet:true,suggestedDecision:'approved',suggestedReason:'38赞达到28赞门槛',visibleEvidence:'图像中可见赞数 38',concerns:['截图真实性未验证']}};
     throw new Error('unexpected API call: '+path);
   };
   const dispose=window.BombaxReviewGrid.mount({
@@ -46,7 +46,7 @@ function fixture(rows,{aiAvailable=true}={}){
   return {root,apiCalls,dispose,panel,button,status};
 }
 const row=(opts={})=>({
-  id:'abc',display_name:'学生（自填）',student_number:'2025012345',state:'pending',
+  id:'abc',updated_at:123456789,display_name:'学生（自填）',student_number:'2025012345',state:'pending',
   material_count:0,ai_consent:0,note:'',...opts
 });
 test('DeepSeek entry is visible without a picture, but disabled and explains missing evidence',()=>{

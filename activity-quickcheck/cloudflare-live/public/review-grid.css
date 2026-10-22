@@ -44,3 +44,5 @@
 .review-ai-panel p{margin:7px 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .review-ai-panel button{margin:7px 0;max-width:100%}
 .review-ai-panel button:disabled{opacity:.62;cursor:not-allowed}
+
+.review-table{min-width:1260px}.review-ai-panel{border-left:4px solid #246bc1}

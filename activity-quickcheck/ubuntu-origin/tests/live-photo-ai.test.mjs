@@ -20,7 +20,7 @@ test('live origin: independent staff, student photo, consent and AI recommendati
       assert.equal(payload.model,'deepseek-flash');
       assert.match(JSON.stringify(payload.messages),/data:image\/png;base64,/);
       return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({
-        assessment:'looks_sufficient',visible_like_count:38,
+        assessment:'looks_sufficient',visible_like_count:38,evidence_quality:'clear',
         visible_evidence:'测试图示数字38',concerns:['不能验证截图真伪']
       })}}]}),{headers:{'Content-Type':'application/json'}});
     }
