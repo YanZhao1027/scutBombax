@@ -16,7 +16,7 @@ test('student homepage is a first-screen banner card catalog; admin lives at sep
   const css=load('platform.css');
   assert.match(css,/body:has\(\.public-headline\) #notice:not\(\.error\)/,
     'public cards remain the visual focus; errors stay visible');
-  assert.match(index,/src="\/review-grid.js\?v=20261023-ai-tristate-1"/);
+  assert.match(index,/src="\/review-grid.js\?v=20261023-ai-tristate-2"/);
   assert.match(adminLogin,/工作人员登录/);
   assert.match(admin,/活动管理后台/);
   assert.match(mine,/我的活动与一码通/);
