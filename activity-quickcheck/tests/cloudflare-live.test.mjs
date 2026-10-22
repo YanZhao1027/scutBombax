@@ -97,8 +97,13 @@ test('Synthetic 100k account successfully signs in and receives HttpOnly cookie'
   assert.equal(me.status,200);
   assert.equal((await me.json()).user.username,user.username);
 });
-test('Legacy 240k account is refused with actionable migration error instead of HTTP 500',async()=>{
-  const {env,req}=authFixture(240000);
+test('Modern 450k account can sign in with a strong password hash',async()=>{
+  const {env,req}=authFixture(450000);
+  const res=await backend.fetch(req,env);
+  assert.equal(res.status,200);
+});
+test('Unsupported 600001-iteration credential fails with actionable migration error',async()=>{
+  const {env,req}=authFixture(600001);
   const res=await backend.fetch(req,env);
   assert.equal(res.status,503);
   assert.match((await res.json()).error,/不兼容|迁移/);

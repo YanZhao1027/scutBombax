@@ -1,4 +1,4 @@
-/* Local D1 and R2 adapters for the existing synthetic-only Worker business logic.
+/* Local D1 and R2 adapters for the Ubuntu-authoritative business logic.
  * Exactly ONE SQLite writer process; never point a second process at this data.
  * No Cloudflare D1/R2 data is imported automatically. */
 import {DatabaseSync} from 'node:sqlite';
@@ -87,13 +87,13 @@ function rateLimit(max,periodMs){
     return {success:next.count<=max};
   }};
 }
-export function localBindings({dataDir,migrationsDir,publicDir}){
+export function localBindings({dataDir,migrationsDir,publicDir,liveMode=false}){
   const DB=localDB(dataDir,migrationsDir);
   const MATERIALS=new LocalMaterials(dataDir);
   const expectedImage=fs.readFileSync(path.join(publicDir,'demo-proof.png'));
   return {DB,MATERIALS,AUTH_RATE_LIMIT:rateLimit(8,60_000),
     AI_RATE_LIMIT:rateLimit(5,60_000),ENABLE_LIVE:'true',
-    SYNTHETIC_ONLY:'true',ALLOW_TEST_IMAGE_UPLOAD:'false',
+    SYNTHETIC_ONLY:liveMode?'false':'true',ALLOW_REAL_SUBMISSIONS:liveMode?'true':'false',ALLOW_TEST_IMAGE_UPLOAD:'false',
     SYNTHETIC_IMAGE_SHA256:undefined,
     close(){DB.close();},demoImage:expectedImage};
 }

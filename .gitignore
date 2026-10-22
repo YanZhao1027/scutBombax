@@ -37,3 +37,5 @@ tmp/
 
 # The privacy guard's local exact-value list: never committed, never uploaded.
 privacy-denylist.local.txt
+
+/activity-quickcheck/node_modules

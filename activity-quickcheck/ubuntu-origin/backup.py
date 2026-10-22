@@ -18,7 +18,7 @@ with sqlite3.connect(out) as verify:
  result=verify.execute('PRAGMA integrity_check').fetchone()[0]
  if result!='ok':raise RuntimeError('SQLite backup integrity check failed: '+result)
 applied=verify.execute('SELECT COUNT(*) FROM _local_migrations').fetchone()[0]
-if applied!=5:raise RuntimeError('Migration mismatch in backup: '+str(applied))
+if applied<6:raise RuntimeError('Migration mismatch in backup: '+str(applied))
 archive=destination/'materials.tar.gz'
 with tarfile.open(archive,'w:gz') as tar:
  material=base/'materials'

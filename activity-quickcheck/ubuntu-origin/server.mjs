@@ -1,7 +1,7 @@
 /* Ubuntu is the sole Activity QuickCheck data authority.
  * The existing Worker business logic is reused with local SQLite and filesystem bindings.
  * Listens only on 127.0.0.1; use a separate HTTPS reverse proxy / Cloudflare Tunnel.
- * SYNTHETIC ONLY: this deliberately does not enable real student processing. */
+ * Student identifiers are self-declared; DeepSeek is opt-in/advisory only. */
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -61,11 +61,19 @@ function requestOrigin(host){
   return null;
 }
 export function createOrigin({dataDir=process.env.BOMBAX_ACTIVITY_DATA||path.join(process.env.HOME||'/tmp','.local/share/bombax-activity-origin'),
-  port=Number(process.env.BOMBAX_ACTIVITY_PORT||8790),bind='127.0.0.1'}={}){
+  port=Number(process.env.BOMBAX_ACTIVITY_PORT||8790),bind='127.0.0.1',
+  liveMode=process.env.BOMBAX_ACTIVITY_MODE==='live',
+  deepseekKeyFile=process.env.BOMBAX_DEEPSEEK_KEY_FILE}={}){
   if(!Number.isInteger(port)||port<1024||port>65535||bind!=='127.0.0.1')throw Error('Origin must remain on IPv4 loopback and an unprivileged port');
   const secretFile=process.env.BOMBAX_RELAY_SECRET_FILE;
   const relaySecret=secretFile?readFileSync(secretFile,'utf8').trim():'';
-  const bindings=localBindings({dataDir,migrationsDir,publicDir});
+  const bindings=localBindings({dataDir,migrationsDir,publicDir,liveMode});
+  if(liveMode&&deepseekKeyFile){
+    let raw='';
+    try{raw=readFileSync(deepseekKeyFile,'utf8').trim();}
+    catch(e){if(e.code!=='ENOENT')throw e;}
+    if(raw)bindings.DEEPSEEK_API_KEY=raw;
+  }
   bindings.SYNTHETIC_IMAGE_SHA256=createHash('sha256').update(bindings.demoImage).digest('hex');
   bindings.ASSETS={fetch:staticAssets};
   const server=http.createServer(async(req,res)=>{
@@ -160,6 +168,6 @@ export function createOrigin({dataDir=process.env.BOMBAX_ACTIVITY_DATA||path.joi
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const app=createOrigin();
-  app.listen().then(url=>console.log('BOMBAX_ACTIVITY_SYNTHETIC_ONLY_READY '+url))
+  app.listen().then(url=>console.log('BOMBAX_ACTIVITY_READY '+url))
     .catch(err=>{console.error('startup failed:',err.message);process.exitCode=1;});
 }

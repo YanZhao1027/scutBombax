@@ -32,8 +32,7 @@ One writer. There is no CF D1/R2 mirroring or dual-write.
   switching origins. Do not widen cookie Domain.
 - QR bearer passes always contain public canonical
   https://activity.10273055.xyz/#pass=<token> so they work outside campus.
-- Everything is synthetic-only until identity, compliance and phones pass
-  a separately reviewed real-data release.
+- Student identifiers remain self-declared, and screenshots are private with manual review.
 
 ## DNS and certificate
 

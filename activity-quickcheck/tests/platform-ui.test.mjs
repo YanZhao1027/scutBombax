@@ -99,19 +99,14 @@ test('real evidence uploads use native image decoding and JPEG quality 75 with b
   assert.equal(closed,1,'native ImageBitmap must be released');
   assert.equal(canvas.width,0);assert.equal(canvas.height,0,'canvas backing memory must be released');
   assert.equal(canvasCreated,1);
-  assert.match(app,/compressEvidenceImage\(f\)/);
-  assert.match(app,/app\.allowTestImageUpload=Boolean\(ready\.allowTestImageUpload\)/);
-  assert.match(app,/独立上传性能测试环境/);
-  assert.match(app,/if\(app\.syntheticOnly&&!app\.allowTestImageUpload\)/);
-  assert.match(app,/if\(!app\.syntheticOnly\|\|app\.allowTestImageUpload\)/);
-  assert.match(app,/raw:compressed\.blob,headers:\{'Content-Type':'image\/jpeg',/);
-  assert.match(app,/X-Bombax-Upload-Test-Key/);
-  assert.match(app,/path\.endsWith\('\/upload'\)\?60000/,'large image uploads get a longer request deadline than ordinary mutations');
-  assert.match(app,/本轮上传测试访问码/);
-  assert.match(app,/原图不会先上传或发送给第三方/);
-  assert.match(app,/if\(app\.syntheticOnly&&!app\.allowTestImageUpload\)box\.append\(el\('img'/,
-    'synthetic Stage continues to use the marked built-in fixture');
-  assert.match(app,/if\(!app\.syntheticOnly\|\|app\.allowTestImageUpload\)\{\s*const fileInput/);
+  assert.match(app,/compressEvidenceImage\(file\)/);
+  assert.match(app,/从手机相册选择/);
+  assert.match(app,/打开相机拍照/);
+  assert.match(app,/aiConsent:aiConsent\.checked/);
+  assert.match(app,/raw:compressed\.blob,headers:\{'Content-Type':'image\/jpeg'\}/);
+  assert.match(app,/path\.endsWith\('\/upload'\)\?60000/);
+  assert.doesNotMatch(app,/本轮上传测试访问码/);
+  assert.doesNotMatch(app,/X-Bombax-Upload-Test-Key/);
   assert.doesNotMatch(helper,/import\s+.*(?:sharp|jimp|pica|browser-image-compression)/i,
     'no extra image-decoder/compression package should be loaded');
 });
@@ -192,7 +187,7 @@ test('fast public bootstrap never waits for ZXing or staff authentication',()=>{
   assert.match(app,/async function loadQrReader\(\)/);
   assert.match(app,/Promise\.all\(\[/);
   assert.match(app,/staffPage\?request\('\/api\/me'\):Promise\.resolve\(\{user:null\}\)/);
-  assert.match(app,/AbortSignal\.timeout\(method==='GET'\?12000:path\.endsWith\('\/upload'\)\?60000:25000\)/);
+  assert.match(app,/AbortSignal\.timeout\(method==='GET'\?12000:path\.endsWith\('\/upload'\)\?60000:path\.endsWith\('\/ai-review'\)\?75000:25000\)/);
   assert.match(app,/async function launchStart\(\)/);
   assert.match(app,/receipt-rejected-banner/);
   assert.match(app,/POST|method:'POST'/);

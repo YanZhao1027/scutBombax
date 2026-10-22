@@ -46,7 +46,7 @@ function localInputTime(timestamp){
 }
 function validateEventInputs(x){
   const radius=Number(x.radiusM),starts=new Date(x.startsAt).getTime(),ends=new Date(x.endsAt).getTime();
-  if(!Number.isInteger(radius)||radius<50||radius>1000)throw new Error('定位半径须为 50–1000 米的整数；建议测试用 150 米');
+  if(!Number.isInteger(radius)||radius<50||radius>1000)throw new Error('定位半径须为 50–1000 米的整数');
   if(!Number.isFinite(starts)||!Number.isFinite(ends))throw new Error('时间格式不正确，请重新选择开始和结束时间');
   if(ends<=starts)throw new Error('结束时间必须晚于开始时间');
   if(ends-starts>7*86400000)throw new Error('活动跨度不能超过 7 天');
@@ -62,7 +62,7 @@ async function request(path,{method='GET',data,raw,headers={}}={}){
   if(raw!==undefined)options.body=raw;
   // Lost connections must fail visibly rather than leave "initializing"
   // forever. Do NOT automatically retry mutations (join/approval/redeem).
-  options.signal=AbortSignal.timeout(method==='GET'?12000:path.endsWith('/upload')?60000:25000);
+  options.signal=AbortSignal.timeout(method==='GET'?12000:path.endsWith('/upload')?60000:path.endsWith('/ai-review')?75000:25000);
   let response;
   try{response=await fetch(path,options);}
   catch(error){
@@ -136,9 +136,9 @@ async function start(){
   app.syntheticOnly=Boolean(ready.syntheticOnly);
   app.allowTestImageUpload=Boolean(ready.allowTestImageUpload);
   if(!ready.ready){
-    notice('当前只开放虚构数据测试，真实报名暂未开通。','error');
+    notice('活动服务暂不可用，请稍后重试。','error');
     $('account').replaceChildren();
-    $('content').replaceChildren(card('活动测试站尚未就绪',text('请稍后重试；请勿填写真实信息。')));
+    $('content').replaceChildren(card('活动服务尚未就绪',text('请稍后重试。')));
     return;
   }
   if(restored?.eventId)restoredEventId=restored.eventId;
@@ -263,7 +263,8 @@ async function renderAdminHome(root){
   ])artOptions.append(el('option',{value:item[0],text:item[1]}));
   const create=form([
     label('活动标题',inp('title')),
-    label('报名和材料审核要求',el('textarea',{name:'guidelines',maxlength:'1000'})),
+    label('报名和材料审核要求（朋友圈集赞等）',el('textarea',{name:'guidelines',maxlength:'1000'})),
+    label('最低点赞数（留空则人工判断）',el('input',{name:'minLikes',type:'number',min:0,max:100000,step:1,placeholder:'例如 28'})),
     label('报名开始时间',el('input',{name:'joinStartsAt',type:'datetime-local',
       value:localInputTime(now-5*60000),required:'required'})),
     label('报名截止时间',el('input',{name:'joinEndsAt',type:'datetime-local',
@@ -288,16 +289,16 @@ async function renderAdminHome(root){
       title:x.title,guidelines:x.guidelines,
       latitude:Number(x.latitude),longitude:Number(x.longitude),radiusM:valid.radius,
       startsAt:valid.starts,endsAt:valid.ends,joinStartsAt:signupStart,joinEndsAt:signupEnd,
-      bannerPreset:x.bannerPreset,requirePhoto:true
+      bannerPreset:x.bannerPreset,requirePhoto:true,minLikes:x.minLikes===''?null:Number(x.minLikes)
     }});
-    notice('虚构活动创建成功，默认卡通横幅已设置。','success');
+    notice('活动创建成功，卡通横幅已设置。','success');
     await start();
   });
-  const quickFill=button('一键填入虚构地点',()=>{
+  const quickFill=button('填入演示坐标',()=>{
     create.elements.latitude.value='23.12';create.elements.longitude.value='113.32';
-    notice('已填入虚构测试坐标，未读取学生或工作人员位置。','success');
+    notice('已填入演示坐标。','success');
   },'secondary');
-  const fillGPS=button('定位当前地点（非演练环境）',async()=>{
+  const fillGPS=button('定位当前地点',async()=>{
     const pos=await requestPhoneLocation(false);
     create.elements.latitude.value=pos.coords.latitude.toFixed(7);
     create.elements.longitude.value=pos.coords.longitude.toFixed(7);
@@ -399,8 +400,8 @@ const MAX_EVIDENCE_SOURCE_PIXELS=12_000_000;
 const MAX_EVIDENCE_EDGE=3200;
 const MAX_EVIDENCE_OUTPUT_PIXELS=8_000_000;
 async function compressEvidenceImage(file){
-  if(!file||!['image/png','image/jpeg'].includes(file.type))
-    throw new Error('请选择 PNG 或 JPEG 格式的截图');
+  if(!file||!['image/png','image/jpeg','image/webp','image/heic','image/heif'].includes(file.type))
+    throw new Error('请选择 JPEG、PNG、WebP 或手机 HEIC 图片');
   if(!Number.isFinite(file.size)||file.size<16||file.size>MAX_EVIDENCE_SOURCE_BYTES)
     throw new Error('原始截图必须小于 12 MB');
   let decoded=null,canvas=null,release=()=>{};
@@ -479,23 +480,25 @@ async function studentView(event,root){
       return;
     }
     const privacy=el('input',{type:'checkbox',name:'privacyAcknowledged',value:'yes'});
+    const aiConsent=el('input',{type:'checkbox',name:'aiConsent',value:'yes'});
     const join=form([
-      label('虚构测试姓名（以“测试”开头）',inp('displayName')),
-      label('虚构测试学号（TEST- 开头）',inp('studentNumber')),
-      label('补充说明（可选）',el('textarea',{name:'note',maxlength:'500'})),
-      el('label',{class:'check'},privacy,app.allowTestImageUpload
-        ?'我确认报名姓名和学号仅为虚构测试资料；如上传截图，我有权提交该图片，并理解图片会存入独立上传测试存储供性能测试，测试结束后清理。请勿上传他人的私密信息。'
-        :'我确认仅使用虚构测试资料，理解报名会保存自填信息和内置模拟截图，仅授权工作人员可查看；本测试站尚不支持真实报名或学校实名认证。')
-    ],'免登录提交报名',async v=>{
-      if(!privacy.checked)throw new Error('请先确认虚构数据演练说明');
+      label('姓名（本人填写）',inp('displayName')),
+      label('学号（本人填写，非学校实名认证）',inp('studentNumber')),
+      label('报名说明（可选）',el('textarea',{name:'note',maxlength:'500'})),
+      el('label',{class:'check'},privacy,
+        '我确认资料由本人提交并用于本活动报名、材料审核与签到；信息及图片保存在主办方 Ubuntu 私有服务器，只有本人和授权工作人员可以查看。'),
+      el('label',{class:'check'},aiConsent,
+        '可选：同意在审核员发起 AI 辅助审核时，将报名图片发送至第三方 DeepSeek 识别可见点赞数；不同意仍可由人工审核。')
+    ],'提交活动报名',async v=>{
+      if(!privacy.checked)throw new Error('请先确认资料用途及隐私说明');
       await request('/api/events/'+event.id+'/join',{method:'POST',data:{
         displayName:v.displayName,studentNumber:v.studentNumber,note:v.note,
-        privacyAcknowledged:true,aiConsent:false
+        privacyAcknowledged:true,aiConsent:aiConsent.checked
       }});
       await studentViewReload(event);
-      notice('报名成功！一码通二维码已经生成；请立即保存，以后查询和签到都使用这一个码。','success');
+      notice('报名成功！一码通已生成，请保存二维码。接下来可上传手机相册中的活动证明图片。','success');
     });
-    box.append(text('无需登录。演练环境仅接受 TEST- 虚构学号及“测试”开头的姓名；同一设备报名后可再次打开本活动查看状态。'),join);
+    box.append(text('报名无需创建账号。仅供主办方按活动规则审核；自填学号不等于学校实名认证。'),join);
     return;
   }
   const attendance=reg.attendance;
@@ -506,17 +509,19 @@ async function studentView(event,root){
   }
   if(reg.state==='rejected'&&!attendance){
     const privacy=el('input',{type:'checkbox',name:'privacyAcknowledged',value:'yes'});
+    const aiConsent=el('input',{type:'checkbox',name:'aiConsent',value:'yes'});
     const rejoin=form([
-      label('重新填写虚构姓名（测试开头）',inp('displayName')),
-      label('重新填写虚构学号（TEST-开头）',inp('studentNumber')),
+      label('重新填写姓名',inp('displayName')),
+      label('重新填写学号',inp('studentNumber')),
       label('根据驳回意见补充新的报名说明',el('textarea',{name:'note',maxlength:'500'})),
-      el('label',{class:'check'},privacy,'我同意重新提交一个独立报名，旧一码通永久作废；旧截图不能再用于查询或核销。')
+      el('label',{class:'check'},privacy,'我同意重新提交一个独立报名，旧一码通永久作废；旧截图不能再用于查询或核销。'),
+      el('label',{class:'check'},aiConsent,'可选：同意 DeepSeek 辅助识别重新提交的图片；不同意仍可人工审核。')
     ],'重新填报，生成全新二维码并作废原码',async values=>{
       if(!privacy.checked)throw new Error('请先确认原二维码将永久作废');
       if(!window.confirm('确定重新填报？当前旧二维码将立即作废，旧截图失去效力，之后只能使用新二维码。'))return;
       const outcome=await request('/api/events/'+event.id+'/reapply',{
         method:'POST',data:{displayName:values.displayName,studentNumber:values.studentNumber,
-          note:values.note,privacyAcknowledged:true,aiConsent:false}
+          note:values.note,privacyAcknowledged:true,aiConsent:aiConsent.checked}
       });
       if(!outcome.oldReceiptRevoked||!outcome.newPassIssued)
         throw new Error('服务器未确认旧码作废或新码签发，请联系工作人员');
@@ -552,58 +557,54 @@ async function studentView(event,root){
   const files=await request('/api/events/'+event.id+'/materials');
   for(const f of files.materials)box.append(el('div',{class:'item'},
     text('已上传 '+f.mime+' · '+Math.ceil(f.length/1024)+' KB')));
-  if(reg.state!=='rejected'&&(!attendance||attendance.channel==='manual')){
-    box.append(el('h3',{text:'证明截图上传'}),
-      text(app.syntheticOnly&&!app.allowTestImageUpload
-        ?'只允许使用本站内置的虚构图片。Worker 会校验文件 SHA-256；真实图片会被拒绝。'
-        :app.allowTestImageUpload
-          ?'独立上传性能测试环境：最多三张 PNG/JPEG。请只上传你有权提交的截图；图片会存入独立私有测试存储，并在本轮测试结束后清理。'
-          :'最多三张 PNG/JPEG。手机会先在本机以 JPEG 质量 75% 压缩，原图上限 12 MB，上传文件上限 3 MB。'));
-    if(app.syntheticOnly&&!app.allowTestImageUpload)box.append(el('img',{class:'qr',src:'/demo-proof.png',alt:'系统内置、标注 TEST ONLY 的虚构点赞截图'}));
-    if(app.syntheticOnly&&!app.allowTestImageUpload)box.append(button('真正上传内置模拟截图至私有 R2',async()=>{
-      const source=await fetch('/demo-proof.png',{credentials:'same-origin'});
-      if(!source.ok)throw new Error('无法获取内置测试图片');
-      const blob=await source.blob();
-      await request('/api/events/'+event.id+'/upload',{method:'POST',raw:blob,headers:{'Content-Type':'image/png'}});
-      notice('图片已上传到私有 R2，等待审核员处理。','success');await studentViewReload(event);
-    },'secondary'));
-    if(!app.syntheticOnly||app.allowTestImageUpload){
-      const fileInput=el('input',{type:'file',accept:'image/png,image/jpeg'});
-      const testKeyInput=app.allowTestImageUpload
-        ?el('input',{type:'password',autocomplete:'off',placeholder:'本轮上传测试访问码','aria-label':'本轮上传测试访问码'})
-        :null;
-      if(testKeyInput)box.append(label('隔离测试访问码（仅当前页面内存使用）',testKeyInput));
-      let uploading=false;
-      const uploadButton=button('本机压缩并上传截图（JPEG 75%）',async()=>{
-        if(uploading)return;
-        const f=fileInput.files?.[0];if(!f)throw new Error('请选择截图');
-        if(testKeyInput&&!testKeyInput.value.trim())throw new Error('请输入隔离上传测试访问码');
-        uploading=true;fileInput.disabled=true;uploadButton.disabled=true;
-        if(testKeyInput)testKeyInput.disabled=true;
-        try{
-          notice('正在手机本机压缩截图；原图不会先上传或发送给第三方。');
-          const compressed=await compressEvidenceImage(f);
-          await request('/api/events/'+event.id+'/upload',{
-            method:'POST',raw:compressed.blob,headers:{'Content-Type':'image/jpeg',
-              ...(testKeyInput?{'X-Bombax-Upload-Test-Key':testKeyInput.value.trim()}:{})}
-          });
-          await studentViewReload(event);
-          notice('截图已压缩为 JPEG（质量 75%）并提交：'+
-            Math.ceil(compressed.originalBytes/1024)+' KB → '+
-            Math.ceil(compressed.compressedBytes/1024)+' KB。','success');
-        }finally{
-          uploading=false;fileInput.disabled=false;uploadButton.disabled=false;
-          if(testKeyInput)testKeyInput.disabled=false;
-        }
-      });
-      box.append(fileInput,uploadButton);
-    }
+  const toggleAi=el('input',{type:'checkbox',name:'aiConsent',value:'yes',checked:Boolean(reg.aiConsent)});
+  const consentArea=el('div',{class:'item'},
+    el('label',{class:'check'},toggleAi,
+      '允许 DeepSeek 辅助识别我已上传图片中的可见点赞数（可随时撤回未来使用授权）'),
+    text('可不勾选：工作人员仍可人工审核。已发送给第三方的历史请求无法撤回；请先在手机上裁剪掉与活动无关的聊天、姓名和头像。'));
+  toggleAi.addEventListener('change',()=>safe(async()=>{
+    toggleAi.disabled=true;
+    try{
+      await request('/api/events/'+event.id+'/consent',{method:'POST',
+        data:{aiConsent:toggleAi.checked}});
+      notice(toggleAi.checked?'已允许工作人员使用 AI 辅助审核':'已撤回后续 AI 使用授权','success');
+    }catch(e){toggleAi.checked=!toggleAi.checked;throw e;}
+    finally{toggleAi.disabled=false;}
+  }));
+  box.append(consentArea);
+  if(reg.state!=='rejected'&&(!attendance||attendance.channel==='manual')&&files.materials.length<3){
+    box.append(el('h3',{text:'上传手机活动证明图片'}),
+      text('最多 3 张。支持从手机相册选择图片或拍照；先在本机压缩为 JPEG 后上传到 Ubuntu 私有目录。单张原图不超过 12 MB、上传后不超过 3 MB。'));
+    const gallery=el('input',{type:'file',accept:'image/png,image/jpeg,image/webp,image/heic,image/heif'});
+    gallery.setAttribute('aria-label','从手机相册选择活动证明图片');
+    const camera=el('input',{type:'file',accept:'image/*',capture:'environment'});
+    camera.setAttribute('aria-label','使用手机摄像头拍摄活动证明图片');
+    let uploading=false;
+    const uploadButton=button('压缩并上传图片',async()=>{
+      if(uploading)return;
+      const file=gallery.files?.[0]||camera.files?.[0];
+      if(!file)throw new Error('请从相册选择图片或使用摄像头拍照');
+      uploading=true;gallery.disabled=true;camera.disabled=true;uploadButton.disabled=true;
+      try{
+        notice('正在手机本地处理图片，请勿关闭页面。');
+        const compressed=await compressEvidenceImage(file);
+        await request('/api/events/'+event.id+'/upload',{method:'POST',
+          raw:compressed.blob,headers:{'Content-Type':'image/jpeg'}});
+        await studentViewReload(event);
+        notice('已上传至 Ubuntu 私有存储：'+
+          Math.ceil(compressed.originalBytes/1024)+' KB → '+
+          Math.ceil(compressed.compressedBytes/1024)+' KB。','success');
+      }finally{uploading=false;gallery.disabled=false;camera.disabled=false;uploadButton.disabled=false;}
+    });
+    box.append(label('从手机相册选择',gallery),label('打开相机拍照',camera),uploadButton);
+  }else if(files.materials.length>=3){
+    box.append(text('已提交 3 张材料，达到上限。'));
   }
   if(!attendance){
     box.append(el('hr'),text(
       reg.state==='approved'
         ? '审核已通过。请在活动现场出示上方一码通，由已登录的工作人员核对身份后扫码签到；无需 GPS 重新生成二维码。'
-        : '同一个一码通可以随时查询审核进度。审核通过之前不能签到；你仍可按要求上传内置模拟材料。'
+        : '同一个一码通可以随时查询审核进度。审核通过之前不能签到；可按主办方要求补充手机活动证明图片。'
     ));
   }
   box.append(button('刷新审核结果',()=>studentViewReload(event),'secondary'));
@@ -632,7 +633,7 @@ async function organizerView(event,root){
     artFile.setAttribute('aria-label','上传小于100KB的静态SVG横幅');
     panel.append(el('details',{class:'banner-editor'},
       el('summary',{text:'活动卡通横幅 · 替换/恢复内置插画（21:9）'}),
-      text('只允许小于 100 KB 的静态 SVG。服务器会拒绝脚本、外链图片、动画、CSS 引用及非 21:9 文件。'),
+      text('仅支持小于 100 KB 的静态 SVG。脚本和外部引用会被拒绝。'),
       preview,preset,el('div',{class:'row'},
         button('应用选中的内置插画',async()=>{
           await request('/api/events/'+event.id+'/banner-preset',{method:'POST',data:{preset:preset.value}});

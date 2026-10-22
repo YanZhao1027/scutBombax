@@ -30,7 +30,7 @@ test('Ubuntu single-authority HTTP and SQLite integration (synthetic only)',asyn
     const invalidHost=await new Promise((resolve,reject)=>{const r=http.request(root+'/api/events',{headers:{Host:'untrusted.example'}},res=>{res.resume();resolve(res.statusCode);});r.on('error',reject);r.end();});
     assert.equal(invalidHost,421);
     assert.equal(app.bindings.DB.inspect('SELECT COUNT(*) AS c FROM activity_events')[0].c,0);
-    assert.equal(app.bindings.DB.inspect('SELECT COUNT(*) AS c FROM _local_migrations')[0].c,5);
+    assert.equal(app.bindings.DB.inspect('SELECT COUNT(*) AS c FROM _local_migrations')[0].c,6);
 
     const owner=randomUUID(),salt=randomBytes(16).toString('hex');
     const hash=pbkdf2Sync('12341234',Buffer.from(salt,'hex'),100000,32,'sha256').toString('hex');

@@ -13,7 +13,7 @@ const testPassword='OrganizerStageTestPassword12345!';
 function makeFixture(){
   const sqlite=new DatabaseSync(':memory:');
   sqlite.exec('PRAGMA foreign_keys=ON');
-  for(const file of ['0001_init.sql','0002_password_iterations.sql','0003_guest_access.sql','0004_join_window.sql','0005_reapply_permissions.sql']){
+  for(const file of ['0001_init.sql','0002_password_iterations.sql','0003_guest_access.sql','0004_join_window.sql','0005_reapply_permissions.sql','0006_min_likes.sql']){
     sqlite.exec(readFileSync(new URL('../cloudflare-live/migrations/'+file,import.meta.url),'utf8'));
   }
   const db={

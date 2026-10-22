@@ -76,9 +76,9 @@ test('Full-viewport camera UI supports continuous scanning, closure, Android Bac
   assert.match(css,/prefers-reduced-motion:\s*reduce/);
 });
 
-test('One-code synthetic Stage admin form avoids collecting real GPS coordinates',()=>{
+test('One-code staff form offers explicit location choice',()=>{
   assert.match(app,/app\.syntheticOnly\?quickFill:fillGPS/);
-  assert.match(app,/一键填入虚构地点/);
+  assert.match(app,/填入演示坐标/);
   assert.match(app,/换设备后选择/);
   assert.doesNotMatch(app,/手机需在此区域才能领取签到码/);
 });

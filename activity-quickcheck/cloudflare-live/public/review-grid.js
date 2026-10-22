@@ -91,7 +91,10 @@
     const prev=node('button','secondary','← 上一张'),next=node('button','secondary','下一张 →');
     const progress=node('span','tag','0 / 0');
     footer.append(prev,progress,next);
-    pane.append(previewBar,who,photo,footer);
+    const aiButton=node('button','secondary','DeepSeek 辅助识别点赞数');
+    const aiStatus=node('p','muted','选择报名图片后，可在取得学生授权时发起 AI 辅助审核。');
+    aiButton.disabled=true;
+    pane.append(previewBar,who,photo,footer,aiButton,aiStatus);
     pane.hidden=true;
     shell.append(sheet,pane);target.append(shell);
     function update(){
@@ -156,6 +159,10 @@
     async function show(){
       if(closed||paneIndex<0||paneIndex>=ordered.length)return;
       const row=ordered[paneIndex],images=await materials(row);
+      aiButton.disabled=!row.ai_consent||!images.length;
+      aiStatus.textContent=row.ai_consent?
+        '学生已同意第三方图片分析；建议先人工查看图片再进行识别。':
+        '学生未同意第三方 AI 分析；可直接人工审核。';
       if(!images.length){who.textContent=row.display_name+'：暂无有效材料';photo.removeAttribute('src');return;}
       imageIndex=Math.min(images.length-1,Math.max(0,imageIndex));
       const pic=images[imageIndex];
@@ -173,6 +180,31 @@
         if(list.length){imageIndex=dir>0?0:list.length-1;return show();}
       }
     }
+    aiButton.addEventListener('click',async()=>{
+      const row=ordered[paneIndex];
+      if(!row||!row.ai_consent)return;
+      aiButton.disabled=true;
+      aiStatus.textContent='正在向 DeepSeek 发送已获授权的材料，请稍候…';
+      try{
+        const result=await request('/api/events/'+eventId+'/ai-review',{
+          method:'POST',data:{registrationId:row.id}});
+        if(closed||row!==ordered[paneIndex])return;
+        const advice=result.advice||{};
+        const count=Number.isInteger(advice.visibleLikeCount)?
+          String(advice.visibleLikeCount)+'赞':'无法可靠识别';
+        const threshold=Number.isInteger(advice.minimumLikes)?
+          String(advice.minimumLikes)+'赞':'本活动未设置固定门槛';
+        const match=advice.thresholdMet===true?'达到可见点赞门槛':
+          advice.thresholdMet===false?'低于可见点赞门槛':'无法确定是否满足门槛';
+        const caveats=Array.isArray(advice.concerns)?advice.concerns.join('；'):'';
+        aiStatus.textContent='AI识别：'+count+'；门槛：'+threshold+'；'+match+
+          '。可见证据：'+String(advice.visibleEvidence||'未说明')+
+          (caveats?'；疑点：'+caveats:'')+
+          '。结果仅供参考，无法确认截图真伪或本人身份；必须由工作人员手动提交审核决定。';
+      }catch(e){
+        aiStatus.textContent='辅助识别未完成：'+(e.message||'请人工审核');
+      }finally{if(!closed&&row===ordered[paneIndex])aiButton.disabled=false;}
+    });
     prev.addEventListener('click',()=>advance(-1).catch(e=>notify(e.message,'error')));
     next.addEventListener('click',()=>advance(1).catch(e=>notify(e.message,'error')));
     close.addEventListener('click',()=>{pane.hidden=true;paneIndex=-1;photo.removeAttribute('src');});
