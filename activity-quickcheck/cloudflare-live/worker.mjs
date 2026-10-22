@@ -605,7 +605,10 @@ async function api(req,env,url){
         need(decision.state!=='approved'||!event.require_photo||row.materials>0,
           409,'存在未上传材料的报名，不能批量通过');
       }
-      const now=epoch(),statements=[];
+      // Make review version strictly monotonic even for same-millisecond
+      // manual decisions, to prevent a stale tab overwriting a newer review.
+      const now=Math.max(epoch(),...items.results.map(row=>row.updated_at+1)),
+        statements=[];
       for(const decision of list){
         statements.push(db.prepare(
           "UPDATE activity_registrations SET state=?,review_reason=?,reviewed_by=?,reviewed_at=?,updated_at=? WHERE id=? AND event_id=? AND state='pending' AND NOT EXISTS (SELECT 1 FROM activity_attendance t WHERE t.registration_id=? AND t.channel='scan')"

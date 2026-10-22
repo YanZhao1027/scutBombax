@@ -19,7 +19,11 @@ const visit=(node,results=[])=>{
   for(const child of node.children||[])if(child instanceof FakeNode)visit(child,results);
   return results;
 };
-function fixture(rows,{aiAvailable=true}={}){
+function fixture(rows,{aiAvailable=true,advice={
+  visibleLikeCount:38,minimumLikes:28,thresholdMet:true,
+  suggestedDecision:'approved',suggestedReason:'38赞达到28赞门槛',
+  visibleEvidence:'图像中可见赞数 38',concerns:['截图真实性未验证']
+}}={}){
   const document={
     createElement:(tag)=>new FakeNode(tag),
     addEventListener(){},
@@ -32,8 +36,8 @@ function fixture(rows,{aiAvailable=true}={}){
   const request=async(path,options)=>{
     apiCalls.push({path,options});
     if(path.includes('/materials?'))return {materials:[{id:'ea4c5cfa-18e8-41e8-aaf0-0812a5f49099'}]};
-    if(path.endsWith('/ai-review'))return {advice:{visibleLikeCount:38,minimumLikes:28,
-      thresholdMet:true,suggestedDecision:'approved',suggestedReason:'38赞达到28赞门槛',visibleEvidence:'图像中可见赞数 38',concerns:['截图真实性未验证']}};
+    if(path.endsWith('/ai-review'))return {advice,subjectVersion:rows[0].updated_at};
+    if(path.endsWith('/review-batch'))return {ok:true,reviewed:options.data.decisions.length};
     throw new Error('unexpected API call: '+path);
   };
   const dispose=window.BombaxReviewGrid.mount({
@@ -90,4 +94,42 @@ test('staff app visibly links owner dashboard to AI and passes readiness to revi
   assert.match(app,/aiAvailable:app\.aiReviewAvailable/);
   assert.match(app,/保存点赞门槛/);
   assert.match(app,/\/review-settings/);
+});
+
+test('uncertain AI result selects only doubt and never submits without human click',async()=>{
+  const f=fixture([row({material_count:1,ai_consent:1})],{advice:{
+    visibleLikeCount:null,minimumLikes:28,thresholdMet:null,
+    suggestedDecision:'uncertain',suggestedReason:'点赞数不清晰，需人工复核',
+    visibleEvidence:'数字被遮挡',concerns:['截图模糊']
+  }});
+  await f.button.click();
+  const all=visit(f.root);
+  const checked=label=>all.find(x=>x.attributes?.get('aria-label')===label);
+  assert.equal(checked('存疑第 1 行').checked,true);
+  assert.equal(checked('通过第 1 行').checked,false);
+  assert.equal(checked('驳回第 1 行').checked,false);
+  assert.match(checked('第 1 行驳回原因').value,/需人工复核/);
+  assert.equal(f.apiCalls.filter(x=>x.path.includes('/review-batch')).length,0);
+  const commit=all.find(x=>x.tagName==='BUTTON'&&x.textContent==='确认提交审核结果');
+  assert.equal(commit.disabled,false);
+  await commit.click();
+  const [batch]=f.apiCalls.filter(x=>x.path.includes('/review-batch'));
+  assert.equal(batch.options.data.decisions.length,1);
+  assert.equal(batch.options.data.decisions[0].state,'uncertain');
+  assert.equal(batch.options.data.decisions[0].subjectVersion,123456789);
+  f.dispose();
+});
+
+test('saved uncertain reviews remain visually labeled and not retried after approval',()=>{
+  const f=fixture([row({
+    material_count:1,ai_consent:1,review_reason:'存疑：头像遮挡点赞数字'
+  })]);
+  const all=visit(f.root);
+  assert.ok(all.some(x=>x.textContent==='存疑 · 待复核'));
+  assert.ok(all.some(x=>x.value==='头像遮挡点赞数字'));
+  f.dispose();
+  const completed=fixture([row({state:'approved',material_count:1,ai_consent:1})]);
+  assert.equal(completed.button.disabled,true);
+  assert.equal(completed.apiCalls.length,0);
+  completed.dispose();
 });
