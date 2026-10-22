@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const app={me:null,events:[],active:null,poll:null,scanner:null,scannerOverlay:null,scannerVideo:null,scannerEpoch:0,scannerHistory:false,scannerFullscreenEntered:false,scannerPreviousFocus:null,scannerFeedback:null,reviewDispose:null,staffDispose:null,qr:null,syntheticOnly:false,allowTestImageUpload:false};
+const app={me:null,events:[],active:null,poll:null,scanner:null,scannerOverlay:null,scannerVideo:null,scannerEpoch:0,scannerHistory:false,scannerFullscreenEntered:false,scannerPreviousFocus:null,scannerFeedback:null,reviewDispose:null,staffDispose:null,qr:null,syntheticOnly:false,allowTestImageUpload:false,aiReviewAvailable:false};
 function el(tag,props={},...children){
   const n=document.createElement(tag);
   for(const [k,v] of Object.entries(props)){
@@ -135,6 +135,7 @@ async function start(){
   ]);
   app.syntheticOnly=Boolean(ready.syntheticOnly);
   app.allowTestImageUpload=Boolean(ready.allowTestImageUpload);
+  app.aiReviewAvailable=Boolean(ready.aiReviewAvailable);
   if(!ready.ready){
     notice('活动服务暂不可用，请稍后重试。','error');
     $('account').replaceChildren();
@@ -622,6 +623,20 @@ async function organizerView(event,root){
     el('span',{class:'tag',text:'待审核 '+queue.filter(x=>x.state==='pending').length}),
     el('span',{class:'tag green',text:'已到场 '+queue.filter(x=>x.attended_at||x.attendedAt).length}));
   panel.append(totals);
+  // Always expose AI entry even when there are no uploaded/consented photos.
+  // Students must expressly opt in; a missing image or opt-in never triggers a third-party request.
+  if(duty==='owner'||duties.includes('reviewer')){
+    const photos=queue.filter(x=>Number(x.material_count)>0);
+    const authorized=photos.filter(x=>Boolean(x.ai_consent));
+    const status=app.aiReviewAvailable?'DeepSeek API 已连接':'DeepSeek API 尚未配置';
+    const helper=el('div',{class:'ai-overview'},
+      el('strong',{text:'🤖 DeepSeek 图片辅助审核 · '+status}),
+      el('p',{text:'本活动共有 '+queue.length+' 条报名；'+photos.length+
+        ' 条已上传图片；'+authorized.length+' 条同时具备图片和 AI 授权。'}));
+    helper.append(button('进入材料审核 / AI 识别',()=>renderDuty(event,root,'reviewer',duty==='owner'),'secondary'));
+    if(!authorized.length)helper.append(text('要进行识别，请先让学生上传手机截图，并在报名页面勾选“同意 DeepSeek 辅助识别”。不同意 AI 的报名仍可人工审核。'));
+    panel.append(helper);
+  }
   if(duty==='owner'){
     const preview=el('img',{class:'admin-illustration-preview',src:'/api/events/'+event.id+'/banner',
       alt:event.title+' 当前 21:9 SVG 主题插画'});
@@ -665,6 +680,27 @@ async function organizerView(event,root){
       });
     });
     panel.append(staffDetails);
+    const likesInput=el('input',{type:'number',min:0,max:100000,step:1,
+      value:event.min_likes===null||event.min_likes===undefined?'':String(event.min_likes),
+      placeholder:'例如 28，不限制可留空','aria-label':'本活动最低点赞数'});
+    const likesStatus=el('p',{class:'muted',text:event.min_likes===null||
+      event.min_likes===undefined?'尚未设置点赞门槛：AI 只能报告可见赞数。':
+      '当前最低点赞数：'+event.min_likes+'。'});
+    panel.append(el('div',{class:'ai-overview'},
+      el('strong',{text:'本活动朋友圈点赞门槛'}),
+      el('label',{},el('span',{text:'最低赞数（留空表示人工判断）：'}),likesInput),
+      button('保存点赞门槛',async()=>{
+        const v=likesInput.value.trim()===''?null:Number(likesInput.value);
+        if(v!==null&&(!Number.isInteger(v)||v<0||v>100000))
+          throw new Error('请输入 0～100000 的整数');
+        const result=await request('/api/events/'+event.id+'/review-settings',{
+          method:'POST',data:{minLikes:v}});
+        event.min_likes=result.minLikes;
+        likesStatus.textContent=v===null?'当前不设固定门槛，需人工判断。':
+          '当前最低点赞数：'+v+'。之后的 AI 建议会按此门槛判断。';
+        notice('活动点赞门槛已保存，无需重建活动','success');
+      },'secondary'),
+      likesStatus));
   }
   const mode=el('div',{class:'row'});
   if(duty==='owner'){
@@ -705,7 +741,7 @@ async function renderDuty(event,root,duty,owner){
     slot.append(text('表格提供全选与 Shift 连续多选；勾「通过」后统一确认。图片会在右侧预览，支持前后顺序切换。'));
     if(!window.BombaxReviewGrid)throw new Error('批量审核组件尚未加载，请刷新后台');
     app.reviewDispose=window.BombaxReviewGrid.mount({
-      root:slot,rows:all,eventId:event.id,request,
+      root:slot,rows:all,eventId:event.id,request,aiAvailable:app.aiReviewAvailable,
       notify:notice,onCommitted:()=>renderDuty(event,root,duty,owner)
     });
   }else if(duty==='manual'){

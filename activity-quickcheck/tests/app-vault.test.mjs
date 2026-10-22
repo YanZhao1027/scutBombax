@@ -21,7 +21,7 @@ test('ordinary browser has screenshot import but no privileged App vault',async(
   assert.match(app,/if\(!verified.registration\)throw/);
   assert.match(app,/请务必另外截图保存一码通/);
   assert.match(html,/src="\/app-vault.js"/);
-  assert.ok(html.indexOf('src="/app-vault.js"')<html.indexOf('src="/app.js"'));
+  assert.ok(html.indexOf('src="/app-vault.js"')<html.indexOf('src="/app.js'));
 });
 
 test('native bridge operations never require JS to read or persist bearer secrets',async()=>{

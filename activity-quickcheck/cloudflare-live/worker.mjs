@@ -285,6 +285,18 @@ async function api(req,env,url){
       if(object)return svgResponse(await object.arrayBuffer());
       return svgResponse(builtInBanner(bannerKind(null,event.title)));
     }
+    if(method==='POST'&&action==='review-settings'){
+      await access(db,user,eid,['owner']);
+      const x=await body(req);
+      const likes=x.minLikes===null||x.minLikes===undefined||x.minLikes===''?
+        null:Number(x.minLikes);
+      need(likes===null||(Number.isInteger(likes)&&likes>=0&&likes<=100000),
+        400,'最低点赞数须为 0 至 100000 的整数或留空');
+      await db.prepare('UPDATE activity_events SET min_likes=? WHERE id=?')
+        .bind(likes,eid).run();
+      await audit(db,eid,user.id,'event.min-likes.update',eid);
+      return json({ok:true,minLikes:likes});
+    }
     if(method==='POST'&&action==='banner'){
       await access(db,user,eid,['owner']);
       need(/^image\/svg\+xml(?:\s*;\s*charset=utf-8)?$/i.test(req.headers.get('Content-Type')||''),

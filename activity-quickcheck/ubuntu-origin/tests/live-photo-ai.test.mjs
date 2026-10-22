@@ -53,12 +53,21 @@ test('live origin: independent staff, student photo, consent and AI recommendati
     assert.equal(login.status,200,JSON.stringify(login.data));
     const now=Date.now();
     const created=await call('/api/events',{method:'POST',cookie:login.cookie,data:{
-      title:'校园活动报名测试',guidelines:'朋友圈赞数至少28',minLikes:28,
+      title:'校园活动报名测试',guidelines:'朋友圈赞数至少28',minLikes:null,
       latitude:23.12,longitude:113.32,radiusM:150,startsAt:now+3600000,
       endsAt:now+7200000,requirePhoto:true
     }});
     assert.equal(created.status,201,JSON.stringify(created.data));
     const eid=created.data.id;
+    assert.equal((await call('/api/events/'+eid+'/review-settings',{
+      method:'POST',data:{minLikes:28}})).status,403,'anonymous cannot edit event requirements');
+    assert.equal((await call('/api/events/'+eid+'/review-settings',{
+      method:'POST',cookie:login.cookie,data:{minLikes:-1}})).status,400);
+    const settings=await call('/api/events/'+eid+'/review-settings',{
+      method:'POST',cookie:login.cookie,data:{minLikes:28}});
+    assert.equal(settings.status,200,JSON.stringify(settings.data));
+    assert.equal(settings.data.minLikes,28);
+    assert.equal(app.bindings.DB.inspect('SELECT min_likes FROM activity_events WHERE id=?',eid)[0].min_likes,28);
     const joined=await call('/api/events/'+eid+'/join',{method:'POST',data:{
       displayName:'李某某',studentNumber:'2024091234',privacyAcknowledged:true,aiConsent:true
     }});

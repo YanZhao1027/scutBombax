@@ -117,7 +117,7 @@ test('unsupported, blocked and failing audio never blocks visual success countin
 
 test('staff panel and full-screen share a large changing marker and synchronized sound switch',()=>{
   const helperIndex=html.indexOf('src="/scanner-feedback.js"');
-  assert.ok(helperIndex>0&&helperIndex<html.indexOf('src="/app.js"'));
+  assert.ok(helperIndex>0&&helperIndex<html.indexOf('src="/app.js'));
   assert.match(app,/window\.BombaxCheckinFeedback\?\.create\(\)/);
   assert.match(app,/function marker\(compact=false\)/);
   assert.match(app,/marker\(true\),hud/);

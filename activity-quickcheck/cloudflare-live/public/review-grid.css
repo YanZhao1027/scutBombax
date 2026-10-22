@@ -36,3 +36,11 @@
   .review-preview{position:static}
   .review-scroll{max-height:58vh}
 }
+
+/* AI launch stays above the scrollable table and outside the hidden photo pane. */
+.review-ai-panel{margin-top:14px;padding:14px 16px;border:1px solid #aacdef;
+ background:#eef7ff;border-radius:12px}
+.review-ai-panel strong{display:block;color:#154d76;margin-bottom:6px}
+.review-ai-panel p{margin:7px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.review-ai-panel button{margin:7px 0;max-width:100%}
+.review-ai-panel button:disabled{opacity:.62;cursor:not-allowed}

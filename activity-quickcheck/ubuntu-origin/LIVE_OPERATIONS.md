@@ -56,3 +56,16 @@ the public hostname relays requests back to the same Ubuntu process.
   and restart it; migration 0006 is additive. Do NOT delete any new student
   records or image files during rollback.
 - Do not modify the unrelated audition HTTPS service on 443.
+
+## Finding DeepSeek in the staff interface
+
+Open https://activity.10273055.xyz/adminlogin and sign in as the organizer.
+From /admin, select the event. The event dashboard shows a permanent
+"DeepSeek 图片辅助审核" readiness card with an "进入材料审核 / AI 识别" action.
+The reviewer queue has a second permanently visible action above its table.
+If no registration has BOTH a private image and explicit opt-in, the action
+is visible but disabled with a specific instruction. A student can consent
+from their own private registration receipt page and upload a phone image.
+The owner can also edit "最低点赞数" on existing activities without
+re-creating an event or losing registrations. AI advice never auto-approves.
+UI assets use a versioned query string to bypass stale client caches.
