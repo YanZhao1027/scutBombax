@@ -666,6 +666,7 @@ async function api(req,env,url){
       const x=await body(req),rid=str(x.registrationId,40);
       const r=await db.prepare('SELECT * FROM activity_registrations WHERE id=? AND event_id=?').bind(rid,eid).first();
       need(r,404,'报名不存在');need(r.ai_consent===1,403,'学生尚未同意把材料交给 DeepSeek 分析');
+      need(r.state==='pending',409,'报名已完成审核，无需再发送学生图片到 AI');
       const previous=await db.prepare('SELECT created_at FROM activity_ai_advice WHERE registration_id=? ORDER BY created_at DESC LIMIT 1').bind(rid).first();
       need(!previous||epoch()-previous.created_at>30000,429,'两次 AI 审核至少间隔 30 秒');
       const attached=await db.prepare('SELECT object_key,mime FROM activity_files WHERE registration_id=? ORDER BY added_at DESC LIMIT 3').bind(rid).all();

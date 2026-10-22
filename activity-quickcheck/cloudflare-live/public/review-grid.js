@@ -58,14 +58,14 @@
     const selection=createSelection(selectable);
     const reasonInputs=new Map(),selectorInputs=new Map(),approvedInputs=new Map(),rejectedInputs=new Map(),uncertainInputs=new Map();
     const versions=new Map(rows.map(r=>[r.id,r.updated_at]));
-    const materialCache=new Map(),ordered=rows.filter(r=>r.material_count>0);
+    const materialCache=new Map(),ordered=rows.filter(r=>r.material_count>0&&r.state==='pending');
     const aiEligible=ordered.filter(r=>Boolean(r.ai_consent));
     let paneIndex=-1,imageIndex=0,closed=false,aiBusy=false;
     const shell=node('div','review-workspace');
     const sheet=node('section','review-sheet');
     const title=node('div','review-toolbar');
     title.append(node('h3','', '报名材料审核总表'),
-      node('p','muted','点击图片在右侧预览；Shift+点击可连续多选。每条选中记录必须在「通过」或「驳回」两列明确勾选其一；两列互斥，未选择的报名绝不会被驳回。'));
+      node('p','muted','点击图片在右侧预览；Shift+点击可连续多选。每条选中记录请在「通过」「驳回」「存疑」三列中选择一项；三列互斥，存疑将保留待审核并记录复核原因。'));
     const toolbar=node('div','review-actions');
     const allBox=node('input');allBox.type='checkbox';allBox.setAttribute('aria-label','全选待审');
     const selectLabel=node('label','check');selectLabel.append(allBox,node('span','','全选待审'));
@@ -142,7 +142,8 @@
         selectorInputs.set(r.id,select);cell(select);
       }else cell('—');
       cell(i+1,'review-line-number');cell(r.display_name);cell(r.student_number);
-      cell(r.state==='pending'?'待审核':r.state==='approved'?'已通过':'已驳回');
+      const hasDoubt=r.state==='pending'&&String(r.review_reason||'').startsWith('存疑：');
+      cell(hasDoubt?'存疑 · 待复核':r.state==='pending'?'待审核':r.state==='approved'?'已通过':'已驳回');
       const view=node('button','secondary review-view',r.material_count?'图片 '+r.material_count+' 张':'无材料');
       view.disabled=!r.material_count;
       view.addEventListener('click',()=>{void showFor(r.id).catch(error=>notify(error.message,'error'));});
@@ -165,7 +166,8 @@
         });
         uncertainInputs.set(r.id,doubtful);cell(doubtful);
         const reason=node('input');reason.type='text';reason.maxLength=240;
-        reason.placeholder='驳回时说明原因，学生可据此重新报名';
+        reason.placeholder='可填写驳回或存疑原因；存疑将保留待复核';
+        if(hasDoubt)reason.value=String(r.review_reason||'').replace(/^存疑：/,'').slice(0,240);
         reason.setAttribute('aria-label','第 '+(i+1)+' 行驳回原因');
         reasonInputs.set(r.id,reason);cell(reason,'review-reason');
       }else{cell('—');cell('—');cell('—');cell('—');}
@@ -242,7 +244,7 @@
               '」；请核对后点击“确认提交审核结果”。';
           }
         }else{aiActivity.textContent+=' 报名数据有变化，请刷新后重新审核。';}
-        if(row===ordered[paneIndex])aiStatus.textContent=summary;
+        if(row===ordered[paneIndex])aiStatus.textContent=aiActivity.textContent;
       }catch(e){
         const reason='AI 辅助识别未完成：'+(e.message||'请人工审核');
         aiActivity.textContent=reason;
@@ -283,11 +285,11 @@
     markUncertain.addEventListener('click',()=>{for(const id of selection.selected)selection.setDecision(id,'uncertain');update();});
     submit.addEventListener('click',async()=>{
       if(selection.unassigned){
-        notify('仍有 '+selection.unassigned+' 条已选报名没有勾选通过或驳回，请先明确决定。','error');
+        notify('仍有 '+selection.unassigned+' 条报名未选择通过、驳回或存疑。','error');
         return;
       }
       const decisions=selection.decisions(id=>reasonInputs.get(id)?.value).map(x=>({
-        ...x,subjectVersion:versions.get(x.registrationId)
+        ...x,reason:x.state==='approved'?'':x.reason,subjectVersion:versions.get(x.registrationId)
       }));
       if(!decisions.length)return;
       const emptyReason=decisions.find(x=>x.state==='rejected'&&!x.reason.trim());

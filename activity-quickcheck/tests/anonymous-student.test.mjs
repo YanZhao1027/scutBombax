@@ -568,3 +568,45 @@ test('owner assigns several staff duties per account, can revoke independently, 
     'legacy role assignment remains compatible and auditable');
   assert.equal((await f.api(base+'/queue?duty=reviewer',{cookie:reviewer})).status,200);
 });
+
+test('uncertain decision persists as pending with an auditable review note and can later be approved',async t=>{
+  const f=makeFixture();t.after(()=>f.close());
+  const owner=await f.signIn('demo_owner');
+  const eid=await f.createEvent(owner,'测试三态待复核');
+  const url='/api/events/'+eid;
+  const signup=await f.api(url+'/join',{method:'POST',data:{
+    displayName:'测试存疑学生',studentNumber:'TEST-REVIEW-HOLD-01',
+    privacyAcknowledged:true,aiConsent:false
+  }});
+  assert.equal(signup.status,201,await signup.clone().text());
+  const reg=(await signup.json()).id;
+  const cookie=(signup.headers.get('set-cookie')||'').split(';')[0];
+  const first=(await(await f.api(url+'/queue',{cookie:owner})).json()).registrations.find(x=>x.id===reg);
+  assert.equal(first.state,'pending');
+  const bad=await f.api(url+'/review-batch',{method:'POST',cookie:owner,data:{
+    decisions:[{registrationId:reg,state:'uncertain',
+      reason:'数字模糊，请人工核对',subjectVersion:first.updated_at+17}]}});
+  assert.equal(bad.status,409,'stale version cannot overwrite the review queue');
+  const hold=await f.api(url+'/review-batch',{method:'POST',cookie:owner,data:{
+    decisions:[{registrationId:reg,state:'uncertain',
+      reason:'数字模糊，请人工核对',subjectVersion:first.updated_at}]}});
+  assert.equal(hold.status,200,await hold.clone().text());
+  assert.equal((await hold.json()).held,1);
+  const pending=f.sqlite.prepare('SELECT state,review_reason FROM activity_registrations WHERE id=?').get(reg);
+  assert.equal(pending.state,'pending','uncertain must not reject/approve the student');
+  assert.match(pending.review_reason,/^存疑：数字模糊/);
+  const audit=f.sqlite.prepare('SELECT action FROM activity_audit WHERE subject_id=? ORDER BY occurred_at DESC').get(reg);
+  assert.equal(audit.action,'registration.review.uncertain');
+  const listed=(await(await f.api(url+'/queue',{cookie:owner})).json()).registrations.find(x=>x.id===reg);
+  assert.match(listed.review_reason,/^存疑：/);
+  // Student can supplement the screenshot and still use the original private pass.
+  const uploaded=await f.api(url+'/upload',{method:'POST',cookie,raw:png});
+  assert.equal(uploaded.status,201,await uploaded.clone().text());
+  const refreshed=(await(await f.api(url+'/queue',{cookie:owner})).json()).registrations.find(x=>x.id===reg);
+  assert.equal(refreshed.state,'pending');
+  assert.equal(refreshed.review_reason,'','new evidence clears old uncertain note');
+  const approved=await f.api(url+'/review-batch',{method:'POST',cookie:owner,data:{
+    decisions:[{registrationId:reg,state:'approved',subjectVersion:refreshed.updated_at}]}});
+  assert.equal(approved.status,200,await approved.clone().text());
+  assert.equal(f.sqlite.prepare('SELECT state FROM activity_registrations WHERE id=?').get(reg).state,'approved');
+});
