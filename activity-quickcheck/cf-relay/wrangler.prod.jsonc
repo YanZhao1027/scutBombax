@@ -1,0 +1,7 @@
+{
+  "name": "bombax-activity-relay",
+  "main": "./worker.mjs",
+  "compatibility_date": "2026-10-22",
+  "routes": [{"pattern":"activity.10273055.xyz","custom_domain":true}],
+  "workers_dev": true
+}
