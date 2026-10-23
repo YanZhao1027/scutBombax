@@ -11,6 +11,8 @@ import {
   type SnapshotSource
 } from './types';
 import './styles.css';
+import './beta-material.css';
+import { mountBetaShell } from './beta-shell';
 import { drawElectricTrend } from './trend';
 import { deriveView, historyCaption } from './view';
 import { dueLabel, shouldAdoptStoredReading } from './local-sync';
@@ -886,8 +888,11 @@ const wire = (): void => {
   // and the interval elapsed → query once" rule, so the page never starts a
   // second query on top of the scheduled one.
   const applyVisibility = (visible: boolean): void => {
-    refresher.setVisible(visible);
-    if (visible) {
+    // A visible Activity tab is not a visible water/electricity screen. Do not
+    // silently poll school services under a separate student activity workflow.
+    const utilityVisible = visible && !document.getElementById('utilities-screen')?.hidden;
+    refresher.setVisible(utilityVisible);
+    if (utilityVisible) {
       startClock();
       syncLocalState();
     } else {
@@ -896,6 +901,9 @@ const wire = (): void => {
   };
 
   document.addEventListener('visibilitychange', () => {
+    applyVisibility(document.visibilityState === 'visible');
+  });
+  document.addEventListener('bombax:sectionchange', () => {
     applyVisibility(document.visibilityState === 'visible');
   });
 
@@ -968,4 +976,5 @@ const boot = async (): Promise<void> => {
   }
 };
 
+mountBetaShell();
 void boot();

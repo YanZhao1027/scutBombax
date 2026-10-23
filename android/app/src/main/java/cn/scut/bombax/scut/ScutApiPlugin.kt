@@ -100,7 +100,7 @@ class ScutApiPlugin : Plugin() {
             val versionName = runCatching {
                 val context = getContext()
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName
-            }.getOrNull() ?: "1.0.1"
+            }.getOrNull() ?: "2.0.0-beta.1"
             JSObject().apply {
                 put("ok", true)
                 put("platform", "android")
