@@ -28,10 +28,10 @@ import androidx.core.content.ContextCompat
 /**
  * Android-native, isolated HTTPS workbench. This is a plain WebView: there is
  * NO Capacitor bridge and NO SCUT authentication or billing cookie injection.
- * Only a hardcoded synthetic-data activity origin can request camera/GPS.
- *
- * The user authorizes camera and location through Android runtime permissions.
- * For actual school data, activity identity proof must be redesigned first.
+ * Only two exact first-party HTTPS origins can request camera/GPS: the
+ * canonical Cloudflare public entry and the campus-only :8443 HTTPS endpoint.
+ * The public site's health probe chooses the route. Student credentials and
+ * screenshots remain within the separate activity WebView, never SCUT billing.
  */
 class ActivityPortalActivity : Activity() {
 
@@ -40,8 +40,9 @@ class ActivityPortalActivity : Activity() {
         private const val CAMERA_PERMISSION_REQUEST = 6081
         private const val LOCATION_PERMISSION_REQUEST = 6082
         private const val FILE_PICK_REQUEST = 6083
-        private const val STAGE = "https://activity-stage.10273055.xyz/"
-        private const val SHOWCASE = "https://activity-demo.10273055.xyz/"
+        private const val PUBLIC = ActivityOriginPolicy.PUBLIC_URL
+        // Debug-only USB-loopback QA, never enabled for Release or remote hosts.
+        private const val USB_QA = "http://127.0.0.1:3318/"
     }
 
     private lateinit var webView: WebView
@@ -51,16 +52,18 @@ class ActivityPortalActivity : Activity() {
     private var fullscreenCameraView: View? = null
     private var fullscreenCameraCallback: WebChromeClient.CustomViewCallback? = null
     private var previousSystemUiFlags: Int = 0
+    private var isUsbQaSession: Boolean = false
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 
+    private fun qaDebugMode(): Boolean =
+        (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
     private fun trusted(uri: Uri?): Boolean {
-        if (uri == null || uri.scheme != "https" || (uri.port != -1 && uri.port != 443)) return false
-        if (uri.userInfo != null) return false
-        return uri.host?.lowercase() in setOf(
-            "activity-stage.10273055.xyz",
-            "activity-demo.10273055.xyz"
-        )
+        if (isUsbQaSession && qaDebugMode() &&
+            uri?.scheme == "http" && uri.host == "127.0.0.1" && uri.port == 3318 &&
+            uri.userInfo == null) return true
+        return ActivityOriginPolicy.isTrusted(uri?.toString())
     }
 
     private fun permissionGranted(permission: String): Boolean =
@@ -104,9 +107,11 @@ class ActivityPortalActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val url = when (intent.getStringExtra(EXTRA_DESTINATION)) {
-            "stage" -> STAGE
-            "showcase" -> SHOWCASE
+        val destination = intent.getStringExtra(EXTRA_DESTINATION)
+        isUsbQaSession = destination == "qa" && qaDebugMode()
+        val url = when (destination) {
+            "activity" -> PUBLIC
+            "qa" -> if (isUsbQaSession) USB_QA else { finish(); return }
             else -> { finish(); return }
         }
 
@@ -137,13 +142,15 @@ class ActivityPortalActivity : Activity() {
             setOnClickListener { finish() }
         }
         val title = TextView(this).apply {
-            text = "活动速签 · 测试工作台"
+            text = "活动速签 · 正式工作台"
             textSize = 18f
             setTextColor(ink)
             setTypeface(null, android.graphics.Typeface.BOLD)
         }
         val subtitle = TextView(this).apply {
-            text = "独立 HTTPS · 仅限 TEST- 虚构资料 · 不读取校园一卡通"
+            text = if (isUsbQaSession)
+                 "USB 本机 QA · 127.0.0.1 · 不连接校园系统"
+                else "校园网优先直连 · 校外 Cloudflare 加密回源 · 与一卡通登录态隔离"
             textSize = 11f
             setTextColor(Color.parseColor(if (dark) "#B9C8E1" else "#506887"))
             setPadding(0, dp(5), 0, 0)
@@ -170,6 +177,18 @@ class ActivityPortalActivity : Activity() {
         }
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false)
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                if (qaDebugMode()) {
+                    val page = runCatching { Uri.parse(url) }.getOrNull()
+                    // Never log path, query, fragment, pass tokens, cookies or student identity.
+                    val host = page?.host ?: "unknown"
+                    val port = page?.port ?: -1
+                    val scheme = page?.scheme ?: "unknown"
+                    android.util.Log.i("BombaxActivityRoute", "mainframe_origin=$scheme://$host:$port")
+                }
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
                 if (trusted(uri)) return false
@@ -254,7 +273,7 @@ class ActivityPortalActivity : Activity() {
                 }
                 return try {
                     startActivityForResult(
-                        Intent.createChooser(picker, "选择虚构演练图片"),
+                        Intent.createChooser(picker, "选择活动证明图片"),
                         FILE_PICK_REQUEST
                     )
                     true

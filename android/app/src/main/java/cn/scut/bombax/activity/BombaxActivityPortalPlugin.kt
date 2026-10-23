@@ -10,8 +10,7 @@ import com.getcapacitor.annotation.CapacitorPlugin
 /**
  * A deliberately small bridge from the app's Material 3 activity navigation.
  *
- * The web caller may choose only between two hardcoded first-party test
- * destinations. It cannot pass a URL, cookie, campus token, or payment code.
+ * The web caller may open only the canonical production entry. It cannot pass a URL, cookie, campus token, or payment code.
  * ActivityPortalActivity is a bare Android WebView with no Capacitor bridge
  * and no access to the native SCUT water/electricity session.
  */
@@ -20,7 +19,7 @@ class BombaxActivityPortalPlugin : Plugin() {
     @PluginMethod
     fun open(call: PluginCall) {
         val destination = call.getString("destination")
-        if (destination != "stage" && destination != "showcase") {
+        if (destination != "activity") {
             call.reject("Invalid activity portal destination")
             return
         }

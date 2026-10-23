@@ -2,7 +2,7 @@ import '@material/web/button/filled-button.js';
 import '@material/web/button/filled-tonal-button.js';
 import '@material/web/button/outlined-button.js';
 import '@material/web/button/text-button.js';
-import { openActivityPortal, type ActivityDestination } from './activity-portal';
+import { openActivityPortal } from './activity-portal';
 
 /**
  * Material 3 app shell. Existing GZIC/DXC controls keep their DOM IDs and the
@@ -62,33 +62,27 @@ export function mountBetaShell(): void {
   }
 
   const status = document.getElementById('activity-launch-status');
-  async function open(which: ActivityDestination): Promise<void> {
+  async function open(): Promise<void> {
     if (!status) return;
-    const stage = document.getElementById('activity-open-stage');
-    const showcase = document.getElementById('activity-open-showcase');
-    const buttons = [stage, showcase].filter(Boolean) as HTMLElement[];
-    buttons.forEach((button) => button.setAttribute('disabled', ''));
+    const launch = document.getElementById('activity-open');
+    if (!launch) return;
+    launch.setAttribute('disabled', '');
     status.textContent = '正在打开活动服务…';
     status.dataset.tone = 'wait';
     try {
-      await openActivityPortal(which);
-      status.textContent = which === 'stage'
-        ? '已打开独立 HTTPS 活动工作台。点击左上角返回花工木棉。'
-        : '已打开只使用虚构数据的演示页面。';
+      await openActivityPortal();
+      status.textContent = '已打开正式活动平台。校园网可智能直连，校外通过 Cloudflare 回源。';
       status.dataset.tone = 'ok';
     } catch {
       status.textContent = '打开失败。请确认网络畅通，或重新安装最新版 Beta 后重试。';
       status.dataset.tone = 'error';
     } finally {
-      buttons.forEach((button) => button.removeAttribute('disabled'));
+      launch.removeAttribute('disabled');
     }
   }
 
-  document.getElementById('activity-open-stage')?.addEventListener('click', () => {
-    void open('stage');
-  });
-  document.getElementById('activity-open-showcase')?.addEventListener('click', () => {
-    void open('showcase');
+  document.getElementById('activity-open')?.addEventListener('click', () => {
+    void open();
   });
 
   select('utilities');

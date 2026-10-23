@@ -371,13 +371,13 @@ body.material-beta {
 }
 .activity-hero h2 { font-size: clamp(24px, 6vw, 31px); max-width: 15em; line-height: 1.2; letter-spacing: -.05em; margin-bottom: 13px; }
 .activity-hero p { max-width: 37em; line-height: 1.8; font-size: 13px; color: #4c6681; margin: 0 0 18px; }
-#activity-open-stage {
+#activity-open {
   --md-filled-button-container-color: #305da8;
   --md-filled-button-label-text-color: white;
   --md-filled-button-container-height: 49px;
   --md-filled-button-container-shape: 24px;
 }
-#activity-open-stage svg { width: 18px; height: 18px; }
+#activity-open svg { width: 18px; height: 18px; }
 .activity-launch-status { font-size: 12px !important; min-height: 0; margin: 12px 0 0 !important; }
 .activity-launch-status[data-tone="error"] { color: #b3261e; }
 .activity-launch-status[data-tone="ok"] { color: #275b48; }
@@ -428,7 +428,7 @@ body.material-beta {
   .activity-blob.two { background: #815572; }
   .activity-hero-chip { color: #d8e6ff; background: #45638e; }
   .activity-hero p { color: #c4d4ee; }
-  #activity-open-stage { --md-filled-button-container-color: #a9c8ff; --md-filled-button-label-text-color: #07315f; }
+  #activity-open { --md-filled-button-container-color: #a9c8ff; --md-filled-button-label-text-color: #07315f; }
   .activity-launch-status[data-tone="ok"] { color: #a7efcb; }
 }
 @media (max-width: 410px) {
@@ -436,7 +436,7 @@ body.material-beta {
   .beta-page { padding: 19px 13px calc(107px + env(safe-area-inset-bottom)); }
   #history-panel, #login-panel, #results-panel, #recharge-panel { padding: 18px 16px; }
   .activity-hero { padding: 23px 20px; }
-  #activity-open-stage { width: 100%; }
+  #activity-open { width: 100%; }
   #login-form .pair { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) {

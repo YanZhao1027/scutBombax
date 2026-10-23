@@ -47,9 +47,10 @@ jobs:
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - name: Enforce Beta metadata before publishing any APK
         run: |
-          node -e "const p=require('./package.json');if(p.version!=='2.0.0-beta.2')process.exit(1)"
+          node -e "const p=require('./package.json');if(p.version!=='2.0.0-beta.3')process.exit(1)"
           grep -q 'applicationId "cn.scut.bombax.beta"' android/app/build.gradle
-          grep -q 'versionName "2.0.0-beta.2"' android/app/build.gradle
+          grep -q 'versionName "2.0.0-beta.3"' android/app/build.gradle
+          grep -q 'versionCode 2000003' android/app/build.gradle
       - run: pnpm install --frozen-lockfile
       - name: Verify source and business logic
         run: |
@@ -57,13 +58,33 @@ jobs:
           pnpm check:dom
           pnpm test
       - run: pnpm build
+      - name: Assert bundled web entry excludes retired activity-stage
+        run: |
+          if grep -R -F -e 'activity-stage.10273055.xyz' -e 'activity-demo.10273055.xyz' dist/; then
+            echo "::error::Deprecated staging/demo activity URL found in web bundle"
+            exit 1
+          fi
+          grep -R -F -q 'https://activity.10273055.xyz/' dist/
       - run: pnpm exec cap sync android
       - name: Kotlin tests and installable Android debug APK
         working-directory: android
-        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+        run: ./gradlew --no-daemon --no-watch-fs testDebugUnitTest assembleDebug
+      - name: Assert built APK contains only approved activity entry
+        run: |
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          if unzip -p "$APK" 'classes*.dex' | strings | grep -F -q -e 'activity-stage.10273055.xyz' -e 'activity-demo.10273055.xyz'; then
+            echo "::error::Deprecated staging/demo URL found in compiled native Android code"
+            exit 1
+          fi
+          if unzip -p "$APK" 'assets/public/assets/*.js' | grep -F -q -e 'activity-stage.10273055.xyz' -e 'activity-demo.10273055.xyz'; then
+            echo "::error::Deprecated activity URL found in packaged JavaScript"
+            exit 1
+          fi
+          unzip -p "$APK" assets/public/index.html | grep -q 'id="activity-open"'
       - uses: actions/upload-artifact@v4
         with:
-          name: HuaGongMuMian-2.0.0-beta.2-Android-APK
+          name: HuaGongMuMian-2.0.0-beta.3-Android-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
           if-no-files-found: error

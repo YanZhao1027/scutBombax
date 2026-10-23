@@ -247,8 +247,8 @@
         </div>
         <span class="activity-hero-chip">独立服务 · HTTPS</span>
         <h2>更轻松地参与每一场校园活动</h2>
-        <p>活动进行中也能报名、补交虚构截图。通过材料审核和到场核验后，进入候选名单。</p>
-        <md-filled-button id="activity-open-stage" type="button" aria-label="打开 App 内独立 HTTPS 活动测试工作台">
+        <p>活动报名、上传手机活动证明、工作人员审核及现场签到，都使用同一个 Ubuntu 主站。</p>
+        <md-filled-button id="activity-open" type="button" aria-label="打开 App 内正式 HTTPS 活动工作台">
           打开活动工作台
           <svg slot="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 4h7v2H6v12h12v-5h2v7H4V4Zm9 0h7v7h-2V7.4l-8.3 8.3-1.4-1.4L16.6 6H13V4Z"/></svg>
         </md-filled-button>
@@ -263,11 +263,11 @@
         <ol class="activity-steps">
           <li>
             <span class="step-symbol" aria-hidden="true">01</span>
-            <div><h3>报名与上传材料</h3><p>提交报名，上传测试用集赞截图；现场报名也可以。</p></div>
+            <div><h3>报名与上传材料</h3><p>提交报名，从手机相册上传活动证明图片；现场也能完成报名。</p></div>
           </li>
           <li>
             <span class="step-symbol" aria-hidden="true">02</span>
-            <div><h3>等待人工审核</h3><p>后台持续处理新材料，审核员决定是否通过。</p></div>
+            <div><h3>等待人工审核</h3><p>授权后可使用 DeepSeek 辅助识别，审核员最终决定通过、驳回或存疑。</p></div>
           </li>
           <li>
             <span class="step-symbol" aria-hidden="true">03</span>
@@ -276,12 +276,11 @@
         </ol>
       </section>
 
-      <section class="activity-test-card" aria-label="测试环境说明">
+      <section class="activity-test-card" aria-label="校内外访问说明">
         <div class="activity-test-icon" aria-hidden="true">✦</div>
         <div>
-          <h2>先从虚构数据试运行</h2>
-          <p>目前仅接入独立测试站。只允许 demo_ 账号、TEST- 学号和系统内置模拟图片；它不会获得学校水电登录态，也不签发官方活动票。</p>
-          <md-outlined-button id="activity-open-showcase" type="button">查看纯演示页面</md-outlined-button>
+          <h2>校园网优先直连，校外继续可用</h2>
+          <p>统一打开 activity.10273055.xyz。校园 Wi-Fi 可通过 HTTPS 健康探测切换到 Ubuntu 校内直连；其他网络保留 Cloudflare 加密访问。报名和上传材料始终存储在同一 Ubuntu 主服务器。</p>
         </div>
       </section>
       <div class="beta-disclaimer">Android 在 App 内以独立 HTTPS 页面打开活动服务，相机、定位和图片选择均由系统授权；活动模块不获得学校一卡通登录态。</div>
